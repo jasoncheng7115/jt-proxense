@@ -1,0 +1,79 @@
+# JT-PROXENSE Configuration
+# Copy this file to config.yaml and edit with your settings
+
+server:
+  host: "0.0.0.0"
+  http_port: 8098
+  influx_enabled: false
+  influx_port: 8086
+
+# Cluster configurations
+# You can add multiple clusters
+clusters:
+  # Example: Single node (standalone)
+  - id: "standalone-node"
+    name: "My PVE Server"
+    enabled: true
+    poll_interval: 2          # Data polling interval in seconds
+    static_refresh_interval: 60  # Static data (storage, etc.) refresh interval
+    nodes:
+      - host: "192.168.1.100"
+        port: 8006
+        verify_ssl: false     # Set to true if using valid SSL certificate
+        priority: 0           # Lower number = higher priority for failover
+    auth:
+      user: "monitoring@pve"
+      token_name: "mon"
+      token_value: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+  # Example: Multi-node cluster with failover
+  - id: "production-cluster"
+    name: "Production Cluster"
+    enabled: false            # Set to true to enable
+    poll_interval: 2
+    static_refresh_interval: 60
+    nodes:
+      - host: "pve1.example.com"
+        port: 8006
+        verify_ssl: false
+        priority: 0           # Primary node
+      - host: "pve2.example.com"
+        port: 8006
+        verify_ssl: false
+        priority: 1           # Failover node
+      - host: "pve3.example.com"
+        port: 8006
+        verify_ssl: false
+        priority: 2           # Second failover
+    auth:
+      user: "monitoring@pve"
+      token_name: "monitoring"
+      token_value: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Alert thresholds
+alerts:
+  enabled: true
+  cpu_warning: 80
+  cpu_critical: 95
+  memory_warning: 85
+  memory_critical: 95
+  disk_warning: 80
+  disk_critical: 95
+  diskio_warning: 50
+  diskio_critical: 100
+  iowait_warning: 5
+  iowait_critical: 10
+
+# UI settings
+ui:
+  default_view: "cluster-core"  # command-center, cluster-core, holo-matrix, radar-scan, storage-vault
+  theme: "cyberpunk"
+  language: "en"                # en, zh-TW
+  animations_enabled: true
+  particle_count: 100
+  vm_matrix_default_filter: "running"
+  matrix_card_width: 82
+  matrix_sort_by: "load"
+  matrix_group_by: "node"
+  matrix_group_sort_by: "node"
+  matrix_group_sort_order: "asc"

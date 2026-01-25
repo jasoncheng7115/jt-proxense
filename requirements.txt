@@ -1,0 +1,19 @@
+# JT-PROXENSE Backend Dependencies
+# Async HTTP framework
+aiohttp>=3.9.0
+aiohttp-cors>=0.7.0
+
+# Configuration
+pyyaml>=6.0
+
+# HTTP client for PVE API
+aiohttp[speedups]>=3.9.0
+
+# Data validation (optional, using dataclasses primarily)
+# pydantic>=2.0
+
+# SSL handling
+certifi>=2024.0.0
+
+# Typing extensions
+typing-extensions>=4.9.0
