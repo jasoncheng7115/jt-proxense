@@ -21,6 +21,8 @@ from . import auth_handlers
 from . import login_page
 from . import audit_page
 from . import totp_page
+from . import account_page
+from . import sessions_page
 from . import vm_control
 from .middleware import (
     request_id_middleware, security_headers_middleware,
@@ -366,6 +368,11 @@ def create_app() -> web.Application:
         ("POST", "/api/auth/totp/enroll-init",   auth_handlers.totp_enroll_init_handler),
         ("POST", "/api/auth/totp/enroll-verify", auth_handlers.totp_enroll_verify_handler),
         ("POST", "/api/auth/totp/disable",       auth_handlers.totp_disable_handler),
+        # Change password (self-service) + sessions admin
+        ("POST",   "/api/auth/change-password",  auth_handlers.change_password_handler),
+        ("GET",    "/api/sessions",              auth_handlers.sessions_list_handler),
+        ("DELETE", "/api/sessions/{session_id}", auth_handlers.sessions_revoke_handler),
+        ("POST",   "/api/sessions/user/{username}/revoke-all", auth_handlers.sessions_revoke_user_handler),
         ("GET",  "/api/users",             auth_handlers.users_list_handler),
         ("POST", "/api/users",             auth_handlers.users_create_handler),
         ("DELETE","/api/users/{username}", auth_handlers.users_delete_handler),
@@ -387,6 +394,10 @@ def create_app() -> web.Application:
     app.router.add_get("/audit", audit_page.audit_page_handler)
     # v0.2.x TOTP enrollment / disable page (any authenticated user)
     app.router.add_get("/totp", totp_page.totp_page_handler)
+    # v0.2.x self-service profile / change-password page
+    app.router.add_get("/account", account_page.account_page_handler)
+    # v0.2.x admin: active sessions viewer + revoke
+    app.router.add_get("/sessions", sessions_page.sessions_page_handler)
 
     # Static files (SPA)
     app.router.add_get("/", index_handler)

@@ -1,0 +1,157 @@
+"""Self-service /account page — change password, see profile, link to /totp.
+
+Authenticated users only. PAM-managed users see a notice that password
+changes happen via the system's passwd tooling.
+"""
+from __future__ import annotations
+
+from aiohttp import web
+
+from .middleware import auth_required
+
+
+HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JT-PROXENSE — Account</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <style>
+        :root {
+            --bg:#050810; --bg-elev:#0d1320; --bg-elev-2:#14182a;
+            --cyan:#00f0ff; --cyan-soft:rgba(0,240,255,.18); --cyan-glow:rgba(0,240,255,.40);
+            --magenta:#bf00ff; --green:#00ff88; --red:#ff3860; --orange:#ff8a3c;
+            --text:#e6f6ff; --text-dim:#95a8c4; --text-muted:#6b7c93;
+            --border:rgba(0,240,255,.16);
+        }
+        @font-face { font-family: Orbitron; src: url(/fonts/orbitron-700.woff2) format('woff2'); font-weight:700; }
+        @font-face { font-family: Rajdhani; src: url(/fonts/rajdhani-400.woff2) format('woff2'); font-weight:400; }
+        @font-face { font-family: Rajdhani; src: url(/fonts/rajdhani-500.woff2) format('woff2'); font-weight:500; }
+        @font-face { font-family: 'Share Tech Mono'; src: url(/fonts/share-tech-mono-400.woff2) format('woff2'); }
+        *{box-sizing:border-box}
+        html,body{margin:0;padding:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:Rajdhani,system-ui,sans-serif}
+        body{background:radial-gradient(ellipse 1000px 500px at 50% -100px,rgba(0,240,255,.07),transparent 60%),var(--bg);background-attachment:fixed}
+        body::after{content:'';position:fixed;inset:0;pointer-events:none;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 2px,rgba(255,255,255,.012) 2px,rgba(255,255,255,.012) 3px)}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+        @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+        .container{max-width:680px;margin:0 auto;padding:32px 24px;position:relative;z-index:2;animation:fadeIn .35s ease}
+        header{display:flex;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:14px;margin-bottom:26px}
+        h1{margin:0;font-family:Orbitron,sans-serif;font-weight:700;font-size:22px;letter-spacing:.08em;text-transform:uppercase}
+        h1 .accent{color:var(--cyan)}
+        nav.top a{color:var(--text-dim);margin-left:16px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;text-decoration:none;transition:color .15s,text-shadow .15s}
+        nav.top a:hover{color:var(--cyan);text-shadow:0 0 8px var(--cyan-glow)}
+        .card{background:linear-gradient(180deg,var(--bg-elev),var(--bg));border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:18px;position:relative;overflow:hidden;animation:fadeIn .4s ease}
+        .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--magenta));transform:scaleX(0);transform-origin:left;transition:transform .4s}
+        .card:hover::before{transform:scaleX(1)}
+        h2{font-family:Orbitron,sans-serif;font-size:15px;letter-spacing:.04em;margin:0 0 14px;color:var(--text);text-transform:uppercase}
+        p{color:var(--text-dim);line-height:1.55}
+        code{font-family:'Share Tech Mono',monospace;background:#02050b;color:var(--cyan);padding:1px 6px;border-radius:3px;font-size:13px}
+        label{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin:14px 0 6px;font-weight:500}
+        input{width:100%;padding:11px 14px;background:#02050b;color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:'Share Tech Mono',monospace;font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}
+        input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-soft)}
+        button{padding:10px 22px;margin-top:14px;font-family:Orbitron,sans-serif;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#001018;background:linear-gradient(135deg,var(--cyan),#00b8d4);border:none;border-radius:6px;cursor:pointer;box-shadow:0 0 16px var(--cyan-glow);transition:transform .12s,box-shadow .15s}
+        button:hover{transform:translateY(-1px);box-shadow:0 0 22px var(--cyan-glow)}
+        button:disabled{opacity:.5;cursor:wait;transform:none;box-shadow:none}
+        button.ghost{color:var(--cyan);background:rgba(0,240,255,.05);border:1px solid var(--cyan-soft);box-shadow:none}
+        .meta{display:flex;align-items:center;gap:8px;font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--text-dim);letter-spacing:.04em}
+        .pill{display:inline-flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:999px;border:1px solid currentColor}
+        .pill.cyan{color:var(--cyan)} .pill.orange{color:var(--orange)} .pill.muted{color:var(--text-muted)}
+        .pill::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor;animation:pulseDot 1.6s ease-in-out infinite}
+        .err{margin-top:14px;padding:12px 14px;background:rgba(255,56,96,.08);border-left:3px solid var(--red);border-radius:4px;font-size:13px;animation:fadeIn .25s ease}
+        .ok{margin-top:14px;padding:12px 14px;background:rgba(0,255,136,.06);border-left:3px solid var(--green);border-radius:4px;font-size:13px;animation:fadeIn .25s ease}
+        .hidden{display:none}
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>JT-<span class="accent">PROXENSE</span> &middot; Account</h1>
+        <nav class="top"><a href="/">&laquo; Dashboard</a></nav>
+    </header>
+
+    <div class="card">
+        <h2>Profile</h2>
+        <div class="meta" id="profile">loading...</div>
+    </div>
+
+    <div class="card" id="pwCard">
+        <h2>Change password</h2>
+        <p id="pwLead">Enter your current password to confirm, then a new one (min 8 chars).</p>
+        <div id="pwForm">
+            <label for="cur">Current password</label>
+            <input id="cur" type="password" autocomplete="current-password">
+            <label for="new1">New password</label>
+            <input id="new1" type="password" autocomplete="new-password">
+            <label for="new2">Confirm new password</label>
+            <input id="new2" type="password" autocomplete="new-password">
+            <button id="pwBtn">Change password &raquo;</button>
+            <div class="err hidden" id="pwErr"></div>
+            <div class="ok hidden" id="pwOk">Password updated.</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Two-factor authentication</h2>
+        <p>Manage TOTP enrollment + backup codes.</p>
+        <a href="/totp"><button class="ghost">Open 2FA setup &raquo;</button></a>
+    </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const show=el=>el.classList.remove('hidden'); const hide=el=>el.classList.add('hidden');
+
+let me=null;
+async function loadProfile(){
+    const r=await fetch('/api/auth/me',{credentials:'same-origin'});
+    if(!r.ok){window.location.replace('/login');return}
+    const d=await r.json();
+    if(!d.authenticated){window.location.replace('/login');return}
+    me=d.user;
+    $('profile').innerHTML = `
+        <span>// signed in as <strong style="color:var(--text)">${esc(me.username)}</strong></span>
+        <span class="pill ${roleClass(me.role_global)}">${esc(me.role_global||'guest')}</span>`;
+}
+function roleClass(r){return r==='admin'?'orange':(r?'cyan':'muted')}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]))}
+
+$('pwBtn').addEventListener('click', async ()=>{
+    hide($('pwErr')); hide($('pwOk'));
+    const cur=$('cur').value, n1=$('new1').value, n2=$('new2').value;
+    if(!cur||!n1){$('pwErr').textContent='All fields required';show($('pwErr'));return}
+    if(n1!==n2){$('pwErr').textContent='New passwords do not match';show($('pwErr'));return}
+    if(n1.length<8){$('pwErr').textContent='New password must be at least 8 characters';show($('pwErr'));return}
+    $('pwBtn').disabled=true;
+    const r=await fetch('/api/auth/change-password',{
+        method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({current_password:cur,new_password:n1})
+    });
+    $('pwBtn').disabled=false;
+    if(r.ok){
+        show($('pwOk'));
+        $('cur').value=''; $('new1').value=''; $('new2').value='';
+    } else {
+        const d=await r.json().catch(()=>({}));
+        const map={pam_managed:'This account is managed by your system\\'s PAM — change it via passwd.',
+                   current_password_invalid:'Current password is incorrect.',
+                   new_too_short:'New password must be at least 8 characters.'};
+        $('pwErr').textContent=map[d.error]||d.error||'Password change failed';
+        show($('pwErr'));
+    }
+});
+
+loadProfile();
+</script>
+</body>
+</html>
+"""
+
+
+@auth_required
+async def account_page_handler(request: web.Request) -> web.Response:
+    return web.Response(
+        text=HTML, content_type="text/html", charset="utf-8",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )

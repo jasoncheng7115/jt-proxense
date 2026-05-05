@@ -221,6 +221,128 @@ async def totp_enroll_verify_handler(request: web.Request) -> web.Response:
 
 
 @auth_required
+async def change_password_handler(request: web.Request) -> web.Response:
+    """Self-service password change. Requires the user's current password
+    in the body so a stolen session alone can't change the password.
+
+    PAM-managed accounts (sentinel hash) cannot change their password here;
+    the system password tooling handles that.
+    """
+    user = request.get("user")
+    if not user:
+        return web.json_response({"error": "auth_required"}, status=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    current = body.get("current_password") or ""
+    new = body.get("new_password") or ""
+    if not current or not new:
+        return web.json_response({"error": "missing_fields"}, status=400)
+    if len(new) < 8:
+        return web.json_response({"error": "new_too_short", "min_length": 8}, status=400)
+
+    user_row = auth.get_user_by_username(user["username"])
+    if not user_row:
+        return web.json_response({"error": "user_not_found"}, status=404)
+
+    # PAM-managed: reject — they should change their system password instead
+    if user_row["password_hash"] == "*PAM*":
+        return web.json_response({
+            "error": "pam_managed",
+            "message": "Use your system's passwd tool — this account is PAM-managed.",
+        }, status=400)
+
+    if not auth.verify_password(current, user_row["password_hash"]):
+        await audit.write(
+            user=user["username"],
+            source_ip=request.get("client_ip", "unknown"),
+            action="auth.change_password", result="denied",
+            request_id=request.get("request_id", ""),
+        )
+        return web.json_response({"error": "current_password_invalid"}, status=401)
+
+    auth.set_password(user["username"], new, must_change_pw=False)
+    await audit.write(
+        user=user["username"],
+        source_ip=request.get("client_ip", "unknown"),
+        action="auth.change_password", result="ok",
+        request_id=request.get("request_id", ""),
+    )
+    return web.json_response({"ok": True})
+
+
+# ---------------------------------------------------------------- /api/sessions
+
+@role_required("admin")
+async def sessions_list_handler(request: web.Request) -> web.Response:
+    """List all active sessions across users. Admin only."""
+    async with db.connect() as c:
+        cur = await c.execute(
+            "SELECT s.id, s.user_id, s.created_at, s.expires_at, s.last_seen_at, "
+            "       s.source_ip, s.user_agent, u.username "
+            "FROM sessions s JOIN users u ON u.id = s.user_id "
+            "WHERE s.expires_at > ? ORDER BY s.last_seen_at DESC",
+            (db.now_ms(),),
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+    # Truncate cookie ids in the response so even an admin can't lift them
+    # to impersonate the user — they can revoke by id but not steal.
+    for r in rows:
+        r["id_preview"] = r["id"][:8] + "..." + r["id"][-4:] if r["id"] else ""
+        del r["id"]
+    return web.json_response({"sessions": rows})
+
+
+@role_required("admin")
+async def sessions_revoke_handler(request: web.Request) -> web.Response:
+    """Revoke a session by its FULL id (admin must look it up via /api/sessions
+    list first; we only accept full ids here so an attacker can't enumerate)."""
+    sid = request.match_info.get("session_id", "")
+    actor = (request.get("user") or {}).get("username", "anonymous")
+    async with db.connect() as c:
+        cur = await c.execute("DELETE FROM sessions WHERE id=?", (sid,))
+        await c.commit()
+        n = cur.rowcount or 0
+    await audit.write(
+        user=actor, source_ip=request.get("client_ip", "unknown"),
+        action="session.revoke",
+        target=f"session/{sid[:8]}...",
+        result="ok" if n > 0 else "error:NotFound",
+        request_id=request.get("request_id", ""),
+    )
+    if n == 0:
+        return web.json_response({"error": "not_found"}, status=404)
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def sessions_revoke_user_handler(request: web.Request) -> web.Response:
+    """Revoke ALL active sessions for a given user. Useful when an account is
+    suspected compromised. Admin only."""
+    username = request.match_info.get("username", "")
+    actor = (request.get("user") or {}).get("username", "anonymous")
+    user_row = auth.get_user_by_username(username)
+    if not user_row:
+        return web.json_response({"error": "user_not_found"}, status=404)
+    async with db.connect() as c:
+        cur = await c.execute("DELETE FROM sessions WHERE user_id=?", (user_row["id"],))
+        await c.commit()
+        n = cur.rowcount or 0
+    await audit.write(
+        user=actor, source_ip=request.get("client_ip", "unknown"),
+        action="session.revoke_all",
+        target=f"user/{username}",
+        result="ok",
+        request_id=request.get("request_id", ""),
+        params={"revoked_count": n},
+    )
+    return web.json_response({"ok": True, "revoked": n})
+
+
+# ---------------------------------------------------------------- TOTP disable
+
+@auth_required
 async def totp_disable_handler(request: web.Request) -> web.Response:
     """Self-service: a user disables their own TOTP. Requires a confirmation
     of the current TOTP code (so an attacker who steals a session can't bypass
