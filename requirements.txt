@@ -16,6 +16,9 @@ argon2-cffi>=23.1.0
 pyotp>=2.9.0
 qrcode[pil]>=7.4.2
 
+# v0.2.x: PAM authentication backend (optional, only loaded when auth.backend='pam')
+python-pam>=2.0.2
+
 # SSL handling
 certifi>=2024.0.0
 

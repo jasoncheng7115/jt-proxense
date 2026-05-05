@@ -264,6 +264,13 @@ def clear_failed_logins(source_ip: str) -> None:
 async def login(username: str, password: str, *, source_ip: str, user_agent: str = "") -> Optional[Session]:
     """Verify password + mint a session. Returns None on failure.
 
+    Backend selection happens here:
+      - config.auth.backend == 'local' (default) → password matched against
+        the SQLite users table.
+      - config.auth.backend == 'pam' → password verified via PAM. The local
+        user row is auto-created on first login (so roles/sessions can attach).
+        Local-only sentinel rows always fail local auth.
+
     Side effects:
       - rate-limit gate first; raises PermissionError if locked out
       - on success: clears that IP's failed_logins
@@ -272,21 +279,45 @@ async def login(username: str, password: str, *, source_ip: str, user_agent: str
     if is_rate_limited(source_ip):
         raise PermissionError("too many failed logins")
 
-    user = get_user_by_username(username)
-    if not user or not user["enabled"] or not verify_password(password, user["password_hash"]):
-        record_failed_login(source_ip, username)
-        return None
+    backend = "local"
+    try:
+        from .config import get_config
+        backend = (get_config().auth.backend or "local").lower()
+    except Exception:
+        pass
 
-    # Optionally upgrade hash if argon2 params changed
-    if needs_rehash(user["password_hash"]):
-        try:
-            with db.connect_sync() as c:
-                c.execute(
-                    "UPDATE users SET password_hash=? WHERE id=?",
-                    (hash_password(password), user["id"]),
-                )
-        except Exception as e:
-            logger.warning("hash upgrade failed for %s: %s", username, e)
+    user = get_user_by_username(username)
+
+    if backend == "pam":
+        from . import auth_pam
+        if not auth_pam.verify(username, password):
+            record_failed_login(source_ip, username)
+            return None
+        # Authentication succeeded; make sure we have a local row to attach
+        # roles + sessions to.
+        user_id = auth_pam.ensure_local_row(username)
+        user = get_user_by_id(user_id)
+        if user and not user["enabled"]:
+            record_failed_login(source_ip, username)
+            return None
+    else:
+        # local backend
+        if not user or not user["enabled"] \
+                or user["password_hash"] == "*PAM*" \
+                or not verify_password(password, user["password_hash"]):
+            record_failed_login(source_ip, username)
+            return None
+
+        # Optionally upgrade hash if argon2 params changed
+        if needs_rehash(user["password_hash"]):
+            try:
+                with db.connect_sync() as c:
+                    c.execute(
+                        "UPDATE users SET password_hash=? WHERE id=?",
+                        (hash_password(password), user["id"]),
+                    )
+            except Exception as e:
+                logger.warning("hash upgrade failed for %s: %s", username, e)
 
     sid = secrets.token_urlsafe(32)
     now = db.now_ms()

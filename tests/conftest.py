@@ -36,3 +36,14 @@ def reset_failed_logins(db_path):
     with db_mod.connect_sync() as c:
         c.execute("DELETE FROM failed_logins")
     yield
+
+
+@pytest.fixture(autouse=True)
+def reset_global_config():
+    """Several tests stash a fake Config into server.config._current_config
+    to drive backend selection / vm_control gating. Always reset to None
+    after the test so the next one starts fresh and re-loads from disk
+    (or stays None if no disk config exists)."""
+    yield
+    from server import config as cfg_mod
+    cfg_mod._current_config = None

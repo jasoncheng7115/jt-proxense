@@ -97,11 +97,23 @@ class AuthConfig:
     """v0.2+ authentication configuration. Disabled by default for v0.1
     backward compatibility — operator opts in by setting enabled: true."""
     enabled: bool = False
-    backend: str = "local"           # 'local' is the only backend in v0.2
+    backend: str = "local"           # 'local' or 'pam' (v0.2.x)
     db_path: str = "/var/lib/jt-proxense/jt-proxense.db"
     # When set, used to sign session cookies. If empty, server generates a
     # random one at first start and writes it back here.
     session_secret: str = ""
+
+
+@dataclass
+class VmControlConfig:
+    """v0.3+ VM control (write operations against PVE). Disabled by default
+    so the binary remains read-only until the operator explicitly opts in."""
+    enabled: bool = False
+    # When False, even an authenticated operator cannot trigger writes —
+    # the endpoint returns 503. Lets us ship the scaffolding safely.
+    require_admin_for_destructive: bool = True
+    # If True, stop / migrate / delete need admin; start / shutdown / reboot
+    # are operator-tier (matches Jason's B3 confirmation tiers).
 
 
 @dataclass
@@ -112,6 +124,7 @@ class Config:
     alerts: AlertConfig = field(default_factory=AlertConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    vm_control: VmControlConfig = field(default_factory=VmControlConfig)
 
     def to_dict(self) -> dict:
         """Convert config to dictionary"""
@@ -140,8 +153,10 @@ class Config:
         alerts = AlertConfig(**data.get("alerts", {}))
         ui = UIConfig(**data.get("ui", {}))
         auth_cfg = AuthConfig(**data.get("auth", {}))
+        vm_control_cfg = VmControlConfig(**data.get("vm_control", {}))
 
-        return cls(server=server, clusters=clusters, alerts=alerts, ui=ui, auth=auth_cfg)
+        return cls(server=server, clusters=clusters, alerts=alerts, ui=ui,
+                   auth=auth_cfg, vm_control=vm_control_cfg)
 
 
 # Global config instance
