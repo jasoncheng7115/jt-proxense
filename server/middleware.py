@@ -46,7 +46,9 @@ _PUBLIC_PREFIXES = (
 def _is_public(path: str) -> bool:
     if path in _PUBLIC_PATHS:
         return True
-    if path == "/" or path == "/login":
+    if path == "/login":
+        return True
+    if path == "/favicon.svg":
         return True
     return any(path.startswith(p) for p in _PUBLIC_PREFIXES)
 
@@ -98,10 +100,13 @@ def make_auth_middleware(auth_enabled: bool):
                 }
 
         if request["user"] is None and not _is_public(request.path):
-            return web.json_response(
-                {"error": "auth_required", "message": "login required"},
-                status=401,
-            )
+            # API calls get JSON 401; HTML routes get a redirect to /login.
+            if request.path.startswith("/api/") or request.path == "/ws":
+                return web.json_response(
+                    {"error": "auth_required", "message": "login required"},
+                    status=401,
+                )
+            raise web.HTTPFound("/login")
         return await handler(request)
     return auth_middleware
 

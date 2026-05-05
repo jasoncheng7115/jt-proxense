@@ -18,6 +18,7 @@ from .config import get_config, save_config, update_config, Config
 from .cluster_manager import cluster_manager
 from . import db
 from . import auth_handlers
+from . import login_page
 from .middleware import (
     request_id_middleware, make_auth_middleware, role_required,
 )
@@ -361,6 +362,9 @@ def create_app() -> web.Application:
     for method, path, handler in api_routes:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
+
+    # v0.2 login page (always public; the SPA root is gated by auth middleware)
+    app.router.add_get("/login", login_page.login_page_handler)
 
     # Static files (SPA)
     app.router.add_get("/", index_handler)

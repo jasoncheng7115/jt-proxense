@@ -8,11 +8,28 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [Unreleased] — v0.2 in progress on `v0.2-auth` branch
 
-### Planned
+### Added (preview, on feature branch — not yet on `main`)
 
-- **Local-only authentication** — opt-in basic auth that listens only on `127.0.0.1` and authenticates against system accounts. Will ship with an emergency CLI back door (`jt-proxense auth disable`, `jt-proxense reset-password <user>`) so that a misconfigured auth layer cannot lock the operator out of the host.
+- **Local authentication backend** with Argon2id hashing, 32-byte session IDs, 12-hour sliding window, 5-attempt-per-IP-per-5-minutes login rate limit. Disabled by default for v0.1 backward compatibility (`auth.enabled: false`).
+- **Role-based access control** with three roles (`viewer` / `operator` / `admin`) and per-cluster scope (`*` = global default).
+- **Append-only audit log** in SQLite. Each state-changing endpoint emits a row with user, timestamp, source IP, action, params hash (the request body itself is NEVER stored), result, and request correlation ID. DB-level triggers reject UPDATE / DELETE on the audit table.
+- **Emergency CLI back door** at `/usr/local/bin/jt-proxense` (SOP §7.4 — non-negotiable for any feature that could lock the operator out). Subcommands: `auth show / disable / set-local`, `user add / list / del`, `reset-password`, `config get / set / reset`. Operates directly against SQLite + config.yaml; does NOT require the service running.
+- **Cyberpunk-styled login page** at `/login` (vanilla HTML + CSS, no React rebuild needed). Anonymous requests to `/` are 302-redirected to `/login` when auth is enabled.
+- **Forward-only SQL migrations runner** in `server/db.py`. First migration creates `users`, `sessions`, `roles`, `audit_log`, `failed_logins`, `schema_version` tables.
+
+### Changed
+
+- **HTTP listener now binds before cluster polling.** Fresh installs with unreachable PVE clusters used to wait ~12 seconds before serving the UI; now `/api/health` and `/login` respond instantly.
+
+### Planned (not yet implemented)
+
+- VM control endpoints (start / stop / migrate / console) — v0.3.
+- ESXi cluster support (read-only first) — v0.4.
+- ESXi → PVE minute-scale-downtime migration via CBT — v0.5.
+
+---
 
 ---
 
