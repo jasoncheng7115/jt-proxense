@@ -6,7 +6,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
 #
 # Environment overrides (for testing):
-#   JT_PROXENSE_REPO_URL  — git URL to clone from (default: GitHub main branch)
+#   JT_PROXENSE_REPO_URL  — git URL to clone from (default: GitHub repo)
+#   JT_PROXENSE_BRANCH    — branch / tag / SHA to check out (default: main)
 #   JT_PROXENSE_INSTALL_DIR — target directory (default: /opt/jt-proxense)
 #   JT_PROXENSE_USER      — service user (default: jt-proxense)
 #   JT_PROXENSE_PORT      — HTTP port written into config.yaml (default: 8098)
@@ -22,6 +23,7 @@ die()  { printf "%b  ✗ %s%b\n" "$RED" "$*" "$NC" >&2; exit 1; }
 
 # ---------- config ----------
 REPO_URL="${JT_PROXENSE_REPO_URL:-https://github.com/jasoncheng7115/jt-proxense.git}"
+REPO_BRANCH="${JT_PROXENSE_BRANCH:-main}"
 INSTALL_DIR="${JT_PROXENSE_INSTALL_DIR:-/opt/jt-proxense}"
 SERVICE_USER="${JT_PROXENSE_USER:-jt-proxense}"
 HTTP_PORT="${JT_PROXENSE_PORT:-8098}"
@@ -135,17 +137,17 @@ export GIT_CONFIG_VALUE_0="$INSTALL_DIR"
 export GIT_CONFIG_COUNT=1
 
 if [ -d "$INSTALL_DIR/.git" ]; then
-    git -C "$INSTALL_DIR" fetch --quiet origin main
-    git -C "$INSTALL_DIR" reset --hard --quiet origin/main
-    ok "updated from ${REPO_URL}"
+    # Use an explicit refspec so shallow clones can fetch any branch.
+    git -C "$INSTALL_DIR" fetch --quiet --depth=1 origin \
+        "+refs/heads/${REPO_BRANCH}:refs/remotes/origin/${REPO_BRANCH}"
+    git -C "$INSTALL_DIR" reset --hard --quiet "origin/${REPO_BRANCH}"
+    ok "updated from ${REPO_URL} (${REPO_BRANCH})"
 else
-    # Fresh install — clone into a temp dir, then move (so we don't blow away
-    # any existing config.yaml the user already placed)
     if [ -e "$INSTALL_DIR/run.py" ]; then
         die "${INSTALL_DIR} is non-empty but not a git checkout. Refusing to overwrite. Move it aside or set JT_PROXENSE_INSTALL_DIR."
     fi
-    git clone --depth 1 --quiet "$REPO_URL" "$INSTALL_DIR"
-    ok "cloned ${REPO_URL}"
+    git clone --depth 1 --quiet --branch "${REPO_BRANCH}" "$REPO_URL" "$INSTALL_DIR"
+    ok "cloned ${REPO_URL} (${REPO_BRANCH})"
 fi
 
 # ---------- 5. python deps ----------
