@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 _PUBLIC_PATHS = {
     "/api/auth/login",
     "/api/auth/logout",
-    "/api/auth/me",      # frontend uses this to discover "am I logged in?"
-    "/api/health",       # liveness probe — no telemetry
+    "/api/auth/me",          # frontend uses this to discover "am I logged in?"
+    "/api/auth/totp/login",  # 2FA second factor — no session yet at this point
+    "/api/health",           # liveness probe — no telemetry
 }
 _PUBLIC_PREFIXES = (
     "/assets/",

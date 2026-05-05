@@ -159,7 +159,7 @@ ok "dependencies installed"
 
 # Smoke test imports — every runtime dep listed here.
 # Adding a new runtime dep? Update this line AND requirements.txt (SOP §7.1).
-python3 -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2" \
+python3 -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2, pyotp, qrcode" \
     || die "Smoke test failed — a runtime module did not import. Check requirements.txt."
 ok "import smoke test passed"
 

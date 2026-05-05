@@ -12,7 +12,8 @@ from aiohttp import web
 
 from . import audit, auth
 from . import db
-from .middleware import role_required
+from . import totp as totp_mod
+from .middleware import role_required, auth_required
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,24 @@ async def login_handler(request: web.Request) -> web.Response:
         )
         return web.json_response({"error": "invalid_credentials"}, status=401)
 
+    # If user has TOTP enabled, do NOT issue a real session yet — return a
+    # short-lived pending token. Frontend submits /api/auth/totp/login with
+    # the code to complete authentication.
+    if totp_mod.is_enabled(session.user_id):
+        # Roll back the session we just created — it shouldn't exist until 2FA passes.
+        await auth.logout(session.id)
+        pending = totp_mod.issue_pending_token(session.user_id)
+        await audit.write(
+            user=username, source_ip=src_ip, action="auth.login",
+            result="ok", request_id=request_id,
+            params={"totp_required": True},
+        )
+        return web.json_response({
+            "ok": True, "totp_required": True,
+            "pending_token": pending,
+            "ttl_seconds": totp_mod.PENDING_TOKEN_TTL_S,
+        })
+
     user_row = auth.get_user_by_id(session.user_id) or {}
     await audit.write(
         user=username, source_ip=src_ip, action="auth.login",
@@ -74,6 +93,146 @@ async def login_handler(request: web.Request) -> web.Response:
         max_age=auth.SESSION_TTL_S, path="/",
     )
     return resp
+
+
+# ---------------------------------------------------------------- TOTP handlers
+
+async def totp_login_handler(request: web.Request) -> web.Response:
+    """Step 2 of login when user has TOTP enabled. Trades pending_token + code
+    for a real session cookie."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+
+    pending = body.get("pending_token") or ""
+    code = body.get("code") or ""
+    src_ip = request.get("client_ip", "unknown")
+    request_id = request.get("request_id", "")
+
+    user_id = totp_mod.consume_pending_token(pending)
+    if user_id is None:
+        return web.json_response({"error": "pending_expired"}, status=401)
+
+    if not totp_mod.verify_code(user_id, code):
+        await audit.write(
+            user=str(user_id), source_ip=src_ip, action="auth.totp.verify",
+            result="denied", request_id=request_id,
+        )
+        return web.json_response({"error": "invalid_totp"}, status=401)
+
+    # Mint a real session now.
+    user_row = auth.get_user_by_id(user_id)
+    if not user_row or not user_row["enabled"]:
+        return web.json_response({"error": "user_disabled"}, status=401)
+
+    import secrets
+    sid = secrets.token_urlsafe(32)
+    now = db.now_ms()
+    expires = now + auth.SESSION_TTL_S * 1000
+    async with db.connect() as c:
+        await c.execute(
+            "INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at, source_ip, user_agent) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (sid, user_id, now, expires, now, src_ip,
+             request.headers.get("User-Agent", "")[:255]),
+        )
+        await c.execute("UPDATE users SET last_login_at=? WHERE id=?", (now, user_id))
+        await c.commit()
+
+    await audit.write(
+        user=user_row["username"], source_ip=src_ip,
+        action="auth.totp.verify", result="ok", request_id=request_id,
+    )
+    resp = web.json_response({
+        "ok": True,
+        "user": {
+            "id": user_row["id"],
+            "username": user_row["username"],
+            "must_change_pw": bool(user_row["must_change_pw"]),
+            "role_global": auth.role_for(user_id, "*"),
+        },
+    })
+    resp.set_cookie(
+        auth.SESSION_COOKIE, sid,
+        httponly=True, secure=False, samesite="Lax",
+        max_age=auth.SESSION_TTL_S, path="/",
+    )
+    return resp
+
+
+@auth_required
+async def totp_enroll_init_handler(request: web.Request) -> web.Response:
+    user = request.get("user")
+    if not user:
+        return web.json_response({"error": "auth_required"}, status=401)
+    secret = totp_mod.generate_secret()
+    totp_mod.stage_secret(user["username"], secret)
+    url = totp_mod.otpauth_url(user["username"], secret)
+    qr = totp_mod.qr_png_data_uri(url)
+    await audit.write(
+        user=user["username"], source_ip=request.get("client_ip", "unknown"),
+        action="auth.totp.enroll-init", result="ok",
+        request_id=request.get("request_id", ""),
+    )
+    return web.json_response({
+        "ok": True,
+        "otpauth_url": url,
+        "qr_data_uri": qr,
+        "secret": secret,  # plain — for manual entry into authenticator
+    })
+
+
+@auth_required
+async def totp_enroll_verify_handler(request: web.Request) -> web.Response:
+    user = request.get("user")
+    if not user:
+        return web.json_response({"error": "auth_required"}, status=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    code = (body.get("code") or "").strip()
+    ok, backup_codes = totp_mod.confirm_enrollment(user["username"], code)
+    await audit.write(
+        user=user["username"], source_ip=request.get("client_ip", "unknown"),
+        action="auth.totp.enroll-verify",
+        result="ok" if ok else "denied",
+        request_id=request.get("request_id", ""),
+    )
+    if not ok:
+        return web.json_response({"error": "invalid_totp"}, status=400)
+    return web.json_response({
+        "ok": True,
+        "backup_codes": backup_codes,
+        "warning": "Save these codes now. They will not be shown again.",
+    })
+
+
+@auth_required
+async def totp_disable_handler(request: web.Request) -> web.Response:
+    """Self-service: a user disables their own TOTP. Requires a confirmation
+    of the current TOTP code (so an attacker who steals a session can't bypass
+    the second factor for future logins)."""
+    user = request.get("user")
+    if not user:
+        return web.json_response({"error": "auth_required"}, status=401)
+    if not totp_mod.is_enabled(user["id"]):
+        return web.json_response({"ok": True, "already_disabled": True})
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    code = body.get("code") or ""
+    if not totp_mod.verify_code(user["id"], code):
+        return web.json_response({"error": "invalid_totp"}, status=401)
+    totp_mod.disable(user["username"])
+    await audit.write(
+        user=user["username"], source_ip=request.get("client_ip", "unknown"),
+        action="auth.totp.disable", result="ok",
+        request_id=request.get("request_id", ""),
+    )
+    return web.json_response({"ok": True})
 
 
 async def logout_handler(request: web.Request) -> web.Response:

@@ -168,6 +168,18 @@ def cmd_user_del(args):
         sys.exit(1)
 
 
+def cmd_user_reset_totp(args):
+    """SOP §7.4 emergency back door: clear a user's TOTP enrollment and
+    backup codes. Used when an authenticator device is lost. Operator must
+    follow up with the user to re-enroll on next login."""
+    from server import totp as totp_mod
+    if totp_mod.disable(args.name):
+        print(f"TOTP disabled for '{args.name}' — they should re-enroll at next login")
+    else:
+        print(f"no such user: {args.name}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_reset_password(args):
     pw = args.password or _gen_password()
     if auth.set_password(args.user, pw, must_change_pw=args.password is None):
@@ -245,6 +257,8 @@ def _parser():
     p_add.set_defaults(func=cmd_user_add)
     su.add_parser("list").set_defaults(func=cmd_user_list)
     p_del = su.add_parser("del"); p_del.add_argument("name"); p_del.set_defaults(func=cmd_user_del)
+    p_rtotp = su.add_parser("reset-totp"); p_rtotp.add_argument("name")
+    p_rtotp.set_defaults(func=cmd_user_reset_totp)
 
     p_reset = sub.add_parser("reset-password")
     p_reset.add_argument("user")

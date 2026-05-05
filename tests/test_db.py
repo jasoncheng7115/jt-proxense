@@ -7,7 +7,11 @@ from server import db
 
 
 def test_migrations_apply_cleanly(db_path):
-    assert db.schema_version() == 1
+    """schema_version equals the number of migration files in server/migrations/."""
+    from server.db import _list_migration_files, _migration_version
+    expected = max((_migration_version(f) for f in _list_migration_files()), default=0)
+    assert db.schema_version() == expected
+    assert expected >= 1
 
 
 def test_migrations_idempotent(db_path):
