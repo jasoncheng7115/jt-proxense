@@ -110,16 +110,27 @@ async def totp_login_handler(request: web.Request) -> web.Response:
     src_ip = request.get("client_ip", "unknown")
     request_id = request.get("request_id", "")
 
+    # Same rate limiter as /api/auth/login — repeated bad TOTP submissions
+    # from the same IP eventually get cooled off.
+    if auth.is_rate_limited(src_ip):
+        return web.json_response(
+            {"error": "rate_limited"}, status=429,
+        )
+
     user_id = totp_mod.consume_pending_token(pending)
     if user_id is None:
+        auth.record_failed_login(src_ip, "<totp:pending_expired>")
         return web.json_response({"error": "pending_expired"}, status=401)
 
     if not totp_mod.verify_code(user_id, code):
+        auth.record_failed_login(src_ip, f"<totp:user_id={user_id}>")
         await audit.write(
             user=str(user_id), source_ip=src_ip, action="auth.totp.verify",
             result="denied", request_id=request_id,
         )
         return web.json_response({"error": "invalid_totp"}, status=401)
+    # success clears the per-IP counter (matches login())
+    auth.clear_failed_logins(src_ip)
 
     # Mint a real session now.
     user_row = auth.get_user_by_id(user_id)

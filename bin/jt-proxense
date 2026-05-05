@@ -269,6 +269,40 @@ def cmd_version(_):
     print("jt-proxense CLI / schema_version=", db.schema_version())
 
 
+def cmd_audit_purge(args):
+    """Retention purge for the audit log. Drops + recreates the append-only
+    trigger around a single DELETE so the operator-driven retention path is
+    distinguishable from accidental deletion attempts."""
+    from datetime import datetime, timezone
+    from server import audit as audit_mod
+    if args.before:
+        try:
+            dt = datetime.fromisoformat(args.before.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            cutoff = int(dt.timestamp() * 1000)
+        except ValueError:
+            print(f"error: --before must be ISO 8601 (e.g. 2025-01-01T00:00:00Z)", file=sys.stderr)
+            sys.exit(1)
+    else:
+        days = args.days or 365
+        cutoff = db.now_ms() - days * 86400 * 1000
+        from datetime import datetime, timezone
+        print(f"  cutoff: {datetime.fromtimestamp(cutoff/1000, tz=timezone.utc).isoformat()} ({days} days ago)")
+    try:
+        n = audit_mod.purge_before_sync(cutoff)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr); sys.exit(1)
+    print(f"  removed: {n} rows")
+
+
+def cmd_audit_count(_):
+    """Show the current row count without touching anything."""
+    with db.connect_sync() as c:
+        row = c.execute("SELECT COUNT(*) AS n FROM audit_log").fetchone()
+    print(f"  audit_log rows: {row['n'] or 0}")
+
+
 # ---------------------------------------------------------------- argparse
 
 def _parser():
@@ -320,6 +354,14 @@ def _parser():
     p_get = sc.add_parser("get"); p_get.add_argument("key"); p_get.set_defaults(func=cmd_config_get)
     p_set = sc.add_parser("set"); p_set.add_argument("key"); p_set.add_argument("value"); p_set.set_defaults(func=cmd_config_set)
     p_rst = sc.add_parser("reset"); p_rst.add_argument("key"); p_rst.set_defaults(func=cmd_config_reset)
+
+    p_audit = sub.add_parser("audit", help="audit log maintenance")
+    sa = p_audit.add_subparsers(dest="action", required=True)
+    p_purge = sa.add_parser("purge", help="delete rows older than --days or --before")
+    p_purge.add_argument("--days", type=int, help="purge rows older than N days (default 365)")
+    p_purge.add_argument("--before", help="ISO 8601 cutoff; e.g. 2025-01-01T00:00:00Z")
+    p_purge.set_defaults(func=cmd_audit_purge)
+    sa.add_parser("count").set_defaults(func=cmd_audit_count)
 
     sub.add_parser("version").set_defaults(func=cmd_version)
 

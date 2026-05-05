@@ -23,7 +23,8 @@ from . import audit_page
 from . import totp_page
 from . import vm_control
 from .middleware import (
-    request_id_middleware, make_auth_middleware, role_required,
+    request_id_middleware, security_headers_middleware,
+    make_auth_middleware, role_required,
 )
 from . import audit
 
@@ -324,7 +325,11 @@ def create_app() -> web.Application:
     config = get_config()
     auth_enabled = bool(getattr(config, "auth", None) and config.auth.enabled)
 
-    middlewares = [request_id_middleware, make_auth_middleware(auth_enabled)]
+    middlewares = [
+        security_headers_middleware,
+        request_id_middleware,
+        make_auth_middleware(auth_enabled),
+    ]
     app = web.Application(middlewares=middlewares)
 
     # Setup CORS

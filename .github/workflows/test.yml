@@ -1,0 +1,61 @@
+name: test
+
+on:
+  push:
+    branches: [main, "v0.2-auth", "v0.3-vm-control"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install runtime + test deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install pytest pytest-asyncio pytest-aiohttp
+
+      - name: Verify install.sh syntax
+        run: bash -n install.sh
+
+      - name: Verify CLI compiles
+        run: python3 -m py_compile bin/jt-proxense
+
+      - name: pytest
+        run: python3 -m pytest tests/ -q
+
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static checks (HTML balance, no DS_Store, no __pycache__)
+        run: |
+          # We can't run scripts/security-audit.sh upstream because it's
+          # checked into the project root, not the public repo. Re-implement
+          # the must-not-leak grep here so the workflow file is self-contained.
+          set -e
+          # OS metadata
+          if find . -name '.DS_Store' -o -name '._*' | grep -q .; then
+            echo "::error::stray macOS metadata files committed"; exit 1
+          fi
+          if find . -type d -name __pycache__ | grep -q .; then
+            echo "::error::__pycache__ committed"; exit 1
+          fi
+          # PEM private keys
+          if grep -rIE 'BEGIN ([A-Z ]+ )?PRIVATE KEY' --include='*.py' --include='*.sh' --include='*.md' --include='*.yaml' --include='*.yml' .; then
+            echo "::error::looks like a private key was committed"; exit 1
+          fi
+          # AWS / GitHub PATs
+          if grep -rIE 'AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}' .; then
+            echo "::error::looks like an API key / PAT was committed"; exit 1
+          fi
+          echo "✓ static checks pass"

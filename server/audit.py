@@ -116,3 +116,42 @@ async def count() -> int:
     async with db.connect() as c:
         row = await (await c.execute("SELECT COUNT(*) AS n FROM audit_log")).fetchone()
         return int(row["n"] or 0)
+
+
+def purge_before_sync(cutoff_ts_ms: int) -> int:
+    """Synchronous retention purge — deletes rows older than cutoff_ts_ms.
+
+    The audit_log table has a BEFORE DELETE trigger that normally rejects
+    deletion, so this function temporarily drops the trigger, purges, and
+    re-creates it. We do that in one transaction; failure rolls back.
+
+    Returns the number of rows removed.
+    """
+    with db.connect_sync() as c:
+        # Sanity: never purge if cutoff is in the future
+        now = db.now_ms()
+        if cutoff_ts_ms >= now:
+            raise ValueError("cutoff is in the future; refusing to purge")
+
+        c.execute("BEGIN")
+        try:
+            c.execute("DROP TRIGGER IF EXISTS audit_no_delete")
+            cur = c.execute("DELETE FROM audit_log WHERE ts < ?", (cutoff_ts_ms,))
+            removed = cur.rowcount
+            c.execute(
+                "CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit_log "
+                "BEGIN SELECT RAISE(FAIL, 'audit_log is append-only'); END"
+            )
+            c.execute("COMMIT")
+            return removed
+        except Exception:
+            c.execute("ROLLBACK")
+            # Make sure the trigger is back even on failure
+            try:
+                c.execute(
+                    "CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log "
+                    "BEGIN SELECT RAISE(FAIL, 'audit_log is append-only'); END"
+                )
+            except Exception:
+                pass
+            raise

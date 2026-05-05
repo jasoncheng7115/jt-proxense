@@ -78,6 +78,38 @@ async def request_id_middleware(request: web.Request, handler):
     return response
 
 
+# Cyberpunk landing page + the SPA assets need a permissive CSP only for fonts
+# (we already inline the page CSS + JS). Everything is same-origin: no external
+# scripts, fonts, or images. Tighten further in v0.3+ as we add real CSPs for
+# the React routes.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
+
+@web.middleware
+async def security_headers_middleware(request: web.Request, handler):
+    """Stamp common security headers on every response.
+
+    CSP is intentionally NOT set here — the React SPA uses inline styles and
+    the cyberpunk pages use inline <style>+<script>. Setting a strict CSP
+    would break them; loosening it would defeat the point. v0.3 will move
+    inline pieces into linked assets so a proper CSP becomes feasible.
+    """
+    try:
+        response = await handler(request)
+    except web.HTTPException as e:
+        for k, v in _SECURITY_HEADERS.items():
+            e.headers.setdefault(k, v)
+        raise
+    for k, v in _SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    return response
+
+
 def make_auth_middleware(auth_enabled: bool):
     """Closes over the config flag so we can switch behaviour at startup time
     without an extra dict lookup per request."""
