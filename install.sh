@@ -44,13 +44,13 @@ cat <<'EOF'
 EOF
 
 # ---------- /dev/tty for interactive prompts (curl|bash safe) ----------
+# `[ -r /dev/tty ]` returns true even when there is no controlling terminal
+# (e.g. ssh without -t). The only reliable test is to *try* opening it.
+INPUT_FD=""
 if [ -t 0 ]; then
     INPUT_FD=0
-elif [ -r /dev/tty ]; then
-    exec 3</dev/tty
-    INPUT_FD=3
 else
-    INPUT_FD=""  # non-interactive — accept defaults
+    exec 3</dev/tty 2>/dev/null && INPUT_FD=3 || true
 fi
 ask_yes_no() {
     # ask_yes_no "Prompt?" default(y|n)
