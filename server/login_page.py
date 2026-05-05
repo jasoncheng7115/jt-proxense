@@ -117,13 +117,25 @@ LOGIN_HTML = """<!DOCTYPE html>
 <body>
     <form class="card" id="loginForm" autocomplete="on">
         <h1>JT-PROXENSE</h1>
-        <div class="sub">// Sign in</div>
+        <div class="sub" id="step-label">// Sign in</div>
 
-        <label for="username">Username</label>
-        <input id="username" name="username" type="text" required autofocus autocomplete="username">
+        <div id="step1">
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" required autofocus autocomplete="username">
 
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" required autocomplete="current-password">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" required autocomplete="current-password">
+        </div>
+
+        <div id="step2" style="display:none;">
+            <label for="totp">Authenticator code</label>
+            <input id="totp" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+                   placeholder="6 digits or backup code"
+                   style="font-family:'Share Tech Mono',monospace; font-size:18px; letter-spacing:.4em; text-align:center;">
+            <div style="margin-top:8px; font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--text-dim);">
+                <span id="totpTtl"></span>
+            </div>
+        </div>
 
         <button type="submit" id="submit">Authenticate &raquo;</button>
 
@@ -136,6 +148,36 @@ LOGIN_HTML = """<!DOCTYPE html>
 const form = document.getElementById('loginForm');
 const errBox = document.getElementById('err');
 const btn = document.getElementById('submit');
+const step1 = document.getElementById('step1');
+const step2 = document.getElementById('step2');
+const stepLabel = document.getElementById('step-label');
+const totpInput = document.getElementById('totp');
+const totpTtl = document.getElementById('totpTtl');
+
+let pendingToken = null;
+let ttlTimer = null;
+
+function showStep2(ttl) {
+    step1.style.display = 'none';
+    step2.style.display = 'block';
+    stepLabel.textContent = '// Two-factor verification';
+    btn.textContent = 'Verify &raquo;';
+    totpInput.focus();
+
+    let remaining = ttl || 120;
+    const tick = () => {
+        if (remaining <= 0) {
+            clearInterval(ttlTimer);
+            totpTtl.textContent = 'Pending token expired — refresh to retry.';
+            btn.disabled = true;
+            return;
+        }
+        totpTtl.textContent = 'Code window expires in ' + remaining + 's.';
+        remaining--;
+    };
+    tick();
+    ttlTimer = setInterval(tick, 1000);
+}
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -145,33 +187,61 @@ form.addEventListener('submit', async (e) => {
     btn.textContent = 'Authenticating...';
 
     try {
-        const r = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-                username: document.getElementById('username').value,
-                password: document.getElementById('password').value,
-            }),
-        });
-        if (r.ok) {
-            // Bring the user to the app root.
-            window.location.replace('/');
-            return;
+        if (!pendingToken) {
+            // STEP 1: password
+            const r = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    username: document.getElementById('username').value,
+                    password: document.getElementById('password').value,
+                }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok && data.totp_required) {
+                pendingToken = data.pending_token;
+                showStep2(data.ttl_seconds);
+                btn.disabled = false;
+                btn.innerHTML = 'Verify &raquo;';
+                return;
+            }
+            if (r.ok) { window.location.replace('/'); return; }
+            let msg = 'Authentication failed';
+            if (r.status === 429) msg = 'Too many failed attempts. Try again later.';
+            else if (data.error === 'invalid_credentials') msg = 'Invalid username or password.';
+            else if (data.error) msg = data.error;
+            errBox.textContent = msg;
+            errBox.classList.remove('hidden');
+        } else {
+            // STEP 2: totp
+            const r = await fetch('/api/auth/totp/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    pending_token: pendingToken,
+                    code: totpInput.value.trim(),
+                }),
+            });
+            if (r.ok) { window.location.replace('/'); return; }
+            const data = await r.json().catch(() => ({}));
+            let msg = 'TOTP verification failed';
+            if (data.error === 'invalid_totp') msg = 'Invalid code. Try again.';
+            else if (data.error === 'pending_expired') msg = 'Pending login expired. Refresh and try again.';
+            else if (data.error) msg = data.error;
+            errBox.textContent = msg;
+            errBox.classList.remove('hidden');
+            totpInput.value = '';
+            totpInput.focus();
         }
-        const data = await r.json().catch(() => ({}));
-        let msg = 'Authentication failed';
-        if (r.status === 429) msg = 'Too many failed attempts. Try again later.';
-        else if (data.error === 'invalid_credentials') msg = 'Invalid username or password.';
-        else if (data.error) msg = data.error;
-        errBox.textContent = msg;
-        errBox.classList.remove('hidden');
     } catch (e) {
         errBox.textContent = 'Network error. Check the server is reachable.';
         errBox.classList.remove('hidden');
     } finally {
         btn.disabled = false;
-        btn.textContent = orig;
+        if (!pendingToken) btn.innerHTML = 'Authenticate &raquo;';
+        else btn.innerHTML = 'Verify &raquo;';
     }
 });
 </script>
