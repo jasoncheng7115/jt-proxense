@@ -495,7 +495,7 @@ class Cluster:
                         match = re.search(r"[-=]>\s*['\"]?(\w[\w-]+)['\"]?", text)
                         if match:
                             return match.group(1)
-                        # Pattern: Proxmox typical log format: "starting migration of VM 154 to node 'host-111'"
+                        # Pattern: Proxmox typical log format: "starting migration of VM 154 to node 'pve-target'"
                         match = re.search(r"migration.*?to\s+(?:node\s+)?['\"]?(\w[\w-]+)['\"]?", text, re.IGNORECASE)
                         if match:
                             return match.group(1)

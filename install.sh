@@ -45,12 +45,14 @@ EOF
 
 # ---------- /dev/tty for interactive prompts (curl|bash safe) ----------
 # `[ -r /dev/tty ]` returns true even when there is no controlling terminal
-# (e.g. ssh without -t). The only reliable test is to *try* opening it.
+# (e.g. ssh without -t). Probe in a subshell so bash's "no such device"
+# diagnostic is captured, then only do the real exec if the probe passed.
 INPUT_FD=""
 if [ -t 0 ]; then
     INPUT_FD=0
-else
-    exec 3</dev/tty 2>/dev/null && INPUT_FD=3 || true
+elif (exec </dev/tty) 2>/dev/null; then
+    exec 3</dev/tty
+    INPUT_FD=3
 fi
 ask_yes_no() {
     # ask_yes_no "Prompt?" default(y|n)
@@ -143,8 +145,9 @@ fi
 
 # ---------- 5. python deps ----------
 say "[5/6] Python dependencies (system pip)..."
-python3 -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
-python3 -m pip install --quiet -r "$INSTALL_DIR/requirements.txt"
+PIP_OPTS="--quiet --root-user-action=ignore"
+python3 -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
+python3 -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt"
 ok "dependencies installed"
 
 # Smoke test imports — every runtime dep listed here.

@@ -16,7 +16,7 @@
 
 ## 三秒安裝
 
-> 此版本僅支援 Linux。macOS / Windows 規劃中。
+> 僅支援 Linux。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash

@@ -75,18 +75,12 @@
         </div>
 
         <div class="install-card">
-            <div class="os-tabs" role="tablist">
-                <button class="os-tab" role="tab" aria-selected="true" data-os="linux">Linux</button>
-                <button class="os-tab" role="tab" aria-selected="false" data-os="macos" disabled>
-                    macOS<span class="soon">soon</span>
-                </button>
-                <button class="os-tab" role="tab" aria-selected="false" data-os="windows" disabled>
-                    Windows<span class="soon">soon</span>
-                </button>
+            <div class="install-head">
+                <span class="install-os">Linux</span>
+                <span class="install-distros">Debian · Ubuntu · RHEL · Rocky · Arch · openSUSE</span>
             </div>
-
-            <div class="os-panel" data-active="true" data-os="linux">
-                <p>Tested on Debian / Ubuntu, RHEL / Rocky, Arch, openSUSE. Requires sudo and Python 3.10+.</p>
+            <div class="install-body">
+                <p>Requires <code>sudo</code> and Python 3.10+.</p>
                 <div class="code-block">
                     <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash">Copy</button>
 <span class="prompt">$</span>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
@@ -95,13 +89,6 @@
                     <strong>After install:</strong>
                     Edit <code>/opt/jt-proxense/config.yaml</code> with your PVE clusters, then <code>sudo systemctl restart jt-proxense</code>. Default URL: <code>http://&lt;your-server&gt;:8098/</code>.
                 </div>
-            </div>
-
-            <div class="os-panel" data-os="macos">
-                <p>macOS installer not available yet — planned for a future release.</p>
-            </div>
-            <div class="os-panel" data-os="windows">
-                <p>Windows installer not available yet — planned for a future release.</p>
             </div>
         </div>
     </div>
@@ -238,16 +225,6 @@
 </div>
 
 <script>
-// OS tab switcher
-document.querySelectorAll('.os-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        if (tab.disabled) return;
-        document.querySelectorAll('.os-tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
-        const os = tab.dataset.os;
-        document.querySelectorAll('.os-panel').forEach(p => p.setAttribute('data-active', p.dataset.os === os ? 'true' : 'false'));
-    });
-});
-
 // Copy button
 document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', async () => {

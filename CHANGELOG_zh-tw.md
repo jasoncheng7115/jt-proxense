@@ -13,7 +13,6 @@ JT-PROXENSE 所有重要變動紀錄於此。
 ### 規劃中
 
 - **本機認證機制** — 可選的 basic auth，只監聽 `127.0.0.1`，認證對象為系統帳號。將同時提供緊急 CLI 後門（`jt-proxense auth disable`、`jt-proxense reset-password <user>`），以免認證設定錯誤把管理員自己鎖在主機外。
-- **macOS / Windows 安裝程式** — 目前僅支援 Linux。
 
 ---
 
@@ -43,6 +42,6 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ### 已知限制
 
-- 僅支援 Linux，macOS / Windows 安裝程式尚未提供。
+- 僅支援 Linux。
 - 不支援子路徑反向代理掛載（如 `/proxense/`），服務必須掛在 `/` 根路徑。
 - 前端 `dist/` 已 build 好放在 repo；如需重新 build 需要 Node.js 18+ 與 `npm install`。

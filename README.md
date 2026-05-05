@@ -16,7 +16,7 @@ Landing page: <https://jasoncheng7115.github.io/jt-proxense/>
 
 ## Three-second install
 
-> Linux only this release. macOS / Windows planned.
+> Linux only.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash

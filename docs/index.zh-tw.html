@@ -75,18 +75,12 @@
         </div>
 
         <div class="install-card">
-            <div class="os-tabs" role="tablist">
-                <button class="os-tab" role="tab" aria-selected="true" data-os="linux">Linux</button>
-                <button class="os-tab" role="tab" aria-selected="false" data-os="macos" disabled>
-                    macOS<span class="soon">即將</span>
-                </button>
-                <button class="os-tab" role="tab" aria-selected="false" data-os="windows" disabled>
-                    Windows<span class="soon">即將</span>
-                </button>
+            <div class="install-head">
+                <span class="install-os">Linux</span>
+                <span class="install-distros">Debian · Ubuntu · RHEL · Rocky · Arch · openSUSE</span>
             </div>
-
-            <div class="os-panel" data-active="true" data-os="linux">
-                <p>已在 Debian / Ubuntu、RHEL / Rocky、Arch、openSUSE 上測試。需要 sudo 權限，Python 3.10+。</p>
+            <div class="install-body">
+                <p>需要 <code>sudo</code> 權限，Python 3.10+。</p>
                 <div class="code-block">
                     <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash">複製</button>
 <span class="prompt">$</span>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
@@ -95,13 +89,6 @@
                     <strong>裝完後：</strong>
                     編輯 <code>/opt/jt-proxense/config.yaml</code> 填入 PVE 叢集，再 <code>sudo systemctl restart jt-proxense</code>。預設網址：<code>http://&lt;your-server&gt;:8098/</code>。
                 </div>
-            </div>
-
-            <div class="os-panel" data-os="macos">
-                <p>macOS 安裝程式尚未提供 — 規劃在後續版本。</p>
-            </div>
-            <div class="os-panel" data-os="windows">
-                <p>Windows 安裝程式尚未提供 — 規劃在後續版本。</p>
             </div>
         </div>
     </div>
@@ -238,15 +225,6 @@
 </div>
 
 <script>
-document.querySelectorAll('.os-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        if (tab.disabled) return;
-        document.querySelectorAll('.os-tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
-        const os = tab.dataset.os;
-        document.querySelectorAll('.os-panel').forEach(p => p.setAttribute('data-active', p.dataset.os === os ? 'true' : 'false'));
-    });
-});
-
 document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
         try {

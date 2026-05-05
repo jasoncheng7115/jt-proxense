@@ -13,7 +13,6 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ### Planned
 
 - **Local-only authentication** — opt-in basic auth that listens only on `127.0.0.1` and authenticates against system accounts. Will ship with an emergency CLI back door (`jt-proxense auth disable`, `jt-proxense reset-password <user>`) so that a misconfigured auth layer cannot lock the operator out of the host.
-- **macOS / Windows installers** — current release is Linux-only.
 
 ---
 
@@ -43,6 +42,6 @@ This release intentionally **does not include built-in authentication.** The HTT
 
 ### Known limitations
 
-- Linux only. macOS and Windows installers are not yet provided.
+- Linux only.
 - Sub-path reverse-proxy mounts (e.g. `/proxense/`) are not supported — the app must be mounted at `/`.
 - The frontend `dist/` is committed to the repository; rebuilding requires Node.js 18+ and `npm install`.

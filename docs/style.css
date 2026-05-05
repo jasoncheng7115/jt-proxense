@@ -362,51 +362,29 @@ section {
     overflow: hidden;
     box-shadow: var(--shadow-card);
 }
-.os-tabs {
+.install-head {
     display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding: 14px 22px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-elev-2);
 }
-.os-tab {
-    flex: 1;
-    padding: 14px 20px;
+.install-os {
     font-family: var(--font-display);
-    font-size: 13px;
+    font-size: 14px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    transition: color .15s ease, border-color .15s ease, background .15s ease;
-}
-.os-tab[aria-selected="true"] {
     color: var(--cyan);
-    border-bottom-color: var(--cyan);
-    background: rgba(0, 240, 255, 0.04);
 }
-.os-tab:not([aria-selected="true"]):hover { color: var(--text-dim); }
-.os-tab[disabled] {
-    cursor: not-allowed;
-    opacity: 0.45;
-}
-.os-tab .soon {
-    font-size: 9px;
-    margin-left: 6px;
-    color: var(--orange);
-    border: 1px solid var(--orange);
-    border-radius: 3px;
-    padding: 1px 5px;
+.install-distros {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
     letter-spacing: 0.04em;
 }
-.os-panel {
-    display: none;
-    padding: 32px;
-}
-.os-panel[data-active="true"] { display: block; }
-
-.os-panel p { color: var(--text-dim); margin: 0 0 18px; font-size: 15px; }
+.install-body { padding: 28px 32px; }
+.install-body p { color: var(--text-dim); margin: 0 0 18px; font-size: 15px; }
 
 .code-block {
     position: relative;
