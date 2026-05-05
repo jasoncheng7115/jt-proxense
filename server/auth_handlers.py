@@ -173,6 +173,19 @@ async def totp_login_handler(request: web.Request) -> web.Response:
 
 
 @auth_required
+async def totp_status_handler(request: web.Request) -> web.Response:
+    """GET — current user's TOTP enrollment status + backup-code remaining."""
+    user = request.get("user")
+    if not user:
+        return web.json_response({"error": "auth_required"}, status=401)
+    enabled = totp_mod.is_enabled(user["id"])
+    return web.json_response({
+        "enabled": bool(enabled),
+        "backup_codes_remaining": totp_mod.remaining_backup_codes(user["id"]) if enabled else 0,
+    })
+
+
+@auth_required
 async def totp_enroll_init_handler(request: web.Request) -> web.Response:
     user = request.get("user")
     if not user:

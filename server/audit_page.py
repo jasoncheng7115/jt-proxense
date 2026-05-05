@@ -141,6 +141,10 @@ AUDIT_HTML = """<!DOCTYPE html>
             color: var(--text-dim);
         }
         .empty { text-align: center; padding: 48px 12px; color: var(--text-muted); }
+        .hidden { display: none; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+        tbody tr.row-main:hover { background: rgba(0,240,255,.06); }
+        tbody tr.row-detail:not(.hidden) td { animation: slideIn .15s ease; }
         .err {
             margin: 12px 0; padding: 12px;
             background: rgba(255,56,96,.08); border-left: 3px solid var(--red);
@@ -171,6 +175,12 @@ AUDIT_HTML = """<!DOCTYPE html>
         <label>Cluster
             <input type="text" id="fCluster" placeholder="any" autocomplete="off">
         </label>
+        <label>Since (UTC)
+            <input type="datetime-local" id="fSince" step="1">
+        </label>
+        <label>Until (UTC)
+            <input type="datetime-local" id="fUntil" step="1">
+        </label>
         <label>Limit
             <select id="fLimit">
                 <option>50</option>
@@ -182,6 +192,7 @@ AUDIT_HTML = """<!DOCTYPE html>
         <div class="actions">
             <button id="refresh" class="primary">Refresh &raquo;</button>
             <button id="auto">Auto: off</button>
+            <button id="exportCsv" title="Download visible rows as CSV">CSV</button>
         </div>
     </div>
 
@@ -229,6 +240,17 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+let lastRows = [];
+
+function localToUtcMs(v) {
+    if (!v) return null;
+    // datetime-local returns "YYYY-MM-DDTHH:MM[:SS]" in browser-local time;
+    // we want UTC ms. The cleanest path: append 'Z' if no offset present —
+    // but datetime-local has no offset, so interpret as local and convert.
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d.getTime();
+}
+
 async function fetchAndRender() {
     const errBox = document.getElementById('errBox');
     errBox.innerHTML = '';
@@ -236,6 +258,8 @@ async function fetchAndRender() {
     const u = document.getElementById('fUser').value.trim(); if (u) params.set('user', u);
     const a = document.getElementById('fAction').value.trim(); if (a) params.set('action', a);
     const c = document.getElementById('fCluster').value.trim(); if (c) params.set('cluster_id', c);
+    const since = localToUtcMs(document.getElementById('fSince').value); if (since) params.set('since_ms', since);
+    const until = localToUtcMs(document.getElementById('fUntil').value); if (until) params.set('until_ms', until);
     try {
         const r = await fetch('/api/audit?' + params, { credentials: 'same-origin' });
         if (r.status === 401) { window.location.href = '/login'; return; }
@@ -243,11 +267,12 @@ async function fetchAndRender() {
         if (!r.ok) { errBox.innerHTML = '<div class="err">HTTP ' + r.status + '</div>'; return; }
         const data = await r.json();
         const tbody = document.getElementById('rows');
-        if (!data.rows || data.rows.length === 0) {
+        lastRows = data.rows || [];
+        if (lastRows.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="empty">No rows match the filters.</td></tr>';
         } else {
-            tbody.innerHTML = data.rows.map(r => `
-                <tr>
+            tbody.innerHTML = lastRows.map((r, i) => `
+                <tr data-row="${i}" class="row-main" style="cursor: pointer">
                     <td class="ts">${tsFmt(r.ts)}</td>
                     <td class="user">${escapeHtml(r.user)}</td>
                     <td class="action">${escapeHtml(r.action)}</td>
@@ -256,7 +281,22 @@ async function fetchAndRender() {
                     <td class="ip">${escapeHtml(r.source_ip)}</td>
                     <td class="req">${escapeHtml(r.request_id)}</td>
                 </tr>
+                <tr class="row-detail hidden" data-detail="${i}">
+                    <td colspan="7" style="background: var(--bg-elev-2); padding: 12px 18px; font-family: 'Share Tech Mono', monospace; font-size: 12px;">
+                        <span style="color: var(--cyan)">id</span>=${r.id}
+                        &middot; <span style="color: var(--cyan)">params_hash</span>=<span style="color: var(--magenta); user-select: all">${escapeHtml(r.params_hash || '—')}</span>
+                        &middot; <span style="color: var(--cyan)">request_id</span>=<span style="color: var(--magenta); user-select: all">${escapeHtml(r.request_id)}</span>
+                    </td>
+                </tr>
             `).join('');
+            // Toggle detail row on click
+            document.querySelectorAll('.row-main').forEach((tr) => {
+                tr.addEventListener('click', () => {
+                    const i = tr.dataset.row;
+                    const det = document.querySelector(`.row-detail[data-detail="${i}"]`);
+                    if (det) det.classList.toggle('hidden');
+                });
+            });
         }
         document.getElementById('totalInfo').textContent = data.total + ' rows total';
         document.getElementById('pageInfo').textContent = `page ${Math.floor(offset/limit)+1} of ${Math.max(1, Math.ceil(data.total/limit))}`;
@@ -301,6 +341,25 @@ document.getElementById('auto').addEventListener('click', (e) => {
         fetchAndRender();
     }
 });
+document.getElementById('exportCsv').addEventListener('click', () => {
+    if (!lastRows.length) { alert('No rows to export — run a query first.'); return; }
+    const cols = ['id', 'ts', 'user', 'source_ip', 'cluster_id', 'action', 'target', 'params_hash', 'result', 'request_id'];
+    const csvEsc = (v) => {
+        if (v == null) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [cols.join(',')];
+    lastRows.forEach((r) => lines.push(cols.map(c => csvEsc(r[c])).join(',')));
+    const blob = new Blob([lines.join('\\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `jt-proxense-audit-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+});
+
 document.getElementById('logoutBtn').addEventListener('click', async (e) => {
     e.preventDefault();
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });

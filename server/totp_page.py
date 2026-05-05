@@ -158,8 +158,11 @@ HTML = """<!DOCTYPE html>
             color: #1a0006;
             background: linear-gradient(135deg, var(--red), #c41a3a);
             box-shadow: 0 0 14px rgba(255,56,96,.4);
+            border: none;
         }
-        button.danger:hover { box-shadow: 0 0 22px rgba(255,56,96,.5); }
+        button.danger:hover { box-shadow: 0 0 22px rgba(255,56,96,.5); transform: translateY(-1px); }
+        .pill.green { color: var(--green); border-color: rgba(0,255,136,.3); }
+        .pill.orange { color: var(--orange); border-color: rgba(255,138,60,.3); }
 
         .qr-block {
             display: flex; gap: 24px; align-items: center;
@@ -263,7 +266,8 @@ HTML = """<!DOCTYPE html>
         your authenticator. They will <strong>not be shown again</strong>.</p>
         <div class="codes" id="codes"></div>
         <button class="ghost" id="copyBackup">Copy all to clipboard</button>
-        <button id="doneBtn">I saved them &raquo;</button>
+        <button class="ghost" id="downloadBackup" style="margin-left:8px;">Download as .txt</button>
+        <button id="doneBtn" style="margin-left:8px;">I saved them &raquo;</button>
     </div>
 
     <div class="card hidden" id="disableCard">
@@ -293,20 +297,36 @@ async function loadStatus() {
     user = d.user;
     $('username').textContent = user.username;
 
-    // We don't currently have an API to read TOTP state directly; use heuristic:
-    // try enroll-init (which would replace any in-progress staging). We'll
-    // instead just show both options and let the user pick.
+    let status = { enabled: false, backup_codes_remaining: 0 };
+    try {
+        const sr = await fetch('/api/auth/totp/status', { credentials: 'same-origin' });
+        if (sr.ok) status = await sr.json();
+    } catch (e) { /* fall through with defaults */ }
+
+    const enrolledHtml = status.enabled
+        ? `<span class="pill green">2FA enabled</span>
+           <span style="margin-left:10px; color: var(--text-dim); font-family: 'Share Tech Mono', monospace; font-size: 12px;">
+                ${status.backup_codes_remaining} backup code${status.backup_codes_remaining === 1 ? '' : 's'} remaining
+           </span>`
+        : `<span class="pill orange">2FA not enabled</span>`;
+
     $('statusCard').innerHTML = `
         <h2>Status</h2>
         <p>Signed in as <code>${escapeHtml(user.username)}</code> &middot;
            role <code>${escapeHtml(user.role_global || 'none')}</code></p>
+        <p>${enrolledHtml}</p>
         <div style="margin-top:12px;">
-            <button id="startEnroll">Set up new authenticator &raquo;</button>
-            <button class="ghost" id="startDisable" style="margin-left:10px;">Disable existing 2FA</button>
+            ${status.enabled
+                ? '<button id="startEnroll" class="ghost">Re-enroll authenticator (regenerates backup codes)</button>'
+                + '<button class="danger" id="startDisable" style="margin-left:10px;">Disable 2FA</button>'
+                : '<button id="startEnroll">Set up authenticator &raquo;</button>'
+            }
         </div>
     `;
     $('startEnroll').addEventListener('click', startEnroll);
-    $('startDisable').addEventListener('click', () => { hide($('enrollCard')); show($('disableCard')); });
+    if ($('startDisable')) {
+        $('startDisable').addEventListener('click', () => { hide($('enrollCard')); show($('disableCard')); });
+    }
 }
 
 async function startEnroll() {
@@ -361,11 +381,34 @@ $('verifyBtn').addEventListener('click', async () => {
     }
 });
 
+function backupCodesText() {
+    const codes = [...$('codes').children].map(el => el.textContent);
+    const ts = new Date().toISOString();
+    return [
+        'JT-PROXENSE TOTP backup codes',
+        'Account:   ' + (user ? user.username : 'unknown'),
+        'Generated: ' + ts,
+        'WARNING:   Each code works ONCE. Treat as a password.',
+        '',
+        ...codes,
+        '',
+    ].join('\\n');
+}
+
 $('copyBackup')?.addEventListener('click', async () => {
-    const codes = [...$('codes').children].map(el => el.textContent).join('\\n');
-    try { await navigator.clipboard.writeText(codes); $('copyBackup').textContent = 'Copied'; }
+    try { await navigator.clipboard.writeText(backupCodesText()); $('copyBackup').textContent = 'Copied'; }
     catch { $('copyBackup').textContent = 'Copy failed'; }
     setTimeout(() => { $('copyBackup').textContent = 'Copy all to clipboard'; }, 1800);
+});
+
+$('downloadBackup')?.addEventListener('click', () => {
+    const blob = new Blob([backupCodesText()], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `jt-proxense-backup-codes-${user ? user.username : 'user'}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 });
 
 $('doneBtn')?.addEventListener('click', () => { window.location.replace('/'); });

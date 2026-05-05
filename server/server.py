@@ -365,6 +365,7 @@ def create_app() -> web.Application:
         ("GET",  "/api/auth/me",           auth_handlers.me_handler),
         # TOTP 2FA (v0.2.x)
         ("POST", "/api/auth/totp/login",         auth_handlers.totp_login_handler),
+        ("GET",  "/api/auth/totp/status",        auth_handlers.totp_status_handler),
         ("POST", "/api/auth/totp/enroll-init",   auth_handlers.totp_enroll_init_handler),
         ("POST", "/api/auth/totp/enroll-verify", auth_handlers.totp_enroll_verify_handler),
         ("POST", "/api/auth/totp/disable",       auth_handlers.totp_disable_handler),
