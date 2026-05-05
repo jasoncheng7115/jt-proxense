@@ -28,6 +28,11 @@ HTTP_PORT="${JT_PROXENSE_PORT:-8098}"
 SERVICE_NAME="jt-proxense"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
+# v0.2: when the CLI prints a one-time password we capture it here so the
+# closing summary can show it prominently to the operator.
+ADMIN_BOOTSTRAP_PW=""
+ADMIN_BOOTSTRAP_USER=""
+
 # ---------- root check ----------
 if [ "$(id -u)" -ne 0 ]; then
     die "This installer must run as root. Try: sudo bash install.sh"
@@ -72,7 +77,7 @@ ask_yes_no() {
 }
 
 # ---------- 1. preflight ----------
-say "[1/6] Network preflight (8s timeout per host)..."
+say "[1/7] Network preflight (8s timeout per host)..."
 preflight_host() {
     local host="$1"
     if curl -fsSI --connect-timeout 8 --max-time 8 "https://${host}/" >/dev/null 2>&1; then
@@ -85,7 +90,7 @@ preflight_host "github.com"
 preflight_host "pypi.org"
 
 # ---------- 2. detect distro + install OS deps ----------
-say "[2/6] Installing OS prerequisites (python3, git)..."
+say "[2/7] Installing OS prerequisites (python3, git)..."
 if   command -v apt-get >/dev/null 2>&1; then PM=apt
 elif command -v dnf     >/dev/null 2>&1; then PM=dnf
 elif command -v yum     >/dev/null 2>&1; then PM=yum
@@ -111,7 +116,7 @@ fi
 ok "python ${PY_VER}, git $(git --version | awk '{print $3}') ready"
 
 # ---------- 3. service user ----------
-say "[3/6] Service user '${SERVICE_USER}'..."
+say "[3/7] Service user '${SERVICE_USER}'..."
 if id "$SERVICE_USER" >/dev/null 2>&1; then
     ok "user already exists"
 else
@@ -120,7 +125,7 @@ else
 fi
 
 # ---------- 4. clone or update source ----------
-say "[4/6] Source code at ${INSTALL_DIR}..."
+say "[4/7] Source code at ${INSTALL_DIR}..."
 mkdir -p "$INSTALL_DIR"
 
 # Mark install dir as safe.directory before any git op (service-user owns it,
@@ -144,7 +149,7 @@ else
 fi
 
 # ---------- 5. python deps ----------
-say "[5/6] Python dependencies (system pip)..."
+say "[5/7] Python dependencies (system pip)..."
 PIP_OPTS="--quiet --root-user-action=ignore"
 python3 -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
 python3 -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt"
@@ -157,7 +162,7 @@ python3 -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2" \
 ok "import smoke test passed"
 
 # ---------- 6. config.yaml + state dir + ownership + systemd ----------
-say "[6/6] Configuration, state directory, ownership, systemd unit..."
+say "[6/7] Configuration, state directory, ownership, systemd unit..."
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     cp "$INSTALL_DIR/config.example.yaml" "$INSTALL_DIR/config.yaml"
     ok "created config.yaml from example (edit it before starting!)"
@@ -188,6 +193,43 @@ install -m 0644 "$INSTALL_DIR/packaging/${SERVICE_NAME}.service" "$SERVICE_FILE"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 ok "systemd unit installed and enabled"
+
+# ---------- 7. authentication bootstrap (v0.2+) ----------
+say "[7/7] Authentication setup..."
+
+# Detect whether auth is already enabled or any user already exists in the DB.
+# If either is true, we leave the auth state alone (idempotent across re-runs).
+AUTH_ENABLED=$(JTPROXENSE_DB_PATH="${STATE_DIR}/jt-proxense.db" \
+    JTPROXENSE_CONFIG="$INSTALL_DIR/config.yaml" \
+    sudo -u "$SERVICE_USER" "$INSTALL_DIR/bin/jt-proxense" auth show 2>/dev/null \
+    | python3 -c "import json,sys;d=json.loads(sys.stdin.read() or '{}'); print('1' if d.get('auth.enabled') else '0', d.get('user_count') or 0)" \
+    2>/dev/null || echo "0 0")
+
+CURRENT_AUTH=$(echo "$AUTH_ENABLED" | awk '{print $1}')
+USER_COUNT=$(echo "$AUTH_ENABLED" | awk '{print $2}')
+
+if [ "$CURRENT_AUTH" = "1" ] || [ "$USER_COUNT" != "0" ]; then
+    ok "auth already configured (enabled=${CURRENT_AUTH}, users=${USER_COUNT}) — left untouched"
+else
+    if ask_yes_no "Enable authentication and bootstrap an 'admin' user?" y; then
+        # 1) flip auth on
+        sudo -u "$SERVICE_USER" "$INSTALL_DIR/bin/jt-proxense" auth set-local >/dev/null
+        # 2) create admin with auto-generated password; capture stdout for the OTP
+        BOOT_OUT=$(sudo -u "$SERVICE_USER" \
+            "$INSTALL_DIR/bin/jt-proxense" user add admin --role admin 2>&1) || \
+            { warn "admin bootstrap failed: $BOOT_OUT"; }
+        ADMIN_BOOTSTRAP_PW=$(echo "$BOOT_OUT" | awk -F': ' '/one-time password/ {print $2}')
+        ADMIN_BOOTSTRAP_USER="admin"
+        if [ -n "$ADMIN_BOOTSTRAP_PW" ]; then
+            ok "admin user created with one-time password (shown below)"
+        else
+            ok "admin user already existed (left untouched)"
+        fi
+    else
+        ok "auth left disabled — anyone reaching :${HTTP_PORT} can read everything."
+        warn "Bind only to 127.0.0.1 (server.host in config.yaml) until auth is set up."
+    fi
+fi
 
 START_NOW=1
 if ask_yes_no "Start ${SERVICE_NAME} service now?" y; then
@@ -227,6 +269,24 @@ if [ "$START_NOW" = "1" ]; then
     echo "   Open in browser:  http://${HOST_IP}:${HTTP_PORT}/"
     echo
 fi
-echo "   Security note: this build ships with no built-in authentication."
-echo "   Put it behind a reverse proxy + auth before exposing to a network."
+if [ -n "$ADMIN_BOOTSTRAP_PW" ]; then
+    cat <<EOF
+   ┌──────────────────────────────────────────────────────────┐
+   │  ONE-TIME ADMIN CREDENTIALS — copy these now              │
+   ├──────────────────────────────────────────────────────────┤
+   │  username:  ${ADMIN_BOOTSTRAP_USER}
+   │  password:  ${ADMIN_BOOTSTRAP_PW}
+   ├──────────────────────────────────────────────────────────┤
+   │  Sign in at  http://${HOST_IP}:${HTTP_PORT}/login
+   │  This password is NOT written to disk — store it now.
+   │  Reset later with: sudo jt-proxense reset-password admin
+   └──────────────────────────────────────────────────────────┘
+
+EOF
+fi
+echo "   Emergency recovery (if you lock yourself out):"
+echo "     sudo jt-proxense auth disable"
+echo "     sudo jt-proxense reset-password <user>"
+echo
+echo "   Audit log viewer (admin only):  http://${HOST_IP}:${HTTP_PORT}/audit"
 echo

@@ -146,8 +146,10 @@ a:hover {
     font-size: 18px;
     letter-spacing: 0.08em;
     color: var(--text);
+    white-space: nowrap;          /* keep "JT-PROXENSE" on one line — never break at the hyphen */
+    flex-shrink: 0;
 }
-.nav-brand img { height: 28px; width: 28px; filter: drop-shadow(0 0 6px var(--cyan-glow)); }
+.nav-brand img { height: 28px; width: 28px; filter: drop-shadow(0 0 6px var(--cyan-glow)); flex-shrink: 0; }
 .nav-brand .ver {
     font-family: var(--font-mono);
     font-size: 11px;
@@ -615,9 +617,20 @@ section {
 @media (max-width: 720px) {
     .hero { padding: 64px 0 56px; }
     .nav-links a:not(.nav-lang) { display: none; }
+    .nav-inner { gap: 12px; }
+    .nav-brand { font-size: 15px; gap: 8px; letter-spacing: 0.06em; }
+    .nav-brand img { height: 22px; width: 22px; }
+    .nav-brand .ver { font-size: 10px; padding: 1px 6px; }
     section { padding: 56px 0; }
-    .os-panel { padding: 22px; }
+    .install-body { padding: 22px; }
     .code-block { padding: 16px 14px 16px 14px; font-size: 13px; }
     .copy-btn { display: none; }
     .feat-card { padding: 22px 20px; }
+}
+
+@media (max-width: 420px) {
+    /* very narrow phones: hide the version pill from the nav so the brand
+       and the lang toggle both fit comfortably */
+    .nav-brand .ver { display: none; }
+    .container { padding: 0 16px; }
 }
