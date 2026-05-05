@@ -152,17 +152,31 @@ ok "dependencies installed"
 
 # Smoke test imports — every runtime dep listed here.
 # Adding a new runtime dep? Update this line AND requirements.txt (SOP §7.1).
-python3 -c "import aiohttp, aiohttp_cors, yaml, certifi" \
+python3 -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2" \
     || die "Smoke test failed — a runtime module did not import. Check requirements.txt."
 ok "import smoke test passed"
 
-# ---------- 6. config.yaml + ownership + systemd ----------
-say "[6/6] Configuration, ownership, systemd unit..."
+# ---------- 6. config.yaml + state dir + ownership + systemd ----------
+say "[6/6] Configuration, state directory, ownership, systemd unit..."
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     cp "$INSTALL_DIR/config.example.yaml" "$INSTALL_DIR/config.yaml"
     ok "created config.yaml from example (edit it before starting!)"
 else
     ok "config.yaml already exists — left untouched"
+fi
+
+# v0.2+: SQLite-backed auth/audit lives in /var/lib/jt-proxense.
+STATE_DIR="/var/lib/jt-proxense"
+mkdir -p "$STATE_DIR"
+chown "${SERVICE_USER}:${SERVICE_USER}" "$STATE_DIR"
+chmod 750 "$STATE_DIR"
+ok "state dir ${STATE_DIR} ready"
+
+# Symlink the CLI back door so operators can run `jt-proxense ...` from anywhere.
+if [ -f "$INSTALL_DIR/bin/jt-proxense" ]; then
+    chmod +x "$INSTALL_DIR/bin/jt-proxense"
+    ln -sf "$INSTALL_DIR/bin/jt-proxense" /usr/local/bin/jt-proxense
+    ok "CLI back door installed at /usr/local/bin/jt-proxense"
 fi
 
 # Hand the whole tree to the service user (root may have written .git refs / .pyc)

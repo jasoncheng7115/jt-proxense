@@ -93,12 +93,25 @@ class UIConfig:
 
 
 @dataclass
+class AuthConfig:
+    """v0.2+ authentication configuration. Disabled by default for v0.1
+    backward compatibility — operator opts in by setting enabled: true."""
+    enabled: bool = False
+    backend: str = "local"           # 'local' is the only backend in v0.2
+    db_path: str = "/var/lib/jt-proxense/jt-proxense.db"
+    # When set, used to sign session cookies. If empty, server generates a
+    # random one at first start and writes it back here.
+    session_secret: str = ""
+
+
+@dataclass
 class Config:
     """Root configuration"""
     server: ServerConfig = field(default_factory=ServerConfig)
     clusters: list[ClusterConfig] = field(default_factory=list)
     alerts: AlertConfig = field(default_factory=AlertConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     def to_dict(self) -> dict:
         """Convert config to dictionary"""
@@ -126,8 +139,9 @@ class Config:
 
         alerts = AlertConfig(**data.get("alerts", {}))
         ui = UIConfig(**data.get("ui", {}))
+        auth_cfg = AuthConfig(**data.get("auth", {}))
 
-        return cls(server=server, clusters=clusters, alerts=alerts, ui=ui)
+        return cls(server=server, clusters=clusters, alerts=alerts, ui=ui, auth=auth_cfg)
 
 
 # Global config instance

@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""jt-proxense CLI — emergency back door + admin operations.
+
+This script MUST work without the service running (it talks to SQLite
+directly). It is the SOP §7.4 "lock-out recovery" tool: if the operator
+ever ends up locked out by an auth misconfig, this is how they get back in.
+
+Usage:
+    jt-proxense auth show
+    jt-proxense auth disable
+    jt-proxense auth set-local
+    jt-proxense user add <name> [--role admin|operator|viewer] [--password <pw>]
+    jt-proxense user list
+    jt-proxense user del <name>
+    jt-proxense reset-password <user> [--password <new>]
+    jt-proxense config get <key>
+    jt-proxense config set <key> <value>
+    jt-proxense config reset <key>
+    jt-proxense version
+"""
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import os
+import secrets
+import string
+import sys
+from pathlib import Path
+
+# Make `server.*` importable when run as a stand-alone script
+_HERE = Path(__file__).resolve().parent
+_ROOT = _HERE.parent
+sys.path.insert(0, str(_ROOT))
+
+from server import auth, db  # noqa: E402
+
+CONFIG_PATH = Path(os.environ.get("JTPROXENSE_CONFIG", "/opt/jt-proxense/config.yaml"))
+DB_PATH = Path(os.environ.get("JTPROXENSE_DB_PATH", "/var/lib/jt-proxense/jt-proxense.db"))
+
+
+def _bootstrap():
+    db.configure(DB_PATH)
+    try:
+        db.apply_migrations()
+    except Exception as e:
+        sys.stderr.write(f"warning: migrations failed: {e}\n")
+
+
+def _read_yaml():
+    """Lightweight YAML read — depends on PyYAML being importable.
+    The runtime already requires PyYAML so this is fine."""
+    import yaml
+    if not CONFIG_PATH.exists():
+        return {}
+    return yaml.safe_load(CONFIG_PATH.read_text()) or {}
+
+
+def _write_yaml(data):
+    import yaml
+    CONFIG_PATH.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
+
+
+def _gen_password(n=20):
+    chars = string.ascii_letters + string.digits + "!@#$%&*-_+="
+    return "".join(secrets.choice(chars) for _ in range(n))
+
+
+# ---------------------------------------------------------------- subcmds
+
+def cmd_auth_show(_):
+    cfg = _read_yaml()
+    auth_cfg = cfg.get("auth", {}) or {}
+    print(json.dumps({
+        "config_file": str(CONFIG_PATH),
+        "db_file": str(DB_PATH),
+        "schema_version": db.schema_version(),
+        "auth.enabled": bool(auth_cfg.get("enabled", False)),
+        "auth.backend": auth_cfg.get("backend", "local"),
+        "user_count": len(auth.list_users()),
+    }, indent=2))
+
+
+def cmd_auth_disable(_):
+    cfg = _read_yaml()
+    cfg.setdefault("auth", {})["enabled"] = False
+    _write_yaml(cfg)
+    print(f"auth disabled in {CONFIG_PATH}. Restart the service.")
+    print("Tip: only listen on 127.0.0.1 while auth is off.")
+
+
+def cmd_auth_set_local(_):
+    cfg = _read_yaml()
+    cfg.setdefault("auth", {})
+    cfg["auth"]["enabled"] = True
+    cfg["auth"]["backend"] = "local"
+    _write_yaml(cfg)
+    print("auth enabled, backend=local. Restart the service.")
+
+
+def cmd_user_add(args):
+    pw = args.password or _gen_password()
+    try:
+        uid = auth.create_user(args.name, pw, must_change_pw=args.password is None)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    role = args.role or "viewer"
+    try:
+        auth.grant_role(args.name, "*", role)
+    except ValueError as e:
+        print(f"warn: role grant failed: {e}", file=sys.stderr)
+    print(f"created user '{args.name}' id={uid} role={role}")
+    if args.password is None:
+        print(f"  one-time password: {pw}")
+        print("  user must change at first login")
+
+
+def cmd_user_list(_):
+    users = auth.list_users()
+    if not users:
+        print("(no users)")
+        return
+    print(f"{'USERNAME':<20} {'ENABLED':<8} {'CHG_PW':<8} {'ROLE':<10} {'CREATED':<13}")
+    for u in users:
+        role = auth.role_for(u["id"], "*") or "(none)"
+        print(f"{u['username']:<20} {bool(u['enabled'])!s:<8} "
+              f"{bool(u['must_change_pw'])!s:<8} {role:<10} "
+              f"{u['created_at'] or '':<13}")
+
+
+def cmd_user_del(args):
+    if auth.delete_user(args.name):
+        print(f"deleted user '{args.name}'")
+    else:
+        print(f"no such user: {args.name}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_reset_password(args):
+    pw = args.password or _gen_password()
+    if auth.set_password(args.user, pw, must_change_pw=args.password is None):
+        print(f"password reset for '{args.user}'")
+        if args.password is None:
+            print(f"  one-time password: {pw}")
+            print("  user must change at first login")
+    else:
+        print(f"no such user: {args.user}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_config_get(args):
+    cfg = _read_yaml()
+    cur = cfg
+    for key in args.key.split("."):
+        if not isinstance(cur, dict) or key not in cur:
+            print(f"key not found: {args.key}", file=sys.stderr)
+            sys.exit(1)
+        cur = cur[key]
+    print(json.dumps(cur, indent=2, default=str))
+
+
+def cmd_config_set(args):
+    cfg = _read_yaml()
+    cur = cfg
+    keys = args.key.split(".")
+    for key in keys[:-1]:
+        cur = cur.setdefault(key, {})
+    # Best-effort type coercion: try JSON first
+    try:
+        value = json.loads(args.value)
+    except json.JSONDecodeError:
+        value = args.value
+    cur[keys[-1]] = value
+    _write_yaml(cfg)
+    print(f"set {args.key} = {value!r}")
+
+
+def cmd_config_reset(args):
+    cfg = _read_yaml()
+    cur = cfg
+    keys = args.key.split(".")
+    for key in keys[:-1]:
+        if not isinstance(cur, dict) or key not in cur:
+            print(f"key not present: {args.key}")
+            return
+        cur = cur[key]
+    cur.pop(keys[-1], None)
+    _write_yaml(cfg)
+    print(f"removed {args.key}")
+
+
+def cmd_version(_):
+    print("jt-proxense CLI / schema_version=", db.schema_version())
+
+
+# ---------------------------------------------------------------- argparse
+
+def _parser():
+    p = argparse.ArgumentParser(prog="jt-proxense")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pa = sub.add_parser("auth", help="auth backend control")
+    sa = pa.add_subparsers(dest="action", required=True)
+    sa.add_parser("show").set_defaults(func=cmd_auth_show)
+    sa.add_parser("disable").set_defaults(func=cmd_auth_disable)
+    sa.add_parser("set-local").set_defaults(func=cmd_auth_set_local)
+
+    pu = sub.add_parser("user", help="user management")
+    su = pu.add_subparsers(dest="action", required=True)
+    p_add = su.add_parser("add"); p_add.add_argument("name")
+    p_add.add_argument("--role", choices=["viewer","operator","admin"])
+    p_add.add_argument("--password", help="if omitted, a one-time password is generated")
+    p_add.set_defaults(func=cmd_user_add)
+    su.add_parser("list").set_defaults(func=cmd_user_list)
+    p_del = su.add_parser("del"); p_del.add_argument("name"); p_del.set_defaults(func=cmd_user_del)
+
+    p_reset = sub.add_parser("reset-password")
+    p_reset.add_argument("user")
+    p_reset.add_argument("--password", help="if omitted, a one-time password is generated")
+    p_reset.set_defaults(func=cmd_reset_password)
+
+    pc = sub.add_parser("config", help="config.yaml read/write")
+    sc = pc.add_subparsers(dest="action", required=True)
+    p_get = sc.add_parser("get"); p_get.add_argument("key"); p_get.set_defaults(func=cmd_config_get)
+    p_set = sc.add_parser("set"); p_set.add_argument("key"); p_set.add_argument("value"); p_set.set_defaults(func=cmd_config_set)
+    p_rst = sc.add_parser("reset"); p_rst.add_argument("key"); p_rst.set_defaults(func=cmd_config_reset)
+
+    sub.add_parser("version").set_defaults(func=cmd_version)
+
+    return p
+
+
+def main():
+    args = _parser().parse_args()
+    _bootstrap()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

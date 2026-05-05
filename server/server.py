@@ -16,6 +16,12 @@ import aiohttp_cors
 
 from .config import get_config, save_config, update_config, Config
 from .cluster_manager import cluster_manager
+from . import db
+from . import auth_handlers
+from .middleware import (
+    request_id_middleware, make_auth_middleware, role_required,
+)
+from . import audit
 
 logger = logging.getLogger(__name__)
 
@@ -311,7 +317,11 @@ async def static_handler(request: web.Request) -> web.Response:
 
 def create_app() -> web.Application:
     """Create the aiohttp application"""
-    app = web.Application()
+    config = get_config()
+    auth_enabled = bool(getattr(config, "auth", None) and config.auth.enabled)
+
+    middlewares = [request_id_middleware, make_auth_middleware(auth_enabled)]
+    app = web.Application(middlewares=middlewares)
 
     # Setup CORS
     cors = aiohttp_cors.setup(app, defaults={
@@ -326,18 +336,26 @@ def create_app() -> web.Application:
     # WebSocket route
     app.router.add_get("/ws", websocket_handler)
 
-    # API routes
+    # API routes — config write requires admin (no-op when auth disabled)
     api_routes = [
-        ("GET", "/api/config", get_config_handler),
-        ("POST", "/api/config", update_config_handler),
-        ("GET", "/api/clusters", get_clusters_handler),
-        ("GET", "/api/clusters/{cluster_id}", get_cluster_handler),
-        ("GET", "/api/summary", get_summary_handler),
-        ("GET", "/api/nodes", get_nodes_handler),
-        ("GET", "/api/vms", get_vms_handler),
-        ("GET", "/api/storages", get_storages_handler),
-        ("GET", "/api/ceph", get_ceph_handler),
-        ("GET", "/api/health", get_health_handler),
+        ("GET",  "/api/config",            get_config_handler),
+        ("POST", "/api/config",            role_required("admin")(update_config_handler)),
+        ("GET",  "/api/clusters",          get_clusters_handler),
+        ("GET",  "/api/clusters/{cluster_id}", get_cluster_handler),
+        ("GET",  "/api/summary",           get_summary_handler),
+        ("GET",  "/api/nodes",             get_nodes_handler),
+        ("GET",  "/api/vms",               get_vms_handler),
+        ("GET",  "/api/storages",          get_storages_handler),
+        ("GET",  "/api/ceph",              get_ceph_handler),
+        ("GET",  "/api/health",            get_health_handler),
+        # ----- v0.2 auth / users / audit -----
+        ("POST", "/api/auth/login",        auth_handlers.login_handler),
+        ("POST", "/api/auth/logout",       auth_handlers.logout_handler),
+        ("GET",  "/api/auth/me",           auth_handlers.me_handler),
+        ("GET",  "/api/users",             auth_handlers.users_list_handler),
+        ("POST", "/api/users",             auth_handlers.users_create_handler),
+        ("DELETE","/api/users/{username}", auth_handlers.users_delete_handler),
+        ("GET",  "/api/audit",             auth_handlers.audit_query_handler),
     ]
 
     for method, path, handler in api_routes:
@@ -353,30 +371,51 @@ def create_app() -> web.Application:
     return app
 
 
+async def _bring_up_clusters():
+    """Background task: load and start cluster polling. Runs concurrently
+    with the HTTP server so unreachable PVE doesn't delay UI availability."""
+    try:
+        await cluster_manager.load_clusters()
+        await cluster_manager.start_all()
+        logger.info("cluster polling online")
+    except Exception as e:
+        logger.error("cluster bring-up failed: %s", e, exc_info=True)
+
+
 async def start_server():
-    """Start the HTTP server"""
+    """Start the HTTP server.
+
+    v0.2: HTTP binds FIRST (so /login and /api/health respond instantly even
+    on a fresh box with unreachable PVE), then cluster polling spins up in
+    the background. v0.1 used to block startup on cluster reachability,
+    causing ~10–15 s delay before the UI loaded.
+    """
     config = get_config()
 
-    # Register callback for cluster updates
+    # If auth is on, ensure the SQLite DB and schema exist before serving.
+    if config.auth.enabled:
+        db.configure(config.auth.db_path)
+        db.apply_migrations()
+        logger.info("auth backend=%s, db=%s, schema=%d",
+                    config.auth.backend, config.auth.db_path, db.schema_version())
+    else:
+        logger.warning("auth.enabled=false — service is OPEN to anyone who can reach the port.")
+
+    # Register cluster-update broadcast callback now (handler is idempotent
+    # against the cluster_manager being not-yet-loaded — it just won't fire).
     cluster_manager.add_callback(on_cluster_data_update)
 
-    # Load and start clusters
-    await cluster_manager.load_clusters()
-    await cluster_manager.start_all()
-
-    # Create and start web app
+    # Build app & start HTTP listener BEFORE cluster polling.
     app = create_app()
     runner = web.AppRunner(app)
     await runner.setup()
 
-    site = web.TCPSite(
-        runner,
-        config.server.host,
-        config.server.http_port,
-    )
+    site = web.TCPSite(runner, config.server.host, config.server.http_port)
     await site.start()
+    logger.info(f"HTTP listener up on http://{config.server.host}:{config.server.http_port}")
 
-    logger.info(f"Server started on http://{config.server.host}:{config.server.http_port}")
+    # Cluster polling in the background.
+    asyncio.create_task(_bring_up_clusters())
 
     return runner
 
