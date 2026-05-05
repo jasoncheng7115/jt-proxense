@@ -129,7 +129,9 @@ def verify_code(user_id: int, code: str) -> bool:
 
     `code` may be a 6-digit TOTP code, or a backup code (longer, plaintext).
     """
-    code = (code or "").strip().replace(" ", "").replace("-", "")
+    # Trim whitespace; users sometimes copy "123 456" from authenticator apps.
+    # Do NOT strip hyphens — backup codes (token_urlsafe) may contain them.
+    code = (code or "").strip().replace(" ", "")
     if not code:
         return False
 

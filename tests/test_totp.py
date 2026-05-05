@@ -13,7 +13,7 @@ def _user(name="alice"):
 
 def test_migration_002_applied(db_path):
     """The TOTP columns + table must exist after migrations."""
-    assert db.schema_version() == 2
+    assert db.schema_version() >= 2
     with db.connect_sync() as c:
         cols = {r[1] for r in c.execute("PRAGMA table_info(users)")}
     for col in ("totp_secret", "totp_enabled", "totp_enrolled_at"):

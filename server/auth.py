@@ -145,34 +145,92 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
 
 # ---------------------------------------------------------------- roles
 
-def grant_role(username: str, cluster_id: str, role: str) -> None:
-    """Grant `role` on `cluster_id` ('*' = global) to user. Replaces existing."""
-    if role not in ("viewer", "operator", "admin"):
+_ROLE_RANK = {"viewer": 1, "operator": 2, "admin": 3}
+
+
+def grant_role(username: str, cluster_id: str, role: str,
+               *, vm_pattern: str = "*") -> None:
+    """Grant `role` on `cluster_id` ('*' = global) for VMs matching `vm_pattern`
+    ('*' = any VM). Replaces an existing row with the same triple."""
+    if role not in _ROLE_RANK:
         raise ValueError(f"invalid role: {role}")
     user = get_user_by_username(username)
     if not user:
         raise ValueError(f"no such user: {username}")
     with db.connect_sync() as c:
         c.execute(
-            "INSERT INTO roles (user_id, cluster_id, role, created_at) VALUES (?,?,?,?) "
-            "ON CONFLICT (user_id, cluster_id) DO UPDATE SET role=excluded.role",
-            (user["id"], cluster_id, role, db.now_ms()),
+            "INSERT INTO roles (user_id, cluster_id, vm_pattern, role, created_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT (user_id, cluster_id, vm_pattern) DO UPDATE SET role=excluded.role",
+            (user["id"], cluster_id, vm_pattern, role, db.now_ms()),
         )
 
 
-def get_roles(user_id: int) -> dict[str, str]:
-    """Return {cluster_id: role} mapping. '*' is the global default."""
+def revoke_role(username: str, cluster_id: str, *, vm_pattern: str = "*") -> bool:
+    user = get_user_by_username(username)
+    if not user:
+        return False
+    with db.connect_sync() as c:
+        cur = c.execute(
+            "DELETE FROM roles WHERE user_id=? AND cluster_id=? AND vm_pattern=?",
+            (user["id"], cluster_id, vm_pattern),
+        )
+        return cur.rowcount > 0
+
+
+def get_roles(user_id: int) -> list[dict]:
+    """All role grants for a user as a list of dicts. Returns [] if none.
+
+    Schema returned per row: {cluster_id, vm_pattern, role}.
+    """
     with db.connect_sync() as c:
         rows = c.execute(
-            "SELECT cluster_id, role FROM roles WHERE user_id=?", (user_id,)
+            "SELECT cluster_id, vm_pattern, role FROM roles WHERE user_id=?",
+            (user_id,),
         ).fetchall()
-        return {r["cluster_id"]: r["role"] for r in rows}
+        return [dict(r) for r in rows]
 
 
-def role_for(user_id: int, cluster_id: str) -> Optional[str]:
-    """Effective role on cluster_id: explicit → global default → None."""
-    roles = get_roles(user_id)
-    return roles.get(cluster_id) or roles.get("*")
+def role_for(user_id: int, cluster_id: str,
+             *, vm_name: Optional[str] = None,
+             vm_tags: Optional[list[str]] = None) -> Optional[str]:
+    """Effective role for a user against a target.
+
+    Precedence:
+      1. Filter rows whose cluster_id matches (`==` or `==*`).
+      2. Filter rows whose vm_pattern matches the target VM (or pattern is `*`).
+         Tag patterns: `tag:foo` matches if 'foo' is in vm_tags.
+         Name patterns: fnmatch against vm_name.
+         If no vm_name supplied, only `*` and tag-only rows count
+         (i.e. cluster-level role lookup ignores VM-specific grants).
+      3. Among matches, return the highest-rank role.
+    """
+    import fnmatch
+    rows = get_roles(user_id)
+    if not rows:
+        return None
+
+    matches: list[str] = []
+    for r in rows:
+        # cluster filter
+        if r["cluster_id"] != cluster_id and r["cluster_id"] != "*":
+            continue
+        pat = r["vm_pattern"]
+        if pat == "*":
+            matches.append(r["role"])
+            continue
+        if pat.startswith("tag:"):
+            if vm_tags and pat[4:] in vm_tags:
+                matches.append(r["role"])
+            continue
+        # name pattern
+        if vm_name is not None and fnmatch.fnmatchcase(vm_name, pat):
+            matches.append(r["role"])
+
+    if not matches:
+        return None
+    # Highest rank wins.
+    return max(matches, key=lambda r: _ROLE_RANK.get(r, 0))
 
 
 # ---------------------------------------------------------------- rate limit

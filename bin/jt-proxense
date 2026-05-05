@@ -180,6 +180,38 @@ def cmd_user_reset_totp(args):
         sys.exit(1)
 
 
+def cmd_user_grant(args):
+    """Grant a role on a (cluster, vm-pattern) target. cluster_id='*' = global,
+    vm_pattern='*' = any VM, vm_pattern='tag:foo' = VMs with tag 'foo'."""
+    try:
+        auth.grant_role(args.name, args.cluster, args.role,
+                        vm_pattern=args.vm_pattern)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr); sys.exit(1)
+    print(f"granted: {args.name} on cluster='{args.cluster}' vm_pattern='{args.vm_pattern}' -> {args.role}")
+
+
+def cmd_user_revoke(args):
+    if auth.revoke_role(args.name, args.cluster, vm_pattern=args.vm_pattern):
+        print(f"revoked: {args.name} on cluster='{args.cluster}' vm_pattern='{args.vm_pattern}'")
+    else:
+        print(f"no matching grant for {args.name} on cluster='{args.cluster}'", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_user_roles(args):
+    user = auth.get_user_by_username(args.name)
+    if not user:
+        print(f"no such user: {args.name}", file=sys.stderr); sys.exit(1)
+    rows = auth.get_roles(user["id"])
+    if not rows:
+        print(f"(no roles for {args.name})")
+        return
+    print(f"{'CLUSTER':<20} {'VM_PATTERN':<24} {'ROLE':<10}")
+    for r in rows:
+        print(f"{r['cluster_id']:<20} {r['vm_pattern']:<24} {r['role']:<10}")
+
+
 def cmd_reset_password(args):
     pw = args.password or _gen_password()
     if auth.set_password(args.user, pw, must_change_pw=args.password is None):
@@ -259,6 +291,24 @@ def _parser():
     p_del = su.add_parser("del"); p_del.add_argument("name"); p_del.set_defaults(func=cmd_user_del)
     p_rtotp = su.add_parser("reset-totp"); p_rtotp.add_argument("name")
     p_rtotp.set_defaults(func=cmd_user_reset_totp)
+
+    p_grant = su.add_parser("grant", help="grant a role on a (cluster, vm-pattern) target")
+    p_grant.add_argument("name")
+    p_grant.add_argument("cluster", help="cluster id ('*' for global default)")
+    p_grant.add_argument("role", choices=["viewer","operator","admin"])
+    p_grant.add_argument("--vm-pattern", default="*",
+        help="VM glob (default '*'), or tag:<tag-name> for tag matching")
+    p_grant.set_defaults(func=cmd_user_grant)
+
+    p_rev = su.add_parser("revoke", help="revoke a (cluster, vm-pattern) grant")
+    p_rev.add_argument("name")
+    p_rev.add_argument("cluster")
+    p_rev.add_argument("--vm-pattern", default="*")
+    p_rev.set_defaults(func=cmd_user_revoke)
+
+    p_roles = su.add_parser("roles", help="list role grants for a user")
+    p_roles.add_argument("name")
+    p_roles.set_defaults(func=cmd_user_roles)
 
     p_reset = sub.add_parser("reset-password")
     p_reset.add_argument("user")
