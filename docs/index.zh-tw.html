@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#050810">
+    <meta name="description" content="JT-PROXENSE — 為 Proxmox VE 打造的即時監控系統，採用科幻 cyberpunk 風格介面。多叢集、WebSocket 即時推送、API 容錯切換、單機部署、不上雲、Apache 2.0。">
+    <meta property="og:title" content="JT-PROXENSE — Proxmox VE 監控，cyberpunk 風格">
+    <meta property="og:description" content="即時 Proxmox VE 監控，科幻 cyberpunk UI。多叢集、WebSocket、單機部署、Apache 2.0。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://jasoncheng7115.github.io/jt-proxense/index.zh-tw.html">
+    <meta property="og:image" content="https://jasoncheng7115.github.io/jt-proxense/screenshots/01-dashboard.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css">
+    <title>JT-PROXENSE — Proxmox VE 監控 · Cyberpunk UI</title>
+</head>
+<body>
+
+<!-- ============== NAV ============== -->
+<header class="nav">
+    <div class="container nav-inner">
+        <a href="#" class="nav-brand">
+            <img src="logo.png" alt="">
+            JT-PROXENSE
+            <span class="ver">v0.1.0</span>
+        </a>
+        <nav class="nav-links">
+            <a href="#install">安裝</a>
+            <a href="#features">功能</a>
+            <a href="#screenshots">畫面</a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener">GitHub</a>
+            <a href="index.html" class="nav-lang">English</a>
+        </nav>
+    </div>
+</header>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+    <div class="container">
+        <div class="hero-pill">即時 · PVE 遙測</div>
+        <h1>把你的 Proxmox<br>當成太空船控制台。</h1>
+        <p class="hero-sub">
+            為 Proxmox VE 打造的即時監控系統，採用科幻 cyberpunk 風格介面。
+            六種視圖、WebSocket 即時推送、節點層級 API 容錯切換 &mdash;
+            單機部署，不上雲。
+        </p>
+        <div class="hero-tags">
+            <span>單機部署</span>
+            <span>單一 Linux 主機</span>
+            <span>WebSocket 即時</span>
+            <span>API 容錯切換</span>
+            <span>不上雲</span>
+            <span>Apache 2.0</span>
+        </div>
+        <div class="cta-row">
+            <a href="#install" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+                三秒安裝
+            </a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener" class="btn btn-ghost">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.16-.02-2.11-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.74 2.68 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.62 1.59.23 2.76.12 3.05.73.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .31.21.68.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+                到 GitHub
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- ============== INSTALL ============== -->
+<section id="install">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">三秒安裝</div>
+            <h2>一行指令，systemd 託管，獨立 service user。</h2>
+            <p>安裝程式會建立專用 <code>jt-proxense</code> 系統使用者、佈署強化過的 systemd unit、然後啟動服務。</p>
+        </div>
+
+        <div class="install-card">
+            <div class="os-tabs" role="tablist">
+                <button class="os-tab" role="tab" aria-selected="true" data-os="linux">Linux</button>
+                <button class="os-tab" role="tab" aria-selected="false" data-os="macos" disabled>
+                    macOS<span class="soon">即將</span>
+                </button>
+                <button class="os-tab" role="tab" aria-selected="false" data-os="windows" disabled>
+                    Windows<span class="soon">即將</span>
+                </button>
+            </div>
+
+            <div class="os-panel" data-active="true" data-os="linux">
+                <p>已在 Debian / Ubuntu、RHEL / Rocky、Arch、openSUSE 上測試。需要 sudo 權限，Python 3.10+。</p>
+                <div class="code-block">
+                    <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash">複製</button>
+<span class="prompt">$</span>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
+                </div>
+                <div class="install-tip">
+                    <strong>裝完後：</strong>
+                    編輯 <code>/opt/jt-proxense/config.yaml</code> 填入 PVE 叢集，再 <code>sudo systemctl restart jt-proxense</code>。預設網址：<code>http://&lt;your-server&gt;:8098/</code>。
+                </div>
+            </div>
+
+            <div class="os-panel" data-os="macos">
+                <p>macOS 安裝程式尚未提供 — 規劃在後續版本。</p>
+            </div>
+            <div class="os-panel" data-os="windows">
+                <p>Windows 安裝程式尚未提供 — 規劃在後續版本。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============== DEMO VIDEO ============== -->
+<section id="demo">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">看它動起來</div>
+            <h2>實際叢集遙測，畫面直出。</h2>
+            <p>同時跑五個 PVE 叢集錄製。WebSocket 推送，client 端不做 polling。</p>
+        </div>
+        <div class="demo-frame">
+            <video controls preload="metadata" poster="screenshots/01-dashboard.png">
+                <source src="demo.mp4" type="video/mp4">
+                您的瀏覽器不支援內嵌影片。
+            </video>
+        </div>
+    </div>
+</section>
+
+<!-- ============== FEATURES ============== -->
+<section id="features">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">六種視圖，同一個叢集</div>
+            <h2>用你需要的角度看它。</h2>
+            <p>用一個按鍵切換視圖，每一種都是同一份即時狀態的不同切片。</p>
+        </div>
+
+        <div class="feat-grid">
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+                <h3>Dashboard 概觀</h3>
+                <p>全域總覽。資源儀錶、基礎建設加總、各叢集健康狀態一眼帶過。</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+                    <path d="M3 12h4l2-6 4 12 2-6h6"/>
+                </svg>
+                <h3>Nodes 節點</h3>
+                <p>每個節點獨立的 ECG 心電圖式指標。CPU / 記憶體 / I/O 即時波形。</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="4" height="4"/><rect x="10" y="3" width="4" height="4"/><rect x="17" y="3" width="4" height="4"/>
+                    <rect x="3" y="10" width="4" height="4"/><rect x="10" y="10" width="4" height="4"/><rect x="17" y="10" width="4" height="4"/>
+                    <rect x="3" y="17" width="4" height="4"/><rect x="10" y="17" width="4" height="4"/><rect x="17" y="17" width="4" height="4"/>
+                </svg>
+                <h3>Matrix 矩陣</h3>
+                <p>每個 VM 一個彩色格子。可依狀態篩、依負載排、依節點分組 — 任意密度。</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="3"/>
+                    <line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>
+                </svg>
+                <h3>Radar 雷達</h3>
+                <p>異常偵測雷達。突波、超門檻、離線節點立刻浮現。</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="11" height="11"/><rect x="14" y="3" width="7" height="6"/>
+                    <rect x="14" y="9" width="7" height="5"/><rect x="3" y="14" width="6" height="7"/><rect x="9" y="14" width="12" height="7"/>
+                </svg>
+                <h3>Storage 儲存</h3>
+                <p>每個儲存池一格 treemap，大小依容量、顏色依使用率。壓力一眼可見。</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+                    <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                    <polygon points="12,7 17,9.5 17,14.5 12,17 7,14.5 7,9.5"/>
+                </svg>
+                <h3>Ceph</h3>
+                <p>Ceph 叢集拓撲與即時 IOPS。OSD、Pool、recovery 狀態同畫面。</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<!-- ============== SCREENSHOTS ============== -->
+<section id="screenshots">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">畫面牆</div>
+            <h2>真實工作環境的 11 張截圖。</h2>
+            <p>點任一張可放大。</p>
+        </div>
+
+        <div class="shot-grid">
+            <figure class="shot"><img src="screenshots/01-dashboard.png" alt="五叢集 Dashboard"><figcaption>Dashboard<span class="desc">全域總覽，五個叢集即時</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/02-nodes.png" alt="Node ECG"><figcaption>Nodes 節點<span class="desc">節點 ECG 心電圖式指標</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/03-matrix.png" alt="VM 矩陣"><figcaption>Matrix 矩陣<span class="desc">每個 VM 一個彩色格</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/04-matrix-table.png" alt="矩陣表格模式"><figcaption>Matrix · 表格<span class="desc">可排序 / 篩選的列表模式</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/05-radar.png" alt="異常雷達"><figcaption>Radar 雷達<span class="desc">異常立刻浮現</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/06-storage.png" alt="儲存列表"><figcaption>Storage 儲存<span class="desc">儲存池列表與使用率</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/07-storage-treemap.png" alt="儲存 Treemap"><figcaption>Storage · Treemap<span class="desc">容量依大小、使用率依顏色</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/08-ceph.png" alt="Ceph 叢集"><figcaption>Ceph<span class="desc">即時叢集拓撲 + IOPS</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/09-settings.png" alt="設定面板"><figcaption>Settings 設定<span class="desc">內建叢集設定編輯器</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/10-clusters.png" alt="多叢集"><figcaption>多叢集<span class="desc">五個叢集並排</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/11-chinese.png" alt="繁中介面"><figcaption>i18n<span class="desc">同一介面，繁體中文</span></figcaption></figure>
+        </div>
+    </div>
+</section>
+
+<!-- ============== FOOTER ============== -->
+<footer class="foot">
+    <div class="container">
+        <nav class="foot-links">
+            <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense/blob/main/CHANGELOG_zh-tw.md" target="_blank" rel="noopener">更新記錄</a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a>
+            <a href="index.html">English</a>
+        </nav>
+        <div class="foot-meta">
+            JT-PROXENSE v0.1.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
+        </div>
+    </div>
+</footer>
+
+<!-- lightbox -->
+<div class="lightbox" id="lightbox">
+    <button class="lightbox-close" aria-label="關閉">×</button>
+    <img id="lightbox-img" src="" alt="">
+</div>
+
+<script>
+document.querySelectorAll('.os-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        if (tab.disabled) return;
+        document.querySelectorAll('.os-tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+        const os = tab.dataset.os;
+        document.querySelectorAll('.os-panel').forEach(p => p.setAttribute('data-active', p.dataset.os === os ? 'true' : 'false'));
+    });
+});
+
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(btn.dataset.copy);
+            const orig = btn.textContent;
+            btn.textContent = '已複製';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1400);
+        } catch (e) { /* ignore */ }
+    });
+});
+
+const lb = document.getElementById('lightbox');
+const lbImg = document.getElementById('lightbox-img');
+document.querySelectorAll('.shot').forEach(fig => {
+    fig.addEventListener('click', () => {
+        const img = fig.querySelector('img');
+        lbImg.src = img.src;
+        lbImg.alt = img.alt;
+        lb.setAttribute('data-open', 'true');
+    });
+});
+lb.addEventListener('click', () => lb.setAttribute('data-open', 'false'));
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') lb.setAttribute('data-open', 'false');
+});
+</script>
+
+</body>
+</html>

@@ -256,6 +256,10 @@ class PVEClient:
         """Get VM current status"""
         return await self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current")
 
+    async def get_vm_config(self, node: str, vmid: int) -> dict:
+        """Get VM config (includes disk info)"""
+        return await self._request("GET", f"/nodes/{node}/qemu/{vmid}/config")
+
     async def get_vm_rrddata(
         self, node: str, vmid: int, timeframe: str = "hour", cf: str = "AVERAGE"
     ) -> list:
@@ -273,6 +277,10 @@ class PVEClient:
     async def get_container_status(self, node: str, vmid: int) -> dict:
         """Get container current status"""
         return await self._request("GET", f"/nodes/{node}/lxc/{vmid}/status/current")
+
+    async def get_container_config(self, node: str, vmid: int) -> dict:
+        """Get container config (includes disk info)"""
+        return await self._request("GET", f"/nodes/{node}/lxc/{vmid}/config")
 
     async def get_storage(self, node: str) -> list:
         """Get storage on a node"""

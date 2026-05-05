@@ -1,0 +1,45 @@
+# User configuration with secrets — copy from config.example.yaml
+config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Node.js (only relevant if a contributor runs `npm install` against the repo)
+node_modules/
+npm-debug.log*
+
+# Build output (frontend dist/ IS committed; node-side build artifacts are not)
+*.tsbuildinfo
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Local dev / testing
+.pytest_cache/
+.coverage
+htmlcov/
+tmp/
+
+# Backups
+*.bak
+config_backups/

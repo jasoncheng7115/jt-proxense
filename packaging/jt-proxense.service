@@ -1,0 +1,30 @@
+[Unit]
+Description=JT-PROXENSE — Real-time Proxmox VE Monitoring
+Documentation=https://github.com/jasoncheng7115/jt-proxense
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jt-proxense
+Group=jt-proxense
+WorkingDirectory=/opt/jt-proxense
+ExecStart=/usr/bin/python3 /opt/jt-proxense/run.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/jt-proxense
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#050810">
+    <meta name="description" content="JT-PROXENSE — real-time Proxmox VE monitoring with a sci-fi cyberpunk UI. Multi-cluster, WebSocket live updates, API failover, single Linux box, no cloud, Apache 2.0.">
+    <meta property="og:title" content="JT-PROXENSE — Proxmox VE monitoring, cyberpunk style">
+    <meta property="og:description" content="Real-time Proxmox VE monitoring with a sci-fi cyberpunk UI. Multi-cluster, WebSocket live updates, single Linux box, Apache 2.0.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://jasoncheng7115.github.io/jt-proxense/">
+    <meta property="og:image" content="https://jasoncheng7115.github.io/jt-proxense/screenshots/01-dashboard.png">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css">
+    <title>JT-PROXENSE — Proxmox VE monitoring · cyberpunk UI</title>
+</head>
+<body>
+
+<!-- ============== NAV ============== -->
+<header class="nav">
+    <div class="container nav-inner">
+        <a href="#" class="nav-brand">
+            <img src="logo.png" alt="">
+            JT-PROXENSE
+            <span class="ver">v0.1.0</span>
+        </a>
+        <nav class="nav-links">
+            <a href="#install">Install</a>
+            <a href="#features">Features</a>
+            <a href="#screenshots">Screenshots</a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener">GitHub</a>
+            <a href="index.zh-tw.html" class="nav-lang">繁體中文</a>
+        </nav>
+    </div>
+</header>
+
+<!-- ============== HERO ============== -->
+<section class="hero">
+    <div class="container">
+        <div class="hero-pill">Live · Real-time PVE telemetry</div>
+        <h1>See your Proxmox<br>like a starship.</h1>
+        <p class="hero-sub">
+            Real-time Proxmox VE monitoring with a sci-fi cyberpunk UI.
+            Six views, WebSocket live updates, API failover across nodes &mdash;
+            on a single Linux box, no cloud.
+        </p>
+        <div class="hero-tags">
+            <span>Self-hosted</span>
+            <span>Single Linux box</span>
+            <span>WebSocket live</span>
+            <span>API failover</span>
+            <span>No cloud</span>
+            <span>Apache 2.0</span>
+        </div>
+        <div class="cta-row">
+            <a href="#install" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg>
+                Three-second install
+            </a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener" class="btn btn-ghost">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.16-.02-2.11-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.74 2.68 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.62 1.59.23 2.76.12 3.05.73.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.4-5.25 5.68.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .31.21.68.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+                View on GitHub
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- ============== INSTALL ============== -->
+<section id="install">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">Three-second install</div>
+            <h2>One line. systemd-managed. Service-user-isolated.</h2>
+            <p>The installer creates a dedicated <code>jt-proxense</code> user, drops a hardened systemd unit, and starts the service.</p>
+        </div>
+
+        <div class="install-card">
+            <div class="os-tabs" role="tablist">
+                <button class="os-tab" role="tab" aria-selected="true" data-os="linux">Linux</button>
+                <button class="os-tab" role="tab" aria-selected="false" data-os="macos" disabled>
+                    macOS<span class="soon">soon</span>
+                </button>
+                <button class="os-tab" role="tab" aria-selected="false" data-os="windows" disabled>
+                    Windows<span class="soon">soon</span>
+                </button>
+            </div>
+
+            <div class="os-panel" data-active="true" data-os="linux">
+                <p>Tested on Debian / Ubuntu, RHEL / Rocky, Arch, openSUSE. Requires sudo and Python 3.10+.</p>
+                <div class="code-block">
+                    <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash">Copy</button>
+<span class="prompt">$</span>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
+                </div>
+                <div class="install-tip">
+                    <strong>After install:</strong>
+                    Edit <code>/opt/jt-proxense/config.yaml</code> with your PVE clusters, then <code>sudo systemctl restart jt-proxense</code>. Default URL: <code>http://&lt;your-server&gt;:8098/</code>.
+                </div>
+            </div>
+
+            <div class="os-panel" data-os="macos">
+                <p>macOS installer not available yet — planned for a future release.</p>
+            </div>
+            <div class="os-panel" data-os="windows">
+                <p>Windows installer not available yet — planned for a future release.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============== DEMO VIDEO ============== -->
+<section id="demo">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">See it move</div>
+            <h2>Live cluster telemetry, on-screen.</h2>
+            <p>Recorded against five PVE clusters running side by side. WebSocket push, no polling on the client.</p>
+        </div>
+        <div class="demo-frame">
+            <video controls preload="metadata" poster="screenshots/01-dashboard.png">
+                <source src="demo.mp4" type="video/mp4">
+                Your browser does not support inline video.
+            </video>
+        </div>
+    </div>
+</section>
+
+<!-- ============== FEATURES ============== -->
+<section id="features">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">Six views, one cluster</div>
+            <h2>Look at it the way you need to.</h2>
+            <p>Switch between views with a keystroke. Each is a different lens on the same live state.</p>
+        </div>
+
+        <div class="feat-grid">
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+                <h3>Dashboard</h3>
+                <p>Global overview. Resource gauges, infrastructure totals, and per-cluster health at a glance.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+                    <path d="M3 12h4l2-6 4 12 2-6h6"/>
+                </svg>
+                <h3>Nodes</h3>
+                <p>ECG-style metric monitors per node. CPU / memory / I/O traced as live waveforms.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="4" height="4"/><rect x="10" y="3" width="4" height="4"/><rect x="17" y="3" width="4" height="4"/>
+                    <rect x="3" y="10" width="4" height="4"/><rect x="10" y="10" width="4" height="4"/><rect x="17" y="10" width="4" height="4"/>
+                    <rect x="3" y="17" width="4" height="4"/><rect x="10" y="17" width="4" height="4"/><rect x="17" y="17" width="4" height="4"/>
+                </svg>
+                <h3>Matrix</h3>
+                <p>Every VM as a coloured tile. Filter by state, sort by load, group by node — at any density.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="3"/>
+                    <line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>
+                </svg>
+                <h3>Radar</h3>
+                <p>Anomaly-detection radar. Spikes, threshold breaches, and offline nodes pop into view.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="11" height="11"/><rect x="14" y="3" width="7" height="6"/>
+                    <rect x="14" y="9" width="7" height="5"/><rect x="3" y="14" width="6" height="7"/><rect x="9" y="14" width="12" height="7"/>
+                </svg>
+                <h3>Storage</h3>
+                <p>Treemap of every storage pool, sized by capacity, coloured by usage. Pressure becomes visible.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+                    <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                    <polygon points="12,7 17,9.5 17,14.5 12,17 7,14.5 7,9.5"/>
+                </svg>
+                <h3>Ceph</h3>
+                <p>Ceph cluster topology with live IOPS. OSDs, pools, and recovery state on one canvas.</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<!-- ============== SCREENSHOTS ============== -->
+<section id="screenshots">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">Screen wall</div>
+            <h2>Eleven shots from a real workspace.</h2>
+            <p>Click any tile to enlarge.</p>
+        </div>
+
+        <div class="shot-grid">
+            <figure class="shot"><img src="screenshots/01-dashboard.png" alt="Global dashboard with five clusters"><figcaption>Dashboard<span class="desc">Global overview, five clusters live</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/02-nodes.png" alt="Node ECG monitors"><figcaption>Nodes<span class="desc">Per-node ECG-style metric traces</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/03-matrix.png" alt="VM matrix grid"><figcaption>Matrix<span class="desc">Every VM as a coloured tile</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/04-matrix-table.png" alt="Matrix table view"><figcaption>Matrix · table<span class="desc">Sortable / filterable list mode</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/05-radar.png" alt="Anomaly radar"><figcaption>Radar<span class="desc">Anomalies pop into view</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/06-storage.png" alt="Storage list"><figcaption>Storage<span class="desc">Pool list with usage bars</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/07-storage-treemap.png" alt="Storage treemap"><figcaption>Storage · treemap<span class="desc">Capacity proportional, usage coloured</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/08-ceph.png" alt="Ceph cluster"><figcaption>Ceph<span class="desc">Live cluster topology + IOPS</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/09-settings.png" alt="Settings panel"><figcaption>Settings<span class="desc">In-app cluster config editor</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/10-clusters.png" alt="Multi-cluster view"><figcaption>Multi-cluster<span class="desc">Five clusters side-by-side</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/11-chinese.png" alt="Traditional Chinese locale"><figcaption>i18n<span class="desc">Same UI, 繁體中文</span></figcaption></figure>
+        </div>
+    </div>
+</section>
+
+<!-- ============== FOOTER ============== -->
+<footer class="foot">
+    <div class="container">
+        <nav class="foot-links">
+            <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+            <a href="https://github.com/jasoncheng7115/jt-proxense/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0</a>
+            <a href="index.zh-tw.html">繁體中文</a>
+        </nav>
+        <div class="foot-meta">
+            JT-PROXENSE v0.1.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
+        </div>
+    </div>
+</footer>
+
+<!-- lightbox -->
+<div class="lightbox" id="lightbox">
+    <button class="lightbox-close" aria-label="Close">×</button>
+    <img id="lightbox-img" src="" alt="">
+</div>
+
+<script>
+// OS tab switcher
+document.querySelectorAll('.os-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        if (tab.disabled) return;
+        document.querySelectorAll('.os-tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+        const os = tab.dataset.os;
+        document.querySelectorAll('.os-panel').forEach(p => p.setAttribute('data-active', p.dataset.os === os ? 'true' : 'false'));
+    });
+});
+
+// Copy button
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(btn.dataset.copy);
+            const orig = btn.textContent;
+            btn.textContent = 'Copied';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1400);
+        } catch (e) { /* ignore */ }
+    });
+});
+
+// Lightbox
+const lb = document.getElementById('lightbox');
+const lbImg = document.getElementById('lightbox-img');
+document.querySelectorAll('.shot').forEach(fig => {
+    fig.addEventListener('click', () => {
+        const img = fig.querySelector('img');
+        lbImg.src = img.src;
+        lbImg.alt = img.alt;
+        lb.setAttribute('data-open', 'true');
+    });
+});
+lb.addEventListener('click', () => lb.setAttribute('data-open', 'false'));
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') lb.setAttribute('data-open', 'false');
+});
+</script>
+
+</body>
+</html>

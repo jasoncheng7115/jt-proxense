@@ -21,6 +21,7 @@ from .models import (
     CPUMetrics,
     MemoryMetrics,
     DiskMetrics,
+    DiskConfig,
     NetworkMetrics,
     VMStatus,
     NodeStatus,
@@ -195,6 +196,9 @@ class Cluster:
             # Update node VM/CT counts
             self._update_node_vm_counts()
 
+            # Fetch VM disk configurations
+            await self._fetch_vm_disk_configs()
+
             # Fetch Ceph data if available
             await self._fetch_ceph_data()
 
@@ -223,6 +227,151 @@ class Cluster:
         except Exception as e:
             logger.warning(f"Failed to fetch storage configs: {e}")
         return storage_configs
+
+    async def _fetch_vm_disk_configs(self):
+        """Fetch disk configurations for all VMs/CTs"""
+        for key, vm in self.cache.vms.items():
+            try:
+                node = vm.node
+                vmid = vm.vmid
+
+                if vm.type == "qemu":
+                    config = await self.client.get_vm_config(node, vmid)
+                else:  # lxc
+                    config = await self.client.get_container_config(node, vmid)
+
+                disks = self._parse_disk_config(config, vm.type)
+                vm.disks = disks
+
+            except Exception as e:
+                logger.debug(f"Failed to fetch disk config for {key}: {e}")
+
+    def _parse_disk_config(self, config: dict, vm_type: str) -> list[DiskConfig]:
+        """Parse disk configuration from VM/CT config"""
+        disks = []
+
+        if vm_type == "qemu":
+            # QEMU disk patterns: scsi0, virtio0, ide0, sata0, etc.
+            disk_patterns = ["scsi", "virtio", "ide", "sata", "efidisk", "tpmstate"]
+            for key, value in config.items():
+                for pattern in disk_patterns:
+                    if key.startswith(pattern) and isinstance(value, str):
+                        disk = self._parse_qemu_disk(key, value)
+                        if disk:
+                            disks.append(disk)
+                        break
+        else:
+            # LXC disk patterns: rootfs, mp0, mp1, etc.
+            for key, value in config.items():
+                if (key == "rootfs" or key.startswith("mp")) and isinstance(value, str):
+                    disk = self._parse_lxc_disk(key, value)
+                    if disk:
+                        disks.append(disk)
+
+        # Sort by device name
+        disks.sort(key=lambda d: d.device)
+        return disks
+
+    def _parse_qemu_disk(self, device: str, value: str) -> Optional[DiskConfig]:
+        """Parse QEMU disk config string
+        Format: storage:vm-vmid-disk-N,size=32G,format=raw,...
+        or: storage:iso/filename.iso,media=cdrom,...
+        """
+        try:
+            parts = value.split(",")
+            if not parts:
+                return None
+
+            # First part is storage:volume
+            storage_volume = parts[0]
+            if ":" not in storage_volume:
+                return None
+
+            storage, volume = storage_volume.split(":", 1)
+
+            # Skip CD-ROM/ISO
+            for part in parts:
+                if "media=cdrom" in part:
+                    return None
+
+            # Parse size
+            size_bytes = 0
+            disk_format = "raw"
+            for part in parts:
+                if part.startswith("size="):
+                    size_str = part[5:]
+                    size_bytes = self._parse_size(size_str)
+                elif part.startswith("format="):
+                    disk_format = part[7:]
+
+            # Try to detect format from volume name if not specified
+            if disk_format == "raw" and ".qcow2" in volume:
+                disk_format = "qcow2"
+            elif disk_format == "raw" and ".vmdk" in volume:
+                disk_format = "vmdk"
+
+            return DiskConfig(
+                device=device,
+                storage=storage,
+                size=size_bytes,
+                format=disk_format
+            )
+        except Exception as e:
+            logger.debug(f"Failed to parse disk {device}: {e}")
+            return None
+
+    def _parse_lxc_disk(self, device: str, value: str) -> Optional[DiskConfig]:
+        """Parse LXC disk config string
+        Format: storage:subvol-vmid-disk-N,size=8G,...
+        or: storage:vm-vmid-disk-N,size=8G,...
+        """
+        try:
+            parts = value.split(",")
+            if not parts:
+                return None
+
+            storage_volume = parts[0]
+            if ":" not in storage_volume:
+                return None
+
+            storage, volume = storage_volume.split(":", 1)
+
+            # Parse size
+            size_bytes = 0
+            for part in parts:
+                if part.startswith("size="):
+                    size_str = part[5:]
+                    size_bytes = self._parse_size(size_str)
+
+            # LXC typically uses subvol or raw
+            disk_format = "subvol" if "subvol" in volume else "raw"
+
+            return DiskConfig(
+                device=device,
+                storage=storage,
+                size=size_bytes,
+                format=disk_format
+            )
+        except Exception as e:
+            logger.debug(f"Failed to parse LXC disk {device}: {e}")
+            return None
+
+    def _parse_size(self, size_str: str) -> int:
+        """Parse size string (e.g., '32G', '500M', '1T') to bytes"""
+        try:
+            size_str = size_str.strip().upper()
+            if size_str.endswith("T"):
+                return int(float(size_str[:-1]) * 1024 * 1024 * 1024 * 1024)
+            elif size_str.endswith("G"):
+                return int(float(size_str[:-1]) * 1024 * 1024 * 1024)
+            elif size_str.endswith("M"):
+                return int(float(size_str[:-1]) * 1024 * 1024)
+            elif size_str.endswith("K"):
+                return int(float(size_str[:-1]) * 1024)
+            else:
+                return int(size_str)
+        except:
+            return 0
 
     async def _fetch_cluster_name(self):
         """Fetch the actual PVE cluster name from cluster status"""
@@ -253,6 +402,9 @@ class Cluster:
         try:
             resources = await self.client.get_cluster_resources()
 
+            # Track which VMs are seen in this poll to clean up stale entries
+            seen_vm_keys: set[str] = set()
+
             for resource in resources:
                 res_type = resource.get("type")
 
@@ -260,8 +412,23 @@ class Cluster:
                     await self._update_node_metrics(resource)
                 elif res_type in ("qemu", "lxc"):
                     await self._update_vm_metrics(resource, res_type)
+                    # Track seen VM keys
+                    vmid = resource.get("vmid")
+                    node = resource.get("node", "")
+                    if vmid is not None and node:
+                        seen_vm_keys.add(f"{node}/{vmid}")
                 elif res_type == "storage":
                     await self._update_storage_metrics(resource)
+
+            # Clean up stale VM entries (VMs that were in cache but not in current poll)
+            # This handles cases where a VM was migrated and the old node entry is stale
+            stale_keys = set(self.cache.vms.keys()) - seen_vm_keys
+            for key in stale_keys:
+                logger.debug(f"Removing stale VM entry: {key}")
+                del self.cache.vms[key]
+                # Also clean up network tracker
+                if key in self.cache.vm_network_trackers:
+                    del self.cache.vm_network_trackers[key]
 
             # Fetch running tasks
             await self._fetch_running_tasks()

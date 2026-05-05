@@ -80,6 +80,15 @@ class NetworkMetrics:
 
 
 @dataclass
+class DiskConfig:
+    """Individual disk configuration"""
+    device: str = ""  # scsi0, virtio0, ide0, rootfs, mp0, etc.
+    storage: str = ""  # local-lvm, ceph-pool, etc.
+    size: int = 0  # bytes
+    format: str = ""  # raw, qcow2, vmdk, subvol, etc.
+
+
+@dataclass
 class VMMetrics:
     """Virtual Machine metrics"""
     vmid: int
@@ -92,6 +101,7 @@ class VMMetrics:
     memory: MemoryMetrics = field(default_factory=MemoryMetrics)
     disk: DiskMetrics = field(default_factory=DiskMetrics)
     network: NetworkMetrics = field(default_factory=NetworkMetrics)
+    disks: list[DiskConfig] = field(default_factory=list)  # Individual disk configs
     uptime: int = 0
     template: bool = False
     tags: list[str] = field(default_factory=list)
