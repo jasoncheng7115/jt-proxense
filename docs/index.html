@@ -22,7 +22,7 @@
         <a href="#" class="nav-brand">
             <img src="logo.png" alt="">
             JT-PROXENSE
-            <span class="ver">v0.1.0</span>
+            <span class="ver">v0.2.0</span>
         </a>
         <nav class="nav-links">
             <a href="#install">Install</a>
@@ -178,6 +178,76 @@
     </div>
 </section>
 
+<!-- ============== v0.2 AUTH + CONTROL ============== -->
+<section id="auth">
+    <div class="container">
+        <div class="section-head">
+            <div class="section-eyebrow">v0.2 — auth + control plane</div>
+            <h2>Now with accountability.</h2>
+            <p>Opt-in authentication, audit log, role-based access, VM &amp; LXC lifecycle, all under the same cyberpunk skin. Default behavior unchanged from v0.1 — flip a flag to enable each layer.</p>
+        </div>
+
+        <div class="feat-grid">
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6l-8-4z"/>
+                    <path d="M9 12l2 2 4-4"/>
+                </svg>
+                <h3>Authentication</h3>
+                <p>Argon2id passwords + 12 h sessions, optional PAM backend (system accounts), TOTP 2FA with 8 backup codes. Per-IP brute-force rate limit.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 7h18M3 12h18M3 17h12"/>
+                    <circle cx="20" cy="17" r="2"/>
+                </svg>
+                <h3>Audit log</h3>
+                <p>Append-only SQLite audit trail. Every login, role change, config edit, VM action recorded. CSV export, date filter, expandable detail rows.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M4 21v-1a8 8 0 0 1 16 0v1"/>
+                    <path d="M16 8l2 2 3-3" stroke-width="1.4"/>
+                </svg>
+                <h3>RBAC by VM pattern</h3>
+                <p>Three roles (viewer / operator / admin), scoped per-cluster AND per-VM. Match by name (<code>web-*</code>) or tag (<code>tag:prod</code>). Highest-rank match wins.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <polygon points="6,4 20,12 6,20" fill="currentColor" fill-opacity=".2"/>
+                    <line x1="6" y1="4" x2="6" y2="20"/>
+                </svg>
+                <h3>VM + LXC control</h3>
+                <p>start / stop / shutdown / reboot / suspend / migrate. Bulk operations across mixed VM and CT vmids in one request. Disabled by default — explicit opt-in.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 7l9 -5 9 5"/>
+                    <path d="M3 7v10l9 5 9-5V7"/>
+                    <path d="M9 12h6"/>
+                </svg>
+                <h3>Emergency CLI</h3>
+                <p>If you ever lock yourself out: <code>jt-proxense auth disable</code> works without the service running. Reset passwords, clear lost authenticators, fix bad config — all offline.</p>
+            </article>
+
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="4" width="18" height="14" rx="2"/>
+                    <path d="M7 20h10M12 18v2"/>
+                    <path d="M8 9l3 3-3 3M14 9l3 3-3 3" stroke-width="1.4"/>
+                </svg>
+                <h3>129 tests, ~55 s</h3>
+                <p>pytest covers migrations, auth, audit triggers, role gating, VM + CT dispatch, RBAC, mocked PVE. Runs in CI on every push.</p>
+            </article>
+        </div>
+    </div>
+</section>
+
 <!-- ============== SCREENSHOTS ============== -->
 <section id="screenshots">
     <div class="container">
@@ -213,7 +283,7 @@
             <a href="index.zh-tw.html">繁體中文</a>
         </nav>
         <div class="foot-meta">
-            JT-PROXENSE v0.1.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
+            JT-PROXENSE v0.2.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
         </div>
     </div>
 </footer>

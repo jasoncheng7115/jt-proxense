@@ -1,8 +1,8 @@
-# JT-PROXENSE v0.1.0
+# JT-PROXENSE v0.2.0 (unreleased)
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
-**Real-time Proxmox VE monitoring with a sci-fi cyberpunk UI.**
+**Real-time Proxmox VE monitoring + authenticated control plane, with a sci-fi cyberpunk UI.**
 
 > Multi-cluster · WebSocket live updates · API failover · Single Linux box · No cloud · Apache 2.0
 
@@ -53,18 +53,62 @@ sudo userdel jt-proxense              # optional
 
 ## Security
 
-**This release ships with no built-in authentication.** Anyone who can reach the HTTP port can read cluster metrics and modify the runtime configuration via `POST /api/config`.
+v0.2 ships **opt-in authentication**. By default `auth.enabled: false` and the service behaves exactly like v0.1.0 — anyone reaching the port can read everything and write `/api/config`. Always either bind to `127.0.0.1` only **or** turn auth on **or** put a reverse proxy with auth in front.
 
-Before exposing it beyond `127.0.0.1`:
+### Turning on authentication
 
-- Bind only to a trusted interface, **or**
-- Put it behind a reverse proxy that enforces authentication (nginx + HTTP basic / OAuth proxy / Tailscale ACL / etc.)
+```bash
+sudo jt-proxense auth set-local            # writes auth.enabled=true to config.yaml
+sudo jt-proxense user add admin --role admin
+#  → prints a one-time password, copy it now
+sudo systemctl restart jt-proxense
+```
 
-Local-host authentication is on the roadmap — see [CHANGELOG.md](CHANGELOG.md) "Unreleased".
+Anonymous browser requests are now 302-redirected to a cyberpunk `/login` page; `/api/*` responds with `401 auth_required`.
+
+### Available auth backends
+
+- `auth.backend: local` — Argon2id passwords stored in SQLite. Default.
+- `auth.backend: pam` — system accounts via PAM. Roles still live in our DB.
+
+### Two-factor (TOTP)
+
+Sign in once, click your username in the header → **Two-factor (TOTP) setup**, scan the QR with any authenticator app, save the 8 backup codes. Disable any time with `jt-proxense user reset-totp <username>` if a device is lost.
+
+### Roles
+
+Three: `viewer`, `operator`, `admin`. Per-cluster + per-VM scoping:
+
+```bash
+# Bob is viewer everywhere, but operator on web-* VMs in cluster1
+jt-proxense user grant bob '*' viewer
+jt-proxense user grant bob cluster1 operator --vm-pattern 'web-*'
+
+# Alice is admin on every VM tagged 'prod'
+jt-proxense user grant alice '*' admin --vm-pattern 'tag:prod'
+```
+
+### Audit log
+
+Every state change (login, role grant, config change, VM start/stop/migrate, etc.) is recorded append-only at `/var/lib/jt-proxense/jt-proxense.db`. Admins browse it at <http://your-server:8098/audit> (date range + LIKE filter + CSV export). Retention: `jt-proxense audit purge --days 90`.
+
+### Emergency lock-out recovery
+
+The CLI works without the service running. Per SOP §7.4:
+
+```bash
+sudo jt-proxense auth disable          # flip auth off, restart service
+sudo jt-proxense reset-password admin  # reset to a known password
+sudo jt-proxense user reset-totp admin # clear lost authenticator
+```
+
+See also [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
 
 ---
 
 ## Features
+
+### Monitoring (v0.1.0 +)
 
 - **Multi-cluster management** — monitor any number of PVE clusters from one pane
 - **Real-time updates** — WebSocket push, sub-second metric refresh
@@ -73,10 +117,28 @@ Local-host authentication is on the roadmap — see [CHANGELOG.md](CHANGELOG.md)
 - **Six views**:
   - **Dashboard** — global overview
   - **Nodes** — per-node ECG-style metric monitors
-  - **Matrix** — VM status grid (filterable, sortable, groupable)
+  - **Matrix** — VM + LXC status grid (filterable, sortable, groupable)
   - **Radar** — anomaly-detection radar
   - **Storage** — treemap visualization of pool usage
   - **Ceph** — Ceph cluster topology + IOPS
+
+### Auth + accountability (v0.2)
+
+- **Argon2id passwords + 12 h sliding sessions + per-IP rate limit**
+- **PAM backend** — log in with system accounts
+- **TOTP 2FA** with 8 backup codes
+- **Three roles** with **per-cluster + per-VM-pattern scoping** (`tag:prod`, `web-*`)
+- **Append-only audit log**, viewable at `/audit`, exportable as CSV
+- **Emergency CLI back door** — recover from any auth misconfig without web access
+- All UIs styled to match the rest of the app (cyberpunk, animated, but information-dense)
+
+### VM + container control (v0.3, ships disabled by default)
+
+- start / stop / shutdown / reboot / suspend / resume — VMs **and** LXC containers
+- migrate within cluster (online for VMs, offline + restart-style for CTs)
+- bulk operations on up to 100 vmids per request, auto-detecting VM vs CT
+- tier confirmations (admin required for hard stop / migrate)
+- every action audited; flip `vm_control.enabled: true` in config to enable
 
 ## Reverse proxy (HTTPS 443 → 8098)
 
