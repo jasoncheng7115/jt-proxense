@@ -46,6 +46,36 @@ def _bootstrap():
         db.apply_migrations()
     except Exception as e:
         sys.stderr.write(f"warning: migrations failed: {e}\n")
+    _ensure_db_owner()
+
+
+def _ensure_db_owner():
+    """Hand the DB and its WAL/SHM sidecars back to the service user.
+
+    Why: an operator typically runs the CLI under sudo (root) for emergency
+    recovery, but the running service is `jt-proxense`. If root creates
+    /var/lib/jt-proxense/jt-proxense.db (during the first migration), the
+    service then can't write to it and login lands in 'attempt to write a
+    readonly database'. Fix that here: any file directly inside the DB's
+    parent dir is chown'd back to whoever owns the dir (the service user).
+    """
+    if os.geteuid() != 0:
+        return
+    parent = DB_PATH.parent
+    try:
+        st = parent.stat()
+        target_uid, target_gid = st.st_uid, st.st_gid
+    except OSError:
+        return
+    if target_uid == 0:
+        return  # nothing to do — root-owned dir means no service user
+    for f in parent.iterdir():
+        try:
+            fst = f.stat()
+            if fst.st_uid != target_uid or fst.st_gid != target_gid:
+                os.chown(f, target_uid, target_gid)
+        except OSError as e:
+            sys.stderr.write(f"warning: chown {f} failed: {e}\n")
 
 
 def _read_yaml():
