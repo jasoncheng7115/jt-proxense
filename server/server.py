@@ -20,6 +20,7 @@ from . import db
 from . import auth_handlers
 from . import login_page
 from . import audit_page
+from . import totp_page
 from . import vm_control
 from .middleware import (
     request_id_middleware, make_auth_middleware, role_required,
@@ -379,6 +380,8 @@ def create_app() -> web.Application:
     app.router.add_get("/login", login_page.login_page_handler)
     # v0.2 audit log viewer (admin only — gated by @role_required in handler)
     app.router.add_get("/audit", audit_page.audit_page_handler)
+    # v0.2.x TOTP enrollment / disable page (any authenticated user)
+    app.router.add_get("/totp", totp_page.totp_page_handler)
 
     # Static files (SPA)
     app.router.add_get("/", index_handler)
