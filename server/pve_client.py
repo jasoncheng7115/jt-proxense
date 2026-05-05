@@ -270,6 +270,47 @@ class PVEClient:
             params={"timeframe": timeframe, "cf": cf},
         )
 
+    # ----- VM lifecycle (v0.3+ writes; require write-scoped PVE token) -----
+
+    async def vm_start(self, node: str, vmid: int) -> str:
+        """Power on a VM. Returns the PVE task UPID."""
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/start")
+
+    async def vm_stop(self, node: str, vmid: int) -> str:
+        """Hard power-off (no ACPI). Returns the task UPID."""
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/stop")
+
+    async def vm_shutdown(self, node: str, vmid: int) -> str:
+        """ACPI shutdown — guest OS is asked to shut down gracefully."""
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/shutdown")
+
+    async def vm_reboot(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/reboot")
+
+    async def vm_suspend(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/suspend")
+
+    async def vm_resume(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/resume")
+
+    async def vm_migrate(self, node: str, vmid: int, target: str,
+                         online: bool = True, with_local_disks: bool = False) -> str:
+        """Migrate a VM to another node. Returns task UPID.
+        `online=True` does live migration (requires shared storage or
+        with_local_disks)."""
+        data = {"target": target, "online": 1 if online else 0}
+        if with_local_disks:
+            data["with-local-disks"] = 1
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/migrate", data=data,
+        )
+
+    async def get_task_status(self, node: str, upid: str) -> dict:
+        """Poll the status of a long-running task by its UPID."""
+        return await self._request(
+            "GET", f"/nodes/{node}/tasks/{upid}/status",
+        )
+
     async def get_containers(self, node: str) -> list:
         """Get containers on a node"""
         return await self._request("GET", f"/nodes/{node}/lxc")

@@ -20,6 +20,7 @@ from . import db
 from . import auth_handlers
 from . import login_page
 from . import audit_page
+from . import vm_control
 from .middleware import (
     request_id_middleware, make_auth_middleware, role_required,
 )
@@ -366,6 +367,11 @@ def create_app() -> web.Application:
     ]
 
     for method, path, handler in api_routes:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3 VM control (writes; gated by config.vm_control.enabled at runtime)
+    for method, path, handler in vm_control.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
