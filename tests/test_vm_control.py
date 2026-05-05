@@ -14,11 +14,12 @@ from server.middleware import request_id_middleware, make_auth_middleware
 # ---------------------------------------------------------------- fakes
 
 class _FakeVM:
-    def __init__(self, vmid, node, name, tags=""):
+    def __init__(self, vmid, node, name, tags="", type="qemu"):
         self.vmid = vmid
         self.node = node
         self.name = name
         self.tags = tags
+        self.type = type  # 'qemu' or 'lxc'
 
 
 class _FakeClient:
@@ -26,15 +27,25 @@ class _FakeClient:
     def __init__(self):
         self.calls = []
 
-    async def vm_start(self, node, vmid):    return self._record("start", node, vmid)
-    async def vm_stop(self, node, vmid):     return self._record("stop", node, vmid)
-    async def vm_shutdown(self, node, vmid): return self._record("shutdown", node, vmid)
-    async def vm_reboot(self, node, vmid):   return self._record("reboot", node, vmid)
-    async def vm_suspend(self, node, vmid):  return self._record("suspend", node, vmid)
-    async def vm_resume(self, node, vmid):   return self._record("resume", node, vmid)
+    async def vm_start(self, node, vmid):    return self._record("vm_start", node, vmid)
+    async def vm_stop(self, node, vmid):     return self._record("vm_stop", node, vmid)
+    async def vm_shutdown(self, node, vmid): return self._record("vm_shutdown", node, vmid)
+    async def vm_reboot(self, node, vmid):   return self._record("vm_reboot", node, vmid)
+    async def vm_suspend(self, node, vmid):  return self._record("vm_suspend", node, vmid)
+    async def vm_resume(self, node, vmid):   return self._record("vm_resume", node, vmid)
     async def vm_migrate(self, node, vmid, target, online=True, with_local_disks=False):
-        self.calls.append(("migrate", node, vmid, target, online, with_local_disks))
+        self.calls.append(("vm_migrate", node, vmid, target, online, with_local_disks))
         return f"UPID:fake:0001:migrate-{vmid}"
+    # CT methods
+    async def ct_start(self, node, vmid):    return self._record("ct_start", node, vmid)
+    async def ct_stop(self, node, vmid):     return self._record("ct_stop", node, vmid)
+    async def ct_shutdown(self, node, vmid): return self._record("ct_shutdown", node, vmid)
+    async def ct_reboot(self, node, vmid):   return self._record("ct_reboot", node, vmid)
+    async def ct_suspend(self, node, vmid):  return self._record("ct_suspend", node, vmid)
+    async def ct_resume(self, node, vmid):   return self._record("ct_resume", node, vmid)
+    async def ct_migrate(self, node, vmid, target, online=False, restart=False):
+        self.calls.append(("ct_migrate", node, vmid, target, online, restart))
+        return f"UPID:fake:0001:ct-migrate-{vmid}"
     async def get_task_status(self, node, upid):
         return {"status": "stopped", "exitstatus": "OK"}
 
@@ -59,11 +70,13 @@ class _FakeCluster:
 
 @pytest.fixture
 def fake_cluster(monkeypatch, db_path):
-    """Patch cluster_manager.get_cluster to return a fake cluster with VMs."""
+    """Patch cluster_manager.get_cluster to return a fake cluster with VMs + CTs."""
     cluster = _FakeCluster([
-        _FakeVM(100, "node1", "web-01", "prod;web"),
-        _FakeVM(101, "node1", "db-01",  "prod;db"),
-        _FakeVM(200, "node2", "dev-01", "dev"),
+        _FakeVM(100, "node1", "web-01", "prod;web", type="qemu"),
+        _FakeVM(101, "node1", "db-01",  "prod;db",  type="qemu"),
+        _FakeVM(200, "node2", "dev-01", "dev",      type="qemu"),
+        _FakeVM(300, "node1", "ct-web", "prod",     type="lxc"),
+        _FakeVM(301, "node2", "ct-dev", "dev",      type="lxc"),
     ])
     from server import cluster_manager as cm
     monkeypatch.setattr(cm.cluster_manager, "get_cluster",
@@ -135,7 +148,7 @@ async def test_enabled_calls_pve_when_authorized(fake_cluster, aiohttp_client):
     body = await r.json()
     assert body["ok"] is True
     assert body["upid"].startswith("UPID:fake:")
-    assert ("start", "node1", 100) in fake_cluster.client.calls
+    assert ("vm_start", "node1", 100) in fake_cluster.client.calls
 
 
 # ---------------------------------------------------------------- role gating
@@ -186,7 +199,7 @@ async def test_admin_can_hard_stop(fake_cluster, aiohttp_client):
     await _login_session_cookie(client, "admin")
     r = await client.post("/api/clusters/cluster1/nodes/node1/vms/100/stop")
     assert r.status == 200
-    assert ("stop", "node1", 100) in fake_cluster.client.calls
+    assert ("vm_stop", "node1", 100) in fake_cluster.client.calls
 
 
 @pytest.mark.asyncio
@@ -310,7 +323,7 @@ async def test_migrate_dispatches_to_pve(fake_cluster, aiohttp_client):
     assert r.status == 200
     body = await r.json()
     assert body["target_node"] == "node3"
-    assert ("migrate", "node1", 100, "node3", True, True) in fake_cluster.client.calls
+    assert ("vm_migrate", "node1", 100, "node3", True, True) in fake_cluster.client.calls
 
 
 # ---------------------------------------------------------------- bulk
@@ -327,9 +340,9 @@ async def test_bulk_dispatches_per_vm(fake_cluster, aiohttp_client):
     body = await r.json()
     assert body["count"] == 3
     assert all(item["ok"] for item in body["results"])
-    # All three start calls dispatched to the right nodes
+    # All three are VMs, so they go through vm_start
     actions = [c[0] for c in fake_cluster.client.calls]
-    assert actions.count("start") == 3
+    assert actions.count("vm_start") == 3
 
 
 @pytest.mark.asyncio
@@ -363,8 +376,90 @@ async def test_task_status_polls_pve(fake_cluster, aiohttp_client):
     app = _make_app(auth_enabled=False, vm_control_enabled=True)
     client = await aiohttp_client(app)
     r = await client.get(
-        "/api/clusters/cluster1/nodes/node1/tasks/UPID:fake:0001:start-100"
+        "/api/clusters/cluster1/nodes/node1/tasks/UPID:fake:0001:vm_start-100"
     )
     assert r.status == 200
     body = await r.json()
     assert body["exitstatus"] == "OK"
+
+
+# ---------------------------------------------------------------- CT (LXC)
+
+@pytest.mark.asyncio
+async def test_ct_start_dispatches_to_ct_method(fake_cluster, aiohttp_client):
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post("/api/clusters/cluster1/nodes/node1/cts/300/start")
+    assert r.status == 200
+    body = await r.json()
+    assert body["ok"] is True
+    assert body["upid"].startswith("UPID:fake:")
+    # IMPORTANT: dispatched to ct_start (not vm_start) since cache type=lxc
+    assert ("ct_start", "node1", 300) in fake_cluster.client.calls
+    assert ("vm_start", "node1", 300) not in fake_cluster.client.calls
+
+
+@pytest.mark.asyncio
+async def test_ct_routes_full_set(fake_cluster, aiohttp_client):
+    """Every CT verb dispatches to the matching ct_* method."""
+    app = _make_app(auth_enabled=False, vm_control_enabled=True,
+                    require_admin_destructive=False)
+    client = await aiohttp_client(app)
+    for verb in ("start", "shutdown", "reboot", "suspend", "resume", "stop"):
+        r = await client.post(f"/api/clusters/cluster1/nodes/node1/cts/300/{verb}")
+        assert r.status == 200, f"{verb} got {r.status}"
+        assert (f"ct_{verb}", "node1", 300) in fake_cluster.client.calls
+
+
+@pytest.mark.asyncio
+async def test_ct_migrate_dispatches(fake_cluster, aiohttp_client):
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post(
+        "/api/clusters/cluster1/cts/300/migrate",
+        json={"target_node": "node3", "online": True, "restart": True},
+    )
+    assert r.status == 200
+    assert ("ct_migrate", "node1", 300, "node3", True, True) in fake_cluster.client.calls
+
+
+@pytest.mark.asyncio
+async def test_ct_not_found_404(fake_cluster, aiohttp_client):
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post("/api/clusters/cluster1/nodes/node1/cts/9999/start")
+    assert r.status == 404
+    body = await r.json()
+    assert body["error"] == "ct_not_found"
+
+
+@pytest.mark.asyncio
+async def test_bulk_dispatches_mixed_vm_and_ct(fake_cluster, aiohttp_client):
+    """Bulk endpoint auto-detects VM vs CT per vmid via cache type."""
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post(
+        "/api/clusters/cluster1/vms/bulk",
+        # 100/101 are VMs, 300/301 are CTs
+        json={"action": "start", "vmids": [100, 101, 300, 301]},
+    )
+    assert r.status == 200
+    body = await r.json()
+    assert body["count"] == 4
+    types = {item["vmid"]: item["type"] for item in body["results"]}
+    assert types == {100: "vm", 101: "vm", 300: "ct", 301: "ct"}
+    actions = [c[0] for c in fake_cluster.client.calls]
+    assert actions.count("vm_start") == 2  # 100, 101
+    assert actions.count("ct_start") == 2  # 300, 301
+
+
+@pytest.mark.asyncio
+async def test_ct_audit_uses_ct_action(fake_cluster, aiohttp_client):
+    """Audit row for a CT action says 'ct.start' not 'vm.start'."""
+    from server import audit
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post("/api/clusters/cluster1/nodes/node1/cts/300/start")
+    assert r.status == 200
+    rows = await audit.query(action="ct.start")
+    assert any(row["target"] == "cluster1/node1/ct/300" for row in rows)

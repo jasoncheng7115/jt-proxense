@@ -105,8 +105,13 @@ def _check_vm_role(request: web.Request, cluster_id: str, vm: dict, min_role: st
 
 
 async def _do_action(request: web.Request, action: str, min_role: str,
-                     pve_method_name: str) -> web.Response:
-    """Common dispatch: enable check → resolve VM → role check → call PVE → audit."""
+                     pve_method_name: str, *, url_kind: str = "vm") -> web.Response:
+    """Common dispatch: enable check → resolve VM/CT → role check → call PVE → audit.
+
+    `url_kind` is "vm" or "ct" — only changes target labels in the audit log
+    and the not-found error code. The PVE-side method is selected via
+    `pve_method_name` (vm_start vs ct_start, etc.).
+    """
     if not _enabled():
         return _disabled_response()
 
@@ -120,26 +125,28 @@ async def _do_action(request: web.Request, action: str, min_role: str,
 
     vm = await _resolve_vm_target(cluster_id, vmid)
     if vm is None:
-        return web.json_response({"error": "vm_not_found"}, status=404)
+        return web.json_response({"error": f"{url_kind}_not_found"}, status=404)
     # Allow caller-supplied node to override (handles HA-relocated VMs)
     if vm["node"] != node:
         # We trust the cache's view of the node; client's path may be stale.
         node = vm["node"]
+
+    audit_target = f"{cluster_id}/{node}/{url_kind}/{vmid}"
+    audit_action = action if "." in action else f"{url_kind}.{action}"
 
     deny = _check_vm_role(request, cluster_id, vm, min_role)
     if deny is not None:
         await audit.write(
             user=(request.get("user") or {}).get("username", "anonymous"),
             source_ip=request.get("client_ip", "unknown"),
-            action=f"vm.{action}",
-            target=f"{cluster_id}/{node}/vm/{vmid}",
+            action=audit_action,
+            target=audit_target,
             cluster_id=cluster_id,
             result="denied",
             request_id=request.get("request_id", ""),
         )
         return deny
 
-    # Audit: pending row before the call (so a hung PVE task is still recorded)
     user = (request.get("user") or {}).get("username", "system")
     src_ip = request.get("client_ip", "unknown")
     request_id = request.get("request_id", "")
@@ -149,14 +156,12 @@ async def _do_action(request: web.Request, action: str, min_role: str,
         return web.json_response({"error": "unsupported_action"}, status=500)
 
     try:
-        # Common signature: (node, vmid) → upid
         upid = await method(node, vmid)
     except Exception as e:
-        logger.warning("vm.%s failed for %s/%s/%d: %s", action, cluster_id, node, vmid, e)
+        logger.warning("%s failed for %s/%s/%d: %s", audit_action, cluster_id, node, vmid, e)
         await audit.write(
             user=user, source_ip=src_ip,
-            action=f"vm.{action}",
-            target=f"{cluster_id}/{node}/vm/{vmid}",
+            action=audit_action, target=audit_target,
             cluster_id=cluster_id,
             result=audit.result_error(e),
             request_id=request_id,
@@ -168,12 +173,11 @@ async def _do_action(request: web.Request, action: str, min_role: str,
 
     await audit.write(
         user=user, source_ip=src_ip,
-        action=f"vm.{action}",
-        target=f"{cluster_id}/{node}/vm/{vmid}",
+        action=audit_action, target=audit_target,
         cluster_id=cluster_id,
         result="ok", request_id=request_id,
     )
-    return web.json_response({"ok": True, "upid": upid, "vm": vm})
+    return web.json_response({"ok": True, "upid": upid, url_kind: vm})
 
 
 # ---------------------------------------------------------------- handlers
@@ -203,6 +207,81 @@ async def vm_resume_handler(request: web.Request) -> web.Response:
 async def vm_stop_handler(request: web.Request) -> web.Response:
     min_role = "admin" if _require_admin_for_destructive() else "operator"
     return await _do_action(request, "stop", min_role, "vm_stop")
+
+
+# ---------------------------------------------------------------- LXC handlers
+
+async def ct_start_handler(request: web.Request) -> web.Response:
+    return await _do_action(request, "ct.start", "operator", "ct_start", url_kind="ct")
+
+async def ct_shutdown_handler(request: web.Request) -> web.Response:
+    return await _do_action(request, "ct.shutdown", "operator", "ct_shutdown", url_kind="ct")
+
+async def ct_reboot_handler(request: web.Request) -> web.Response:
+    return await _do_action(request, "ct.reboot", "operator", "ct_reboot", url_kind="ct")
+
+async def ct_suspend_handler(request: web.Request) -> web.Response:
+    return await _do_action(request, "ct.suspend", "operator", "ct_suspend", url_kind="ct")
+
+async def ct_resume_handler(request: web.Request) -> web.Response:
+    return await _do_action(request, "ct.resume", "operator", "ct_resume", url_kind="ct")
+
+async def ct_stop_handler(request: web.Request) -> web.Response:
+    min_role = "admin" if _require_admin_for_destructive() else "operator"
+    return await _do_action(request, "ct.stop", min_role, "ct_stop", url_kind="ct")
+
+
+async def ct_migrate_handler(request: web.Request) -> web.Response:
+    """LXC migrate (offline by default; online via restart=true)."""
+    if not _enabled():
+        return _disabled_response()
+    cluster_id = request.match_info["cluster_id"]
+    vmid = int(request.match_info["vmid"])
+    cluster = cluster_manager.get_cluster(cluster_id)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    target = body.get("target_node") or ""
+    online = bool(body.get("online", False))
+    restart = bool(body.get("restart", False))
+    if not target:
+        return web.json_response({"error": "missing_target_node"}, status=400)
+
+    vm = await _resolve_vm_target(cluster_id, vmid)
+    if vm is None:
+        return web.json_response({"error": "ct_not_found"}, status=404)
+
+    min_role = "admin" if _require_admin_for_destructive() else "operator"
+    deny = _check_vm_role(request, cluster_id, vm, min_role)
+    if deny is not None:
+        return deny
+
+    user = (request.get("user") or {}).get("username", "system")
+    src_ip = request.get("client_ip", "unknown")
+    request_id = request.get("request_id", "")
+    try:
+        upid = await cluster.client.ct_migrate(
+            vm["node"], vmid, target=target, online=online, restart=restart,
+        )
+    except Exception as e:
+        await audit.write(
+            user=user, source_ip=src_ip, action="ct.migrate",
+            target=f"{cluster_id}/{vm['node']}->{target}/ct/{vmid}",
+            cluster_id=cluster_id, result=audit.result_error(e),
+            request_id=request_id,
+            params={"target": target, "online": online, "restart": restart},
+        )
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(
+        user=user, source_ip=src_ip, action="ct.migrate",
+        target=f"{cluster_id}/{vm['node']}->{target}/ct/{vmid}",
+        cluster_id=cluster_id, result="ok", request_id=request_id,
+        params={"target": target, "online": online, "restart": restart},
+    )
+    return web.json_response({"ok": True, "upid": upid, "ct": vm, "target_node": target})
 
 
 async def vm_migrate_handler(request: web.Request) -> web.Response:
@@ -278,10 +357,35 @@ async def task_status_handler(request: web.Request) -> web.Response:
 
 # ---------------------------------------------------------------- bulk ops (B1)
 
+async def _resolve_vm_with_type(cluster_id: str, vmid: int):
+    """Like _resolve_vm_target but also returns the type ('qemu' or 'lxc')
+    by reading the cache record's `.type` field."""
+    cluster = cluster_manager.get_cluster(cluster_id)
+    if cluster is None:
+        return None
+    for key, vm in cluster.cache.vms.items():
+        if int(vm.vmid) == int(vmid):
+            tags = []
+            raw_tags = getattr(vm, "tags", "") or ""
+            if isinstance(raw_tags, str):
+                tags = [t.strip() for t in raw_tags.split(";") if t.strip()]
+            elif isinstance(raw_tags, list):
+                tags = list(raw_tags)
+            return {
+                "node": getattr(vm, "node", ""),
+                "name": getattr(vm, "name", "") or f"vm-{vmid}",
+                "tags": tags,
+                "type": getattr(vm, "type", "qemu"),  # 'qemu' or 'lxc'
+            }
+    return None
+
+
 async def vm_bulk_handler(request: web.Request) -> web.Response:
     """POST /api/clusters/{cid}/vms/bulk
     body: {"action": "start|stop|...", "vmids": [100,101,...]}
-    Fans out N tasks; emits one audit row per target plus a parent batch entry.
+    Fans out N tasks; auto-detects VM vs CT per vmid and dispatches to
+    vm_* or ct_* PVE methods accordingly.
+    Emits one parent batch entry + one audit row per target.
     """
     if not _enabled():
         return _disabled_response()
@@ -302,7 +406,6 @@ async def vm_bulk_handler(request: web.Request) -> web.Response:
     if len(vmids) > 100:
         return web.json_response({"error": "too_many", "limit": 100}, status=400)
 
-    pve_method_name = f"vm_{action}"
     min_role = "admin" if (action == "stop" and _require_admin_for_destructive()) else "operator"
 
     user = (request.get("user") or {}).get("username", "system")
@@ -312,7 +415,7 @@ async def vm_bulk_handler(request: web.Request) -> web.Response:
     batch_id = secrets.token_urlsafe(9)
 
     await audit.write(
-        user=user, source_ip=src_ip, action=f"vm.bulk.{action}",
+        user=user, source_ip=src_ip, action=f"bulk.{action}",
         target=f"{cluster_id}/batch/{batch_id}",
         cluster_id=cluster_id, result="pending", request_id=request_id,
         params={"vmids": vmids, "count": len(vmids)},
@@ -320,30 +423,35 @@ async def vm_bulk_handler(request: web.Request) -> web.Response:
 
     results = []
     for vmid in vmids:
-        vm = await _resolve_vm_target(cluster_id, vmid)
+        vm = await _resolve_vm_with_type(cluster_id, vmid)
         if vm is None:
-            results.append({"vmid": vmid, "ok": False, "error": "vm_not_found"})
+            results.append({"vmid": vmid, "ok": False, "error": "not_found"})
             continue
         deny = _check_vm_role(request, cluster_id, vm, min_role)
         if deny is not None:
             results.append({"vmid": vmid, "ok": False, "error": "forbidden"})
             continue
+        kind = "ct" if vm["type"] == "lxc" else "vm"
+        pve_method_name = f"{kind}_{action}"
+        method = getattr(cluster.client, pve_method_name, None)
+        if method is None:
+            results.append({"vmid": vmid, "ok": False, "error": f"unsupported_action_for_{kind}"})
+            continue
         try:
-            method = getattr(cluster.client, pve_method_name)
             upid = await method(vm["node"], vmid)
-            results.append({"vmid": vmid, "ok": True, "upid": upid})
+            results.append({"vmid": vmid, "type": kind, "ok": True, "upid": upid})
             await audit.write(
-                user=user, source_ip=src_ip, action=f"vm.{action}",
-                target=f"{cluster_id}/{vm['node']}/vm/{vmid}",
+                user=user, source_ip=src_ip, action=f"{kind}.{action}",
+                target=f"{cluster_id}/{vm['node']}/{kind}/{vmid}",
                 cluster_id=cluster_id, result="ok",
                 request_id=request_id,
                 params={"batch_id": batch_id},
             )
         except Exception as e:
-            results.append({"vmid": vmid, "ok": False, "error": str(e)})
+            results.append({"vmid": vmid, "type": kind, "ok": False, "error": str(e)})
             await audit.write(
-                user=user, source_ip=src_ip, action=f"vm.{action}",
-                target=f"{cluster_id}/{vm['node']}/vm/{vmid}",
+                user=user, source_ip=src_ip, action=f"{kind}.{action}",
+                target=f"{cluster_id}/{vm['node']}/{kind}/{vmid}",
                 cluster_id=cluster_id, result=audit.result_error(e),
                 request_id=request_id,
                 params={"batch_id": batch_id},
@@ -359,6 +467,7 @@ async def vm_bulk_handler(request: web.Request) -> web.Response:
 # ---------------------------------------------------------------- routes
 
 ROUTES = [
+    # VM lifecycle
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/start",    vm_start_handler),
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/stop",     vm_stop_handler),
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/shutdown", vm_shutdown_handler),
@@ -366,6 +475,16 @@ ROUTES = [
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/suspend",  vm_suspend_handler),
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/resume",   vm_resume_handler),
     ("POST", "/api/clusters/{cluster_id}/vms/{vmid}/migrate",               vm_migrate_handler),
+    # LXC container lifecycle (parallel to VM, same RBAC + audit pattern)
+    ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/start",    ct_start_handler),
+    ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/stop",     ct_stop_handler),
+    ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/shutdown", ct_shutdown_handler),
+    ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/reboot",   ct_reboot_handler),
+    ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/suspend",  ct_suspend_handler),
+    ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/resume",   ct_resume_handler),
+    ("POST", "/api/clusters/{cluster_id}/cts/{vmid}/migrate",               ct_migrate_handler),
+    # Bulk: auto-detects VM vs CT per vmid via cluster cache lookup
     ("POST", "/api/clusters/{cluster_id}/vms/bulk",                         vm_bulk_handler),
+    # Task status polling (works for both VM and CT tasks — UPID format is same)
     ("GET",  "/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}",        task_status_handler),
 ]

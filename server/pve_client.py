@@ -311,6 +311,38 @@ class PVEClient:
             "GET", f"/nodes/{node}/tasks/{upid}/status",
         )
 
+    # ----- LXC container lifecycle (v0.3+ writes; mirror of vm_*) -----
+
+    async def ct_start(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/start")
+
+    async def ct_stop(self, node: str, vmid: int) -> str:
+        """Hard stop (no graceful shutdown)."""
+        return await self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/stop")
+
+    async def ct_shutdown(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/shutdown")
+
+    async def ct_reboot(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/reboot")
+
+    async def ct_suspend(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/suspend")
+
+    async def ct_resume(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/lxc/{vmid}/status/resume")
+
+    async def ct_migrate(self, node: str, vmid: int, target: str,
+                         online: bool = False, restart: bool = False) -> str:
+        """LXC migrate. PVE supports offline migration always, online via
+        restart=1 (which stops + starts on target)."""
+        data = {"target": target}
+        if online: data["online"] = 1
+        if restart: data["restart"] = 1
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc/{vmid}/migrate", data=data,
+        )
+
     async def get_containers(self, node: str) -> list:
         """Get containers on a node"""
         return await self._request("GET", f"/nodes/{node}/lxc")
