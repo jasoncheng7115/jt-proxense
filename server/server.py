@@ -223,21 +223,32 @@ async def get_nodes_handler(request: web.Request) -> web.Response:
 
 
 def _to_jsonable(obj):
-    """Recursively convert dataclasses (which `vars(obj)` can leave nested
-    inside the __dict__) into plain dict/list/scalar so json.dumps works.
+    """Recursively convert dataclasses + Enums (and the cache models that
+    contain both) into plain dict/list/scalar so json.dumps works.
 
     The cache models include nested dataclasses (CPUMetrics, MemoryMetrics,
-    DiskMetrics, …); those weren't JSON-serializable until polling started
-    populating them, which was the latent bug exposed by the new tokens."""
+    …) and Enum fields (VMStatus, NodeStatus). Those weren't JSON-serializable
+    until polling started populating them — the latent bug exposed once the
+    new Administrator tokens started filling the cache properly."""
     import dataclasses
+    import enum
+    # Enum: unwrap to value (handles VMStatus.RUNNING → "running")
+    if isinstance(obj, enum.Enum):
+        return obj.value
+    # Dataclass instance: deep-convert via asdict, then re-walk in case any
+    # leaf fields are Enums or further dataclasses asdict already inlined.
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {k: _to_jsonable(v) for k, v in dataclasses.asdict(obj).items()}
     if isinstance(obj, dict):
         return {str(k): _to_jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set)):
         return [_to_jsonable(v) for v in obj]
-    if hasattr(obj, "__dict__") and not isinstance(obj, type):
-        return {k: _to_jsonable(v) for k, v in vars(obj).items()}
+    # Plain Python object with attributes — but NOT a class, NOT an Enum.
+    if (hasattr(obj, "__dict__")
+            and not isinstance(obj, type)
+            and not isinstance(obj, enum.Enum)):
+        return {k: _to_jsonable(v) for k, v in vars(obj).items()
+                if not k.startswith("_")}
     return obj
 
 
