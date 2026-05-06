@@ -4,7 +4,7 @@
 
 **為 Proxmox VE 打造的即時監控系統，採用科幻 cyberpunk 風格介面。**
 
-> 多叢集 · WebSocket 即時推送 · API 容錯切換 · 單機部署 · 不上雲 · Apache 2.0
+> 多叢集 · API 容錯切換 · 單機部署 · Apache 2.0
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
@@ -70,7 +70,7 @@ sudo userdel jt-proxense              # 可選
 - **即時更新** — WebSocket 推送，亞秒級指標刷新
 - **API 容錯切換** — 每個叢集可指定多個節點，按 `priority` 自動切換
 - **Cyberpunk UI** — 深色主題、霓虹點綴、可選粒子 / 動畫層
-- **六種視圖**：
+- **六種畫面**：
   - **Dashboard 概觀** — 全域總覽
   - **Nodes 節點** — 節點 ECG 心電圖式指標
   - **Matrix 矩陣** — VM 狀態格（可篩選 / 排序 / 分組）
