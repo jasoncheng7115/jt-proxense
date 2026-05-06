@@ -39,7 +39,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ### 新增
 
-- **六種視覺化視圖**：Dashboard 概觀、Nodes 節點（ECG 心電圖式指標）、Matrix 矩陣（VM 格）、Radar 雷達（異常偵測）、Storage 儲存（treemap）、Ceph（叢集拓撲）。
+- **六種視覺化畫面**：Dashboard 概觀、Nodes 節點（ECG 心電圖式指標）、Matrix 矩陣（VM 格）、Radar 雷達（異常偵測）、Storage 儲存（treemap）、Ceph（叢集拓撲）。
 - **多叢集 polling**，每個叢集依 `priority` 順序做 API failover；單一節點異常不會拖累該叢集整體資料更新。
 - **WebSocket 即時推送** — 用戶端取得叢集狀態增量，無須重新 poll。
 - **一行 Linux 安裝腳本**（`install.sh`），具備：

@@ -4,7 +4,7 @@
 
 **Real-time Proxmox VE monitoring + authenticated control plane, with a sci-fi cyberpunk UI.**
 
-> Multi-cluster · WebSocket live updates · API failover · Single Linux box · No cloud · Apache 2.0
+> Multi-cluster · API failover · Single Linux box · Apache 2.0
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
