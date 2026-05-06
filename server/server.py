@@ -213,13 +213,32 @@ async def get_nodes_handler(request: web.Request) -> web.Response:
     if cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster:
-            nodes = {k: v.__dict__ for k, v in cluster.cache.nodes.items()}
+            nodes = {k: _to_jsonable(v) for k, v in cluster.cache.nodes.items()}
     else:
         for cid, cluster in cluster_manager.clusters.items():
             for key, node in cluster.cache.nodes.items():
-                nodes[f"{cid}/{key}"] = node.__dict__
+                nodes[f"{cid}/{key}"] = _to_jsonable(node)
 
     return web.json_response(nodes)
+
+
+def _to_jsonable(obj):
+    """Recursively convert dataclasses (which `vars(obj)` can leave nested
+    inside the __dict__) into plain dict/list/scalar so json.dumps works.
+
+    The cache models include nested dataclasses (CPUMetrics, MemoryMetrics,
+    DiskMetrics, …); those weren't JSON-serializable until polling started
+    populating them, which was the latent bug exposed by the new tokens."""
+    import dataclasses
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {k: _to_jsonable(v) for k, v in dataclasses.asdict(obj).items()}
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_jsonable(v) for v in obj]
+    if hasattr(obj, "__dict__") and not isinstance(obj, type):
+        return {k: _to_jsonable(v) for k, v in vars(obj).items()}
+    return obj
 
 
 async def get_vms_handler(request: web.Request) -> web.Response:
@@ -230,11 +249,11 @@ async def get_vms_handler(request: web.Request) -> web.Response:
     if cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster:
-            vms = {k: v.__dict__ for k, v in cluster.cache.vms.items()}
+            vms = {k: _to_jsonable(v) for k, v in cluster.cache.vms.items()}
     else:
         for cid, cluster in cluster_manager.clusters.items():
             for key, vm in cluster.cache.vms.items():
-                vms[f"{cid}/{key}"] = vm.__dict__
+                vms[f"{cid}/{key}"] = _to_jsonable(vm)
 
     return web.json_response(vms)
 
@@ -247,11 +266,11 @@ async def get_storages_handler(request: web.Request) -> web.Response:
     if cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster:
-            storages = {k: v.__dict__ for k, v in cluster.cache.storages.items()}
+            storages = {k: _to_jsonable(v) for k, v in cluster.cache.storages.items()}
     else:
         for cid, cluster in cluster_manager.clusters.items():
             for key, storage in cluster.cache.storages.items():
-                storages[f"{cid}/{key}"] = storage.__dict__
+                storages[f"{cid}/{key}"] = _to_jsonable(storage)
 
     return web.json_response(storages)
 
@@ -264,11 +283,11 @@ async def get_ceph_handler(request: web.Request) -> web.Response:
     if cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster and cluster.cache.ceph:
-            ceph_data[cluster_id] = cluster.cache.ceph.__dict__
+            ceph_data[cluster_id] = _to_jsonable(cluster.cache.ceph)
     else:
         for cid, cluster in cluster_manager.clusters.items():
             if cluster.cache.ceph:
-                ceph_data[cid] = cluster.cache.ceph.__dict__
+                ceph_data[cid] = _to_jsonable(cluster.cache.ceph)
 
     return web.json_response(ceph_data)
 
