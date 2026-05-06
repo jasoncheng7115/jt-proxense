@@ -1,10 +1,10 @@
-# JT-PROXENSE v0.2.0（尚未發布）
+# JT-PROXENSE v0.1.0
 
 > English version: [README.md](README.md)
 
-**為 Proxmox VE 打造的即時監控 + 認證控制平面，採用科幻 cyberpunk 風格介面。**
+**為 Proxmox VE 打造的即時監控系統，採用科幻 cyberpunk 風格介面。**
 
-> 多叢集 · API 容錯切換 · 單機部署 · Apache 2.0
+> 多叢集 · WebSocket 即時推送 · API 容錯切換 · 單機部署 · 不上雲 · Apache 2.0
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
@@ -53,92 +53,30 @@ sudo userdel jt-proxense              # 可選
 
 ## 安全性
 
-v0.2 提供**可選的認證機制**。預設 `auth.enabled: false`，行為與 v0.1.0 相同 — 任何能連到 HTTP port 的人都能讀取叢集指標、並透過 `POST /api/config` 修改執行時設定。對外開放前請選一條：綁定 `127.0.0.1`、開啟認證、或放在認證反向代理後。
+**此版本不含內建認證機制。** 任何能連到 HTTP port 的人都能讀取叢集指標、並透過 `POST /api/config` 修改執行時設定。
 
-### 啟用認證
+對外曝光前請：
 
-```bash
-sudo jt-proxense auth set-local            # 寫入 auth.enabled=true 到 config.yaml
-sudo jt-proxense user add admin --role admin
-#  → 印出一次性密碼，請立刻保存
-sudo systemctl restart jt-proxense
-```
+- 只綁定可信介面，**或**
+- 放在強制認證的反向代理後（nginx + HTTP basic / OAuth proxy / Tailscale ACL 等）
 
-之後匿名瀏覽器請求會被 302 導向 cyberpunk 風格的 `/login` 頁；`/api/*` 回 `401 auth_required`。
-
-### 可用認證後端
-
-- `auth.backend: local` — Argon2id 雜湊密碼存於 SQLite。預設。
-- `auth.backend: pam` — 透過 PAM 認證系統帳號。角色仍由本服務管理。
-
-### 雙因素認證（TOTP）
-
-登入後從 header 點使用者名稱 → **Two-factor (TOTP) setup**，用任何 authenticator app 掃 QR，保存 8 組備用代碼。設備遺失時用 `jt-proxense user reset-totp <username>` 清除。
-
-### 角色
-
-三種：`viewer`、`operator`、`admin`。可逐叢集 + 逐 VM 範圍授權：
-
-```bash
-# Bob 全域 viewer，但 cluster1 中 web-* VM 是 operator
-jt-proxense user grant bob '*' viewer
-jt-proxense user grant bob cluster1 operator --vm-pattern 'web-*'
-
-# Alice 對任何 tag 為 'prod' 的 VM 是 admin
-jt-proxense user grant alice '*' admin --vm-pattern 'tag:prod'
-```
-
-### 稽核日誌
-
-每個狀態變更（登入、角色授權、設定修改、VM 開關機/遷移等）都附加式記錄在 `/var/lib/jt-proxense/jt-proxense.db`。Admin 可在 <http://your-server:8098/audit> 瀏覽（日期區間 + LIKE 過濾 + CSV 匯出）。保留期限：`jt-proxense audit purge --days 90`。
-
-### 緊急鎖死復原
-
-CLI 不需要服務在跑也能用。SOP §7.4 鐵則：
-
-```bash
-sudo jt-proxense auth disable          # 關掉認證、重啟服務
-sudo jt-proxense reset-password admin  # 重設成已知密碼
-sudo jt-proxense user reset-totp admin # 清除遺失的 authenticator
-```
-
-威脅模型與漏洞回報請見 [SECURITY.md](SECURITY.md)。
+本機認證（local-only auth）已列入 roadmap，請見 [CHANGELOG.md](CHANGELOG.md) 的 "Unreleased" 段落。
 
 ---
 
 ## 功能特色
 
-### 監控（v0.1.0+）
-
 - **多叢集管理** — 從同一介面監看多個 PVE 叢集
 - **即時更新** — WebSocket 推送，亞秒級指標刷新
 - **API 容錯切換** — 每個叢集可指定多個節點，按 `priority` 自動切換
 - **Cyberpunk UI** — 深色主題、霓虹點綴、可選粒子 / 動畫層
-- **六種畫面**：
+- **六種視圖**：
   - **Dashboard 概觀** — 全域總覽
   - **Nodes 節點** — 節點 ECG 心電圖式指標
-  - **Matrix 矩陣** — VM + LXC 狀態格（可篩選 / 排序 / 分組）
+  - **Matrix 矩陣** — VM 狀態格（可篩選 / 排序 / 分組）
   - **Radar 雷達** — 異常偵測雷達
   - **Storage 儲存** — 儲存池 treemap 視覺化
   - **Ceph** — Ceph 叢集拓撲與 IOPS
-
-### 認證 + 可追溯性（v0.2）
-
-- **Argon2id 密碼 + 12 小時滑動 session + per-IP 速率限制**
-- **PAM 後端** — 用系統帳號登入
-- **TOTP 雙因素認證**，含 8 組單次備用碼
-- **三種角色**支援**逐叢集 + 逐 VM-pattern 範圍授權**（`tag:prod`、`web-*`）
-- **附加式稽核日誌**，可在 `/audit` 瀏覽、CSV 匯出
-- **緊急 CLI 後門** — 認證設定錯誤也能無 web 復原
-- 所有 UI 統一 cyberpunk 風格、有動畫，但表格保持資訊密度
-
-### VM + 容器控制（v0.3，預設關閉）
-
-- 開機 / 關機 / 重啟 / 暫停 / 恢復 — VM **與** LXC 容器
-- 叢集內遷移（VM 線上、CT offline 或 restart-style）
-- 批次操作最多 100 個 vmid / 次，自動分辨 VM vs CT
-- Tier 確認（hard stop / migrate 需 admin）
-- 每個動作都進稽核日誌；改 `vm_control.enabled: true` 即啟用
 
 ## 反向代理（HTTPS 443 → 8098）
 

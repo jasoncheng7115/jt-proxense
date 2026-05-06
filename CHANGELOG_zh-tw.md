@@ -8,28 +8,11 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
-## [Unreleased] — v0.2 開發中於 `v0.2-auth` 分支
+## [Unreleased]
 
-### 新增（預覽，僅在 feature branch，尚未進 `main`）
+### 規劃中
 
-- **本機認證後端**：Argon2id 雜湊、32-byte session ID、12 小時滑動視窗、5 次/IP/5 分鐘登入失敗速率限制。預設關閉（`auth.enabled: false`），保留 v0.1 行為。
-- **角色式存取控制**（RBAC）：三種角色 `viewer` / `operator` / `admin`，可逐叢集授權（`*` 表全域預設）。
-- **稽核日誌**（SQLite，附加式不可改）：每個會變更狀態的 endpoint 寫一筆 — 使用者、時間戳、來源 IP、動作、參數雜湊（請求 body 本身**永不**存進來）、結果、請求關聯 ID。資料庫層 trigger 拒絕 UPDATE / DELETE。
-- **緊急 CLI 後門** `/usr/local/bin/jt-proxense`（SOP §7.4 鐵則 — 任何可能鎖死操作者的功能必備）。子命令：`auth show / disable / set-local`、`user add / list / del`、`reset-password`、`config get / set / reset`。直接操作 SQLite + config.yaml，**不需要服務在跑**。
-- **Cyberpunk 風格登入頁**於 `/login`（純 HTML + CSS，不用重 build React）。啟用 auth 時，匿名請求 `/` 會 302 導向 `/login`。
-- **Forward-only SQL migration 機制**（`server/db.py`）：第一個 migration 建立 `users`、`sessions`、`roles`、`audit_log`、`failed_logins`、`schema_version` 等表。
-
-### 變更
-
-- **HTTP listener 改在 cluster polling 之前綁定**。v0.1 全新安裝若 PVE 不可達會等 ~12 秒才開始服務；現在 `/api/health` 與 `/login` 立刻可達。
-
-### 規劃中（尚未實作）
-
-- VM 操作端點（開機 / 關機 / 遷移 / console）— v0.3。
-- ESXi 叢集支援（先唯讀）— v0.4。
-- ESXi → PVE 分鐘級停機遷移（CBT 增量同步）— v0.5。
-
----
+- **本機認證機制** — 可選的 basic auth，只監聽 `127.0.0.1`，認證對象為系統帳號。將同時提供緊急 CLI 後門（`jt-proxense auth disable`、`jt-proxense reset-password <user>`），以免認證設定錯誤把管理員自己鎖在主機外。
 
 ---
 
@@ -39,7 +22,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ### 新增
 
-- **六種視覺化畫面**：Dashboard 概觀、Nodes 節點（ECG 心電圖式指標）、Matrix 矩陣（VM 格）、Radar 雷達（異常偵測）、Storage 儲存（treemap）、Ceph（叢集拓撲）。
+- **六種視覺化視圖**：Dashboard 概觀、Nodes 節點（ECG 心電圖式指標）、Matrix 矩陣（VM 格）、Radar 雷達（異常偵測）、Storage 儲存（treemap）、Ceph（叢集拓撲）。
 - **多叢集 polling**，每個叢集依 `priority` 順序做 API failover；單一節點異常不會拖累該叢集整體資料更新。
 - **WebSocket 即時推送** — 用戶端取得叢集狀態增量，無須重新 poll。
 - **一行 Linux 安裝腳本**（`install.sh`），具備：
