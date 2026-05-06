@@ -27,6 +27,10 @@ from . import vm_control
 from . import pdm_resources
 from . import pdm_backups
 from . import pdm_cluster
+from . import pdm_remote_migrate
+from . import pdm_vm_ext
+from . import console_proxy
+from . import console_page
 from . import notifications_handlers
 from . import audit_forwarder
 from .middleware import (
@@ -433,6 +437,26 @@ def create_app() -> web.Application:
     for method, path, handler in notifications_handlers.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
+
+    # v0.3.x cross-cluster (remote) migrate
+    for method, path, handler in pdm_remote_migrate.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x extended VM ops (snapshot / clone / template / delete / config)
+    for method, path, handler in pdm_vm_ext.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x noVNC console: WS bridge + server-rendered page
+    app.router.add_get(
+        "/api/console/{cluster_id}/{node}/{vmid}/ws",
+        console_proxy.console_ws_handler,
+    )
+    app.router.add_get(
+        "/console/{cluster_id}/{node}/{vmid}",
+        console_page.console_page_handler,
+    )
 
     # v0.2 login page (always public; the SPA root is gated by auth middleware)
     app.router.add_get("/login", login_page.login_page_handler)

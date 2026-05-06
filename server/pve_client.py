@@ -294,15 +294,135 @@ class PVEClient:
         return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/resume")
 
     async def vm_migrate(self, node: str, vmid: int, target: str,
-                         online: bool = True, with_local_disks: bool = False) -> str:
-        """Migrate a VM to another node. Returns task UPID.
-        `online=True` does live migration (requires shared storage or
-        with_local_disks)."""
+                         online: bool = True, with_local_disks: bool = False,
+                         migration_network: str | None = None) -> str:
+        """Migrate a VM to another node within the same cluster. Returns task UPID.
+
+        `online=True` does live migration (requires shared storage or with_local_disks).
+        `migration_network` optionally pins the data transfer onto a specific
+        CIDR — the operator's high-bandwidth migration network. PVE looks up
+        which interface on each node carries that subnet.
+        """
         data = {"target": target, "online": 1 if online else 0}
         if with_local_disks:
             data["with-local-disks"] = 1
+        if migration_network:
+            data["migration_network"] = migration_network
         return await self._request(
             "POST", f"/nodes/{node}/qemu/{vmid}/migrate", data=data,
+        )
+
+    async def vm_remote_migrate(
+        self, node: str, vmid: int, *,
+        target_endpoint: str,
+        target_vmid: int,
+        target_bridge: str,
+        target_storage: str,
+        online: bool = True,
+        delete_source: bool = False,
+        bwlimit: int | None = None,
+    ) -> str:
+        """PVE 8 cross-cluster ('remote') migrate.
+
+        target_endpoint (string built by the caller): 'apitoken=PVEAPIToken=<USER!TOKEN=SECRET>,
+            host=<IP_OR_HOSTNAME>,fingerprint=<SHA256_HEX>,port=8006'
+        target_vmid: VM id to assign on the target cluster (auto-pick or operator-chosen).
+        target_bridge: 'src=dst[;src=dst...]' mapping (e.g. 'vmbr0=vmbr0').
+        target_storage: 'src=dst[;src=dst...]' mapping for each VM disk's storage.
+        delete_source: if True, source VM is removed after a successful migrate
+            (PVE term for "move" vs "copy"). Default False = leave source intact.
+        """
+        data = {
+            "target-endpoint": target_endpoint,
+            "target-vmid": target_vmid,
+            "target-bridge": target_bridge,
+            "target-storage": target_storage,
+            "online": 1 if online else 0,
+            "delete": 1 if delete_source else 0,
+        }
+        if bwlimit:
+            data["bwlimit"] = bwlimit
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/remote_migrate", data=data,
+        )
+
+    # --- Snapshots / clone / template / delete (full VM lifecycle) ---
+
+    async def vm_reset(self, node: str, vmid: int) -> str:
+        """Hard reset (button-style power cycle). UPID returned."""
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/reset")
+
+    async def vm_list_snapshots(self, node: str, vmid: int) -> list:
+        return await self._request("GET", f"/nodes/{node}/qemu/{vmid}/snapshot")
+
+    async def vm_take_snapshot(self, node: str, vmid: int, snapname: str,
+                               description: str = "", vmstate: bool = False) -> str:
+        data = {"snapname": snapname, "description": description,
+                "vmstate": 1 if vmstate else 0}
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/snapshot", data=data,
+        )
+
+    async def vm_delete_snapshot(self, node: str, vmid: int, snapname: str) -> str:
+        return await self._request(
+            "DELETE", f"/nodes/{node}/qemu/{vmid}/snapshot/{snapname}",
+        )
+
+    async def vm_rollback_snapshot(self, node: str, vmid: int, snapname: str) -> str:
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback",
+        )
+
+    async def vm_clone(self, node: str, vmid: int, *,
+                       newid: int, name: str = "", target_node: str | None = None,
+                       full: bool = False, storage: str | None = None,
+                       snapname: str | None = None) -> str:
+        data = {"newid": newid, "full": 1 if full else 0}
+        if name: data["name"] = name
+        if target_node: data["target"] = target_node
+        if storage: data["storage"] = storage
+        if snapname: data["snapname"] = snapname
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/clone", data=data,
+        )
+
+    async def vm_to_template(self, node: str, vmid: int) -> str:
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/template")
+
+    async def vm_delete(self, node: str, vmid: int, *, purge: bool = False,
+                        skiplock: bool = False) -> str:
+        params = {}
+        if purge: params["purge"] = 1
+        if skiplock: params["skiplock"] = 1
+        return await self._request(
+            "DELETE", f"/nodes/{node}/qemu/{vmid}", params=params,
+        )
+
+    async def vm_update_config(self, node: str, vmid: int, **fields) -> dict:
+        """Update VM config. PVE returns {} on async update (uses background
+        task) or directly applies for simple fields."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/qemu/{vmid}/config", data=fields,
+        )
+
+    # --- noVNC / console ---
+
+    async def vm_vncproxy(self, node: str, vmid: int, *,
+                          websocket: bool = True, generate_password: bool = False) -> dict:
+        """Get a noVNC ticket. Returns {ticket, port, user, cert, ...}.
+        Pass websocket=True (default) for browser noVNC. The ticket is single-use
+        and expires within ~30 s if not used."""
+        data = {"websocket": 1 if websocket else 0,
+                "generate-password": 1 if generate_password else 0}
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/vncproxy", data=data,
+        )
+
+    async def ct_vncproxy(self, node: str, vmid: int, *,
+                          websocket: bool = True) -> dict:
+        data = {"websocket": 1 if websocket else 0}
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc/{vmid}/vncproxy", data=data,
         )
 
     async def get_task_status(self, node: str, upid: str) -> dict:
