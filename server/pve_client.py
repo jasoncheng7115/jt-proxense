@@ -343,6 +343,241 @@ class PVEClient:
             "POST", f"/nodes/{node}/lxc/{vmid}/migrate", data=data,
         )
 
+    # ----- Tags + pools (PDM-style, v0.3.x) -----
+
+    async def list_pools(self) -> list:
+        """All resource pools in the cluster."""
+        return await self._request("GET", "/pools")
+
+    async def create_pool(self, poolid: str, comment: str = "") -> None:
+        await self._request("POST", "/pools", data={"poolid": poolid, "comment": comment})
+
+    async def delete_pool(self, poolid: str) -> None:
+        await self._request("DELETE", f"/pools/{poolid}")
+
+    async def update_pool(self, poolid: str, *, vms: str | None = None,
+                          storage: str | None = None, delete: bool = False) -> None:
+        """Add/remove VMs and storages to/from a pool. `vms` and `storage`
+        are comma-separated lists of vmids / storage ids per PVE convention.
+        delete=True removes them; otherwise adds."""
+        data: dict = {}
+        if vms is not None:
+            data["vms"] = vms
+        if storage is not None:
+            data["storage"] = storage
+        if delete:
+            data["delete"] = 1
+        await self._request("PUT", f"/pools/{poolid}", data=data)
+
+    async def set_vm_tags(self, node: str, vmid: int, tags: str) -> None:
+        """Replace the VM's tag list. PVE separates tags by ';'."""
+        await self._request(
+            "PUT", f"/nodes/{node}/qemu/{vmid}/config",
+            data={"tags": tags},
+        )
+
+    async def set_ct_tags(self, node: str, vmid: int, tags: str) -> None:
+        await self._request(
+            "PUT", f"/nodes/{node}/lxc/{vmid}/config",
+            data={"tags": tags},
+        )
+
+    # ----- Backups (vzdump + storage content listing) -----
+
+    async def list_backup_jobs(self) -> list:
+        """Cluster-level scheduled backup jobs."""
+        return await self._request("GET", "/cluster/backup")
+
+    async def get_backup_job(self, job_id: str) -> dict:
+        return await self._request("GET", f"/cluster/backup/{job_id}")
+
+    async def create_backup_job(self, *, schedule: str, storage: str,
+                                vmid: str | None = None, all_vms: bool = False,
+                                node: str | None = None,
+                                mode: str = "snapshot",
+                                **kwargs) -> None:
+        data = {"schedule": schedule, "storage": storage, "mode": mode}
+        if vmid: data["vmid"] = vmid
+        if all_vms: data["all"] = 1
+        if node: data["node"] = node
+        for k, v in kwargs.items():
+            data[k] = v
+        await self._request("POST", "/cluster/backup", data=data)
+
+    async def delete_backup_job(self, job_id: str) -> None:
+        await self._request("DELETE", f"/cluster/backup/{job_id}")
+
+    async def trigger_backup(self, node: str, *, vmid: int | str,
+                             storage: str, mode: str = "snapshot",
+                             compress: str = "zstd", **kwargs) -> str:
+        """Run an ad-hoc vzdump on `node`. Returns the task UPID.
+        Accepts a single vmid or a comma-separated list."""
+        data = {"vmid": str(vmid), "storage": storage,
+                "mode": mode, "compress": compress}
+        for k, v in kwargs.items():
+            data[k] = v
+        return await self._request("POST", f"/nodes/{node}/vzdump", data=data)
+
+    async def list_storage_content(self, node: str, storage: str,
+                                   content: str = "backup") -> list:
+        """Backups (or other content) currently stored on `storage`."""
+        return await self._request(
+            "GET", f"/nodes/{node}/storage/{storage}/content",
+            params={"content": content},
+        )
+
+    async def delete_storage_content(self, node: str, storage: str,
+                                     volume: str) -> str:
+        """Delete a stored volume (e.g. an old backup file). Returns task UPID."""
+        return await self._request(
+            "DELETE", f"/nodes/{node}/storage/{storage}/content/{volume}",
+        )
+
+    async def restore_backup(self, node: str, *, vmid: int, storage: str,
+                             archive: str, vm_type: str = "qemu",
+                             force: bool = False, **kwargs) -> str:
+        """Restore a backup file into a (new or existing) vmid. Returns UPID.
+        `vm_type` is 'qemu' or 'lxc' — selects the right PVE endpoint."""
+        path = "qemu" if vm_type == "qemu" else "lxc"
+        data = {"vmid": vmid, "archive": f"{storage}:{archive}",
+                "force": 1 if force else 0}
+        for k, v in kwargs.items():
+            data[k] = v
+        return await self._request("POST", f"/nodes/{node}/{path}", data=data)
+
+    # ----- Apt updates manager -----
+
+    async def list_apt_updates(self, node: str) -> list:
+        """Pending apt-get upgrades on a node."""
+        return await self._request("GET", f"/nodes/{node}/apt/update")
+
+    async def apt_refresh(self, node: str) -> str:
+        """Trigger apt-get update. Returns task UPID."""
+        return await self._request("POST", f"/nodes/{node}/apt/update")
+
+    async def apt_upgrade(self, node: str) -> str:
+        """Apply pending updates. Returns task UPID."""
+        return await self._request("POST", f"/nodes/{node}/apt/upgrade")
+
+    # ----- ACME certificate management -----
+
+    async def list_acme_accounts(self) -> list:
+        return await self._request("GET", "/cluster/acme/account")
+
+    async def create_acme_account(self, name: str, contact: str, *,
+                                  directory: str = "https://acme-v02.api.letsencrypt.org/directory",
+                                  tos_url: str = "") -> str:
+        data = {"name": name, "contact": contact, "directory": directory}
+        if tos_url:
+            data["tos_url"] = tos_url
+        return await self._request("POST", "/cluster/acme/account", data=data)
+
+    async def request_acme_cert(self, node: str, *, force: bool = False) -> str:
+        """Order/renew a certificate for the given node. Returns task UPID."""
+        data = {"force": 1 if force else 0}
+        return await self._request("POST", f"/nodes/{node}/certificates/acme/certificate", data=data)
+
+    # ----- HA group management -----
+
+    async def list_ha_groups(self) -> list:
+        return await self._request("GET", "/cluster/ha/groups")
+
+    async def create_ha_group(self, group: str, nodes: str, *,
+                              restricted: bool = False, nofailback: bool = False,
+                              comment: str = "") -> None:
+        data = {"group": group, "nodes": nodes,
+                "restricted": 1 if restricted else 0,
+                "nofailback": 1 if nofailback else 0}
+        if comment:
+            data["comment"] = comment
+        await self._request("POST", "/cluster/ha/groups", data=data)
+
+    async def delete_ha_group(self, group: str) -> None:
+        await self._request("DELETE", f"/cluster/ha/groups/{group}")
+
+    async def list_ha_resources(self) -> list:
+        return await self._request("GET", "/cluster/ha/resources")
+
+    async def add_ha_resource(self, sid: str, *, group: str | None = None,
+                              state: str = "started", comment: str = "") -> None:
+        """sid is e.g. 'vm:100' or 'ct:101'."""
+        data = {"sid": sid, "state": state}
+        if group:
+            data["group"] = group
+        if comment:
+            data["comment"] = comment
+        await self._request("POST", "/cluster/ha/resources", data=data)
+
+    async def delete_ha_resource(self, sid: str) -> None:
+        # PVE accepts sid in the URL path
+        await self._request("DELETE", f"/cluster/ha/resources/{sid}")
+
+    # ----- Firewall (cluster-level) -----
+
+    async def list_cluster_firewall_rules(self) -> list:
+        return await self._request("GET", "/cluster/firewall/rules")
+
+    async def add_cluster_firewall_rule(self, *, action: str, type: str = "in",
+                                        enable: bool = True,
+                                        source: str = "", dest: str = "",
+                                        proto: str = "", dport: str = "",
+                                        comment: str = "") -> None:
+        data = {"action": action, "type": type, "enable": 1 if enable else 0}
+        for k, v in (("source", source), ("dest", dest), ("proto", proto),
+                     ("dport", dport), ("comment", comment)):
+            if v:
+                data[k] = v
+        await self._request("POST", "/cluster/firewall/rules", data=data)
+
+    async def delete_cluster_firewall_rule(self, pos: int) -> None:
+        await self._request("DELETE", f"/cluster/firewall/rules/{pos}")
+
+    # ----- Firewall (VM-level) -----
+
+    async def list_vm_firewall_rules(self, node: str, vmid: int, vm_type: str = "qemu") -> list:
+        path = "qemu" if vm_type == "qemu" else "lxc"
+        return await self._request("GET", f"/nodes/{node}/{path}/{vmid}/firewall/rules")
+
+    async def add_vm_firewall_rule(self, node: str, vmid: int, vm_type: str, **kwargs) -> None:
+        path = "qemu" if vm_type == "qemu" else "lxc"
+        await self._request("POST", f"/nodes/{node}/{path}/{vmid}/firewall/rules", data=kwargs)
+
+    async def delete_vm_firewall_rule(self, node: str, vmid: int, vm_type: str, pos: int) -> None:
+        path = "qemu" if vm_type == "qemu" else "lxc"
+        await self._request("DELETE", f"/nodes/{node}/{path}/{vmid}/firewall/rules/{pos}")
+
+    # ----- SDN (read-only first; write needs reload semantics) -----
+
+    async def list_sdn_zones(self) -> list:
+        return await self._request("GET", "/cluster/sdn/zones")
+
+    async def list_sdn_vnets(self) -> list:
+        return await self._request("GET", "/cluster/sdn/vnets")
+
+    async def list_sdn_subnets(self, vnet: str) -> list:
+        return await self._request("GET", f"/cluster/sdn/vnets/{vnet}/subnets")
+
+    async def reload_sdn(self) -> str:
+        """Apply pending SDN configuration. Returns task UPID."""
+        return await self._request("POST", "/cluster/sdn")
+
+    # ----- Storage replication -----
+
+    async def list_replication_jobs(self) -> list:
+        return await self._request("GET", "/cluster/replication")
+
+    async def create_replication_job(self, *, id: str, target: str, schedule: str,
+                                     rate: int | None = None, comment: str = "") -> None:
+        data = {"id": id, "target": target, "schedule": schedule, "type": "local"}
+        if rate is not None:
+            data["rate"] = rate
+        if comment:
+            data["comment"] = comment
+        await self._request("POST", "/cluster/replication", data=data)
+
+    async def delete_replication_job(self, job_id: str) -> None:
+        await self._request("DELETE", f"/cluster/replication/{job_id}")
+
     async def get_containers(self, node: str) -> list:
         """Get containers on a node"""
         return await self._request("GET", f"/nodes/{node}/lxc")

@@ -24,6 +24,10 @@ from . import totp_page
 from . import account_page
 from . import sessions_page
 from . import vm_control
+from . import pdm_resources
+from . import pdm_backups
+from . import pdm_cluster
+from . import notifications_handlers
 from . import audit_forwarder
 from .middleware import (
     request_id_middleware, security_headers_middleware,
@@ -407,6 +411,26 @@ def create_app() -> web.Application:
 
     # v0.3 VM control (writes; gated by config.vm_control.enabled at runtime)
     for method, path, handler in vm_control.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x PDM-style resource management (pools + tags). Admin-only at handler.
+    for method, path, handler in pdm_resources.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x backup orchestration
+    for method, path, handler in pdm_backups.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x apt + ACME + HA + firewall + SDN + replication
+    for method, path, handler in pdm_cluster.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x notification channels + rules
+    for method, path, handler in notifications_handlers.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

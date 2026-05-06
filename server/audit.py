@@ -77,18 +77,27 @@ async def write(
     except Exception as e:
         logger.warning("audit write failed: action=%s user=%s err=%s", action, user, e)
 
+    row_dict = {
+        "ts_ms": ts, "user": user, "source_ip": source_ip,
+        "cluster_id": cluster_id, "action": action, "target": target,
+        "params_hash": ph, "result": result, "request_id": request_id,
+    }
+
     # Best-effort external forwarding (non-blocking, never raises).
     try:
         from . import audit_forwarder
         fwd = audit_forwarder.get_forwarder()
         if fwd is not None:
-            fwd.submit({
-                "ts_ms": ts, "user": user, "source_ip": source_ip,
-                "cluster_id": cluster_id, "action": action, "target": target,
-                "params_hash": ph, "result": result, "request_id": request_id,
-            })
+            fwd.submit(row_dict)
     except Exception as e:
         logger.warning("audit forward submit failed: %s", e)
+
+    # Notifications fan-out (rules → webhook/email channels).
+    try:
+        from . import notifications
+        notifications.dispatch(row_dict)
+    except Exception as e:
+        logger.warning("notification dispatch failed: %s", e)
 
 
 async def query(
