@@ -40,6 +40,50 @@ CONFIG_PATH = Path(os.environ.get("JTPROXENSE_CONFIG", "/opt/jt-proxense/config.
 DB_PATH = Path(os.environ.get("JTPROXENSE_DB_PATH", "/var/lib/jt-proxense/jt-proxense.db"))
 
 
+def _cli_actor() -> str:
+    """Identify whoever's running the CLI for audit purposes.
+
+    Order: SUDO_USER (the operator behind sudo) → USER → 'cli'. This means
+    `sudo jt-proxense ...` records the human's username, not just 'root'.
+    """
+    return os.environ.get("SUDO_USER") or os.environ.get("USER") or "cli"
+
+
+def _cli_audit(action: str, *, target: str = "", result: str = "ok", params=None):
+    """Append an audit row from the CLI without going through the running
+    service. Synchronous SQLite via db.connect_sync. Best-effort: a missing
+    DB or migration failure is logged to stderr but does not abort the CLI
+    command (the CLI's job is recovery, not audit-or-die)."""
+    try:
+        import hashlib, json, time
+        params_hash = None
+        if params is not None:
+            try:
+                canon = json.dumps(params, sort_keys=True, separators=(",", ":"), default=str)
+                params_hash = hashlib.sha256(canon.encode()).hexdigest()
+            except Exception:
+                pass
+        with db.connect_sync() as c:
+            c.execute(
+                "INSERT INTO audit_log "
+                "(ts, user, source_ip, cluster_id, action, target, params_hash, result, request_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    int(time.time() * 1000),
+                    _cli_actor(),
+                    "cli",
+                    None,
+                    action,
+                    target or None,
+                    params_hash,
+                    result,
+                    f"cli-{secrets.token_urlsafe(6)}",
+                ),
+            )
+    except Exception as e:
+        sys.stderr.write(f"warning: audit write failed: {e}\n")
+
+
 def _bootstrap():
     db.configure(DB_PATH)
     try:
@@ -116,6 +160,7 @@ def cmd_auth_disable(_):
     cfg = _read_yaml()
     cfg.setdefault("auth", {})["enabled"] = False
     _write_yaml(cfg)
+    _cli_audit("auth.disable", target="config.yaml")
     print(f"auth disabled in {CONFIG_PATH}. Restart the service.")
     print("Tip: only listen on 127.0.0.1 while auth is off.")
 
@@ -126,6 +171,7 @@ def cmd_auth_set_local(_):
     cfg["auth"]["enabled"] = True
     cfg["auth"]["backend"] = "local"
     _write_yaml(cfg)
+    _cli_audit("auth.set-local", target="config.yaml")
     print("auth enabled, backend=local. Restart the service.")
 
 
@@ -134,6 +180,7 @@ def cmd_user_add(args):
     try:
         uid = auth.create_user(args.name, pw, must_change_pw=args.password is None)
     except ValueError as e:
+        _cli_audit("user.create", target=args.name, result="error:ValueError")
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
     role = args.role or "viewer"
@@ -141,6 +188,7 @@ def cmd_user_add(args):
         auth.grant_role(args.name, "*", role)
     except ValueError as e:
         print(f"warn: role grant failed: {e}", file=sys.stderr)
+    _cli_audit("user.create", target=args.name, params={"role": role, "must_change_pw": args.password is None})
     print(f"created user '{args.name}' id={uid} role={role}")
     if args.password is None:
         print(f"  one-time password: {pw}")
@@ -162,8 +210,10 @@ def cmd_user_list(_):
 
 def cmd_user_del(args):
     if auth.delete_user(args.name):
+        _cli_audit("user.delete", target=args.name)
         print(f"deleted user '{args.name}'")
     else:
+        _cli_audit("user.delete", target=args.name, result="error:NotFound")
         print(f"no such user: {args.name}", file=sys.stderr)
         sys.exit(1)
 
@@ -174,8 +224,10 @@ def cmd_user_reset_totp(args):
     follow up with the user to re-enroll on next login."""
     from server import totp as totp_mod
     if totp_mod.disable(args.name):
+        _cli_audit("auth.totp.reset", target=args.name)
         print(f"TOTP disabled for '{args.name}' — they should re-enroll at next login")
     else:
+        _cli_audit("auth.totp.reset", target=args.name, result="error:NotFound")
         print(f"no such user: {args.name}", file=sys.stderr)
         sys.exit(1)
 
@@ -187,14 +239,20 @@ def cmd_user_grant(args):
         auth.grant_role(args.name, args.cluster, args.role,
                         vm_pattern=args.vm_pattern)
     except ValueError as e:
+        _cli_audit("role.grant", target=f"{args.name}@{args.cluster}/{args.vm_pattern}", result="error:ValueError")
         print(f"error: {e}", file=sys.stderr); sys.exit(1)
+    _cli_audit("role.grant",
+               target=f"{args.name}@{args.cluster}/{args.vm_pattern}",
+               params={"role": args.role})
     print(f"granted: {args.name} on cluster='{args.cluster}' vm_pattern='{args.vm_pattern}' -> {args.role}")
 
 
 def cmd_user_revoke(args):
     if auth.revoke_role(args.name, args.cluster, vm_pattern=args.vm_pattern):
+        _cli_audit("role.revoke", target=f"{args.name}@{args.cluster}/{args.vm_pattern}")
         print(f"revoked: {args.name} on cluster='{args.cluster}' vm_pattern='{args.vm_pattern}'")
     else:
+        _cli_audit("role.revoke", target=f"{args.name}@{args.cluster}/{args.vm_pattern}", result="error:NotFound")
         print(f"no matching grant for {args.name} on cluster='{args.cluster}'", file=sys.stderr)
         sys.exit(1)
 
@@ -215,11 +273,14 @@ def cmd_user_roles(args):
 def cmd_reset_password(args):
     pw = args.password or _gen_password()
     if auth.set_password(args.user, pw, must_change_pw=args.password is None):
+        _cli_audit("auth.reset_password", target=args.user,
+                   params={"must_change_pw": args.password is None})
         print(f"password reset for '{args.user}'")
         if args.password is None:
             print(f"  one-time password: {pw}")
             print("  user must change at first login")
     else:
+        _cli_audit("auth.reset_password", target=args.user, result="error:NotFound")
         print(f"no such user: {args.user}", file=sys.stderr)
         sys.exit(1)
 
@@ -248,6 +309,7 @@ def cmd_config_set(args):
         value = args.value
     cur[keys[-1]] = value
     _write_yaml(cfg)
+    _cli_audit("config.set", target=args.key)  # value not stored — could be sensitive
     print(f"set {args.key} = {value!r}")
 
 
@@ -262,6 +324,7 @@ def cmd_config_reset(args):
         cur = cur[key]
     cur.pop(keys[-1], None)
     _write_yaml(cfg)
+    _cli_audit("config.reset", target=args.key)
     print(f"removed {args.key}")
 
 
@@ -293,6 +356,9 @@ def cmd_audit_purge(args):
         n = audit_mod.purge_before_sync(cutoff)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr); sys.exit(1)
+    # Audit the purge AFTER it runs so the audit row itself isn't deleted.
+    _cli_audit("audit.purge", target=f"before={cutoff}",
+               params={"cutoff_ts_ms": cutoff, "removed": n})
     print(f"  removed: {n} rows")
 
 

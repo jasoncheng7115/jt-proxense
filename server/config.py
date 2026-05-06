@@ -93,6 +93,30 @@ class UIConfig:
 
 
 @dataclass
+class AuditForwardConfig:
+    """v0.2.x: ship audit rows to an external collector (Graylog, ArcSight,
+    rsyslog, etc.). Disabled by default — operator opts in.
+
+    `format` selects the wire format:
+      - 'gelf'   — Graylog Extended Log Format (JSON, one message per row)
+      - 'syslog' — RFC 5424 (PRI / structured-data / message)
+      - 'cef'    — ArcSight Common Event Format (pipe-delimited)
+    `transport` is 'udp' (fire-and-forget) or 'tcp' (reconnecting + buffered).
+    """
+    enabled: bool = False
+    format: str = "gelf"               # 'gelf' | 'syslog' | 'cef'
+    transport: str = "udp"             # 'udp' | 'tcp'
+    host: str = ""
+    port: int = 12201                  # GELF default; syslog 514; CEF often 514
+    # syslog only — facility in RFC 5424 numeric range 0-23
+    syslog_facility: int = 16          # 16 = local0
+    # CEF identification
+    cef_vendor: str = "JasonTools"
+    cef_product: str = "jt-proxense"
+    cef_version: str = "0.2"
+
+
+@dataclass
 class AuthConfig:
     """v0.2+ authentication configuration. Disabled by default for v0.1
     backward compatibility — operator opts in by setting enabled: true."""
@@ -102,6 +126,8 @@ class AuthConfig:
     # When set, used to sign session cookies. If empty, server generates a
     # random one at first start and writes it back here.
     session_secret: str = ""
+    # Audit log forwarding (optional)
+    forward: AuditForwardConfig = field(default_factory=AuditForwardConfig)
 
 
 @dataclass
@@ -152,7 +178,9 @@ class Config:
 
         alerts = AlertConfig(**data.get("alerts", {}))
         ui = UIConfig(**data.get("ui", {}))
-        auth_cfg = AuthConfig(**data.get("auth", {}))
+        auth_data = dict(data.get("auth", {}))
+        forward_data = auth_data.pop("forward", {}) or {}
+        auth_cfg = AuthConfig(**auth_data, forward=AuditForwardConfig(**forward_data))
         vm_control_cfg = VmControlConfig(**data.get("vm_control", {}))
 
         return cls(server=server, clusters=clusters, alerts=alerts, ui=ui,

@@ -479,4 +479,88 @@ async def audit_query_handler(request: web.Request) -> web.Response:
         offset=int(q.get("offset", "0")),
     )
     total = await audit.count()
+    # Meta-audit: reading the audit log is itself a sensitive action.
+    # Skip when the only filter is the user's own login row (auto-load on /audit
+    # page would otherwise spam the log on every refresh — capture only what
+    # actually carries an active filter).
+    if any(q.get(k) for k in ("user", "action", "cluster_id", "since_ms", "until_ms")):
+        await audit.write(
+            user=(request.get("user") or {}).get("username", "anonymous"),
+            source_ip=request.get("client_ip", "unknown"),
+            action="audit.read", result="ok",
+            request_id=request.get("request_id", ""),
+            params={k: q.get(k) for k in ("user", "action", "cluster_id", "since_ms", "until_ms", "limit") if q.get(k)},
+        )
     return web.json_response({"rows": rows, "total": total})
+
+
+# ---------------------------------------------------------------- /api/roles
+
+@role_required("admin")
+async def roles_grant_handler(request: web.Request) -> web.Response:
+    """Grant a role on (cluster, vm_pattern). Mirror of `jt-proxense user grant`
+    but admin-callable from the web UI."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    name = (body.get("username") or "").strip()
+    cluster = body.get("cluster_id", "*")
+    role = body.get("role", "")
+    vm_pattern = body.get("vm_pattern", "*")
+    actor = (request.get("user") or {}).get("username", "anonymous")
+    src_ip = request.get("client_ip", "unknown")
+    request_id = request.get("request_id", "")
+
+    if not name or role not in ("viewer", "operator", "admin"):
+        return web.json_response({"error": "bad_request"}, status=400)
+    try:
+        auth.grant_role(name, cluster, role, vm_pattern=vm_pattern)
+    except ValueError as e:
+        await audit.write(
+            user=actor, source_ip=src_ip, action="role.grant",
+            target=f"{name}@{cluster}/{vm_pattern}", result="error:ValueError",
+            request_id=request_id, params=body,
+        )
+        return web.json_response({"error": str(e)}, status=400)
+    await audit.write(
+        user=actor, source_ip=src_ip, action="role.grant",
+        target=f"{name}@{cluster}/{vm_pattern}", result="ok",
+        request_id=request_id, params=body,
+    )
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def roles_revoke_handler(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    name = (body.get("username") or "").strip()
+    cluster = body.get("cluster_id", "*")
+    vm_pattern = body.get("vm_pattern", "*")
+    actor = (request.get("user") or {}).get("username", "anonymous")
+    ok = auth.revoke_role(name, cluster, vm_pattern=vm_pattern)
+    await audit.write(
+        user=actor, source_ip=request.get("client_ip", "unknown"),
+        action="role.revoke",
+        target=f"{name}@{cluster}/{vm_pattern}",
+        result="ok" if ok else "error:NotFound",
+        request_id=request.get("request_id", ""),
+        params=body,
+    )
+    if not ok:
+        return web.json_response({"error": "not_found"}, status=404)
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def roles_list_handler(request: web.Request) -> web.Response:
+    """List all role grants for a user. Read-only — not audited."""
+    username = request.match_info.get("username", "")
+    user_row = auth.get_user_by_username(username)
+    if not user_row:
+        return web.json_response({"error": "not_found"}, status=404)
+    rows = auth.get_roles(user_row["id"])
+    return web.json_response({"username": username, "roles": rows})

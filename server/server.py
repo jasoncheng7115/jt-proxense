@@ -24,6 +24,7 @@ from . import totp_page
 from . import account_page
 from . import sessions_page
 from . import vm_control
+from . import audit_forwarder
 from .middleware import (
     request_id_middleware, security_headers_middleware,
     make_auth_middleware, role_required,
@@ -146,14 +147,30 @@ async def get_config_handler(request: web.Request) -> web.Response:
 
 
 async def update_config_handler(request: web.Request) -> web.Response:
-    """Update configuration"""
+    """Update configuration. EVERY config change is audited — body is hashed,
+    not stored, so secrets in the body (PVE tokens) never reach the audit log."""
+    actor = (request.get("user") or {}).get("username", "anonymous")
+    src_ip = request.get("client_ip", "unknown")
+    request_id = request.get("request_id", "")
     try:
         updates = await request.json()
+        # Compute the change set's top-level keys for the audit "target" — gives
+        # operators a clue without leaking the values.
+        changed_keys = sorted(list(updates.keys())) if isinstance(updates, dict) else []
         config = update_config(updates)
-        # Reload all clusters to pick up config changes (auth, intervals, etc.)
         await cluster_manager.reload_all_clusters()
+        await audit.write(
+            user=actor, source_ip=src_ip, action="config.update",
+            target=",".join(changed_keys) or "<empty>",
+            result="ok", request_id=request_id,
+            params=updates,  # hashed inside audit.write — body itself never stored
+        )
         return web.json_response({"status": "ok", "message": "Configuration updated and reloaded"})
     except Exception as e:
+        await audit.write(
+            user=actor, source_ip=src_ip, action="config.update",
+            result=audit.result_error(e), request_id=request_id,
+        )
         return web.json_response({"error": str(e)}, status=400)
 
 
@@ -374,6 +391,10 @@ def create_app() -> web.Application:
         ("GET",    "/api/sessions",              auth_handlers.sessions_list_handler),
         ("DELETE", "/api/sessions/{session_id}", auth_handlers.sessions_revoke_handler),
         ("POST",   "/api/sessions/user/{username}/revoke-all", auth_handlers.sessions_revoke_user_handler),
+        # Role management (admin only — same logic as `jt-proxense user grant/revoke`)
+        ("POST",   "/api/roles/grant",              auth_handlers.roles_grant_handler),
+        ("POST",   "/api/roles/revoke",             auth_handlers.roles_revoke_handler),
+        ("GET",    "/api/roles/{username}",         auth_handlers.roles_list_handler),
         ("GET",  "/api/users",             auth_handlers.users_list_handler),
         ("POST", "/api/users",             auth_handlers.users_create_handler),
         ("DELETE","/api/users/{username}", auth_handlers.users_delete_handler),
@@ -439,6 +460,26 @@ async def start_server():
     else:
         logger.warning("auth.enabled=false — service is OPEN to anyone who can reach the port.")
 
+    # Audit forwarding (optional, set up after DB so the forwarder is ready
+    # before the first audit row is written).
+    fwd_cfg = getattr(config.auth, "forward", None)
+    if fwd_cfg and fwd_cfg.enabled and fwd_cfg.host:
+        try:
+            import socket as _socket
+            fwd = audit_forwarder.AuditForwarder(
+                fmt=fwd_cfg.format, transport=fwd_cfg.transport,
+                host=fwd_cfg.host, port=fwd_cfg.port,
+                hostname=_socket.gethostname() or "jt-proxense",
+                syslog_facility=fwd_cfg.syslog_facility,
+                cef_vendor=fwd_cfg.cef_vendor,
+                cef_product=fwd_cfg.cef_product,
+                cef_version=fwd_cfg.cef_version,
+            )
+            await fwd.start()
+            audit_forwarder.set_forwarder(fwd)
+        except Exception as e:
+            logger.warning("audit forwarder failed to start: %s", e)
+
     # Register cluster-update broadcast callback now (handler is idempotent
     # against the cluster_manager being not-yet-loaded — it just won't fire).
     cluster_manager.add_callback(on_cluster_data_update)
@@ -460,6 +501,10 @@ async def start_server():
 
 async def stop_server(runner: web.AppRunner):
     """Stop the server"""
+    fwd = audit_forwarder.get_forwarder()
+    if fwd is not None:
+        await fwd.stop()
+        audit_forwarder.set_forwarder(None)
     await cluster_manager.stop_all()
     await runner.cleanup()
     logger.info("Server stopped")

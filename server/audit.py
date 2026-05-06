@@ -58,22 +58,37 @@ async def write(
     params: Any = None,
 ) -> None:
     """Append one audit row. NEVER raises into the caller — audit failure
-    is an operational issue, not a request failure (logged at WARNING)."""
+    is an operational issue, not a request failure (logged at WARNING).
+
+    Also forwards the row to an external collector when one is configured
+    via auth.forward.* — the forwarder's submit() is non-blocking and lossy
+    by design (queued, dropped on overflow)."""
+    ts = db.now_ms()
+    ph = hash_params(params)
     try:
         async with db.connect() as c:
             await c.execute(
                 "INSERT INTO audit_log "
                 "(ts, user, source_ip, cluster_id, action, target, params_hash, result, request_id) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
-                (
-                    db.now_ms(), user, source_ip,
-                    cluster_id, action, target,
-                    hash_params(params), result, request_id,
-                ),
+                (ts, user, source_ip, cluster_id, action, target, ph, result, request_id),
             )
             await c.commit()
     except Exception as e:
         logger.warning("audit write failed: action=%s user=%s err=%s", action, user, e)
+
+    # Best-effort external forwarding (non-blocking, never raises).
+    try:
+        from . import audit_forwarder
+        fwd = audit_forwarder.get_forwarder()
+        if fwd is not None:
+            fwd.submit({
+                "ts_ms": ts, "user": user, "source_ip": source_ip,
+                "cluster_id": cluster_id, "action": action, "target": target,
+                "params_hash": ph, "result": result, "request_id": request_id,
+            })
+    except Exception as e:
+        logger.warning("audit forward submit failed: %s", e)
 
 
 async def query(
