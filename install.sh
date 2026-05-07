@@ -179,6 +179,15 @@ chown "${SERVICE_USER}:${SERVICE_USER}" "$STATE_DIR"
 chmod 750 "$STATE_DIR"
 ok "state dir ${STATE_DIR} ready"
 
+# v0.3+: encrypted secret store master key. Kept outside $STATE_DIR
+# (which is the Proxmox / data dir) so an accidental data dir restore
+# from a different host doesn't drag the wrong key with it.
+KEY_DIR="/etc/jt-proxense"
+mkdir -p "$KEY_DIR"
+chown "${SERVICE_USER}:${SERVICE_USER}" "$KEY_DIR"
+chmod 750 "$KEY_DIR"
+ok "key dir ${KEY_DIR} ready"
+
 # Symlink the CLI back door so operators can run `jt-proxense ...` from anywhere.
 if [ -f "$INSTALL_DIR/bin/jt-proxense" ]; then
     chmod +x "$INSTALL_DIR/bin/jt-proxense"
@@ -231,6 +240,15 @@ else
         ok "auth left disabled — anyone reaching :${HTTP_PORT} can read everything."
         warn "Bind only to 127.0.0.1 (server.host in config.yaml) until auth is set up."
     fi
+fi
+
+# v0.3+: sweep any plaintext PVE password in config.yaml into the encrypted
+# secret store, then blank the yaml field. Idempotent — safe to run on
+# every install / re-run / upgrade.
+MIGR=$(sudo -u "$SERVICE_USER" "$INSTALL_DIR/bin/jt-proxense" secret migrate-yaml 2>&1 || true)
+if echo "$MIGR" | grep -q ": ok"; then
+    N=$(echo "$MIGR" | grep -c ": ok")
+    ok "migrated ${N} cluster password(s) from config.yaml → encrypted store at ${KEY_DIR}/master.key"
 fi
 
 START_NOW=1

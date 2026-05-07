@@ -9,17 +9,114 @@ Anonymous → 302 to /login (handled by middleware on the path being NOT public)
 """
 from __future__ import annotations
 
+import json
+
 from aiohttp import web
 
 from .middleware import auth_required
+from .page_i18n import pick_lang
 
 
-HTML = """<!DOCTYPE html>
-<html lang="en">
+_I18N: dict[str, dict[str, str]] = {
+    "en": {
+        "title":             "2FA Setup",
+        "back":              "« Dashboard",
+        "status_h":          "Status",
+        "status_loading":    "Loading current 2FA state for {user}...",
+        "signed_in":         "Signed in as",
+        "role":              "role",
+        "pill_enabled":      "2FA enabled",
+        "pill_disabled":     "2FA not enabled",
+        "backup_remaining":  "{n} backup codes remaining",
+        "backup_remaining_1":"{n} backup code remaining",
+        "btn_setup":         "Set up authenticator »",
+        "btn_re_enroll":     "Re-enroll authenticator (regenerates backup codes)",
+        "btn_disable":       "Disable 2FA",
+        "enroll_h":          "Enroll Authenticator",
+        "enroll_lead":       "Scan the QR code with any TOTP authenticator (Google Authenticator, 1Password, Authy, etc.). If you can't scan, type the secret manually.",
+        "manual_entry":      "Manual entry:",
+        "issuer":            "Issuer",
+        "secret":            "Secret",
+        "confirm_lead":      "Then type a fresh 6-digit code to confirm:",
+        "ph_six":            "6 digits",
+        "btn_confirm":       "Confirm »",
+        "btn_generating":    "Generating...",
+        "err_start":         "Failed to start enrollment.",
+        "err_invalid_totp":  "Code didn't match — check your authenticator clock and try again.",
+        "err_verify":        "Verification failed.",
+        "backup_h":          "Backup Codes",
+        "backup_warn":       "Save these now. Each works once if you lose your authenticator. They will not be shown again.",
+        "btn_copy":          "Copy all to clipboard",
+        "btn_copied":        "Copied",
+        "btn_copy_failed":   "Copy failed",
+        "btn_download":      "Download as .txt",
+        "btn_done":          "I saved them »",
+        "disable_h":         "Disable 2FA",
+        "disable_lead":      "Confirms your identity by requiring a current TOTP code.",
+        "ph_six_or_backup":  "6 digits or backup code",
+        "btn_disable_2fa":   "Disable Two-Factor",
+        "ok_disabled":       "2FA disabled.",
+        "err_invalid_code":  "Invalid code.",
+        "err_failed":        "Failed.",
+        "backup_file_title": "JT-PROXENSE TOTP backup codes",
+        "backup_file_acct":  "Account:",
+        "backup_file_gen":   "Generated:",
+        "backup_file_warn":  "WARNING:   Each code works ONCE. Treat as a password.",
+    },
+    "zh-TW": {
+        "title":             "雙因素認證設定",
+        "back":              "« 儀表板",
+        "status_h":          "狀態",
+        "status_loading":    "正在載入 {user} 的 2FA 狀態...",
+        "signed_in":         "目前登入",
+        "role":              "角色",
+        "pill_enabled":      "已啟用 2FA",
+        "pill_disabled":     "尚未啟用 2FA",
+        "backup_remaining":  "剩餘 {n} 個備援碼",
+        "backup_remaining_1":"剩餘 {n} 個備援碼",
+        "btn_setup":         "設定驗證器 »",
+        "btn_re_enroll":     "重新註冊驗證器（重新產生備援碼）",
+        "btn_disable":       "停用 2FA",
+        "enroll_h":          "註冊驗證器",
+        "enroll_lead":       "用任意 TOTP 驗證器（Google Authenticator、1Password、Authy 等）掃描 QR 碼。若無法掃描，可手動輸入金鑰。",
+        "manual_entry":      "手動輸入：",
+        "issuer":            "發行者",
+        "secret":            "金鑰",
+        "confirm_lead":      "輸入一組目前的 6 位數驗證碼確認：",
+        "ph_six":            "6 位數",
+        "btn_confirm":       "確認 »",
+        "btn_generating":    "產生中...",
+        "err_start":         "無法啟動註冊流程。",
+        "err_invalid_totp":  "驗證碼不正確 — 請確認驗證器時間後再試。",
+        "err_verify":        "驗證失敗。",
+        "backup_h":          "備援碼",
+        "backup_warn":       "請立即保存。每個備援碼只能用一次，且不會再顯示。",
+        "btn_copy":          "複製全部到剪貼簿",
+        "btn_copied":        "已複製",
+        "btn_copy_failed":   "複製失敗",
+        "btn_download":      "下載為 .txt",
+        "btn_done":          "已保存 »",
+        "disable_h":         "停用 2FA",
+        "disable_lead":      "需要目前的 TOTP 驗證碼以確認身分。",
+        "ph_six_or_backup":  "6 位數或備援碼",
+        "btn_disable_2fa":   "停用雙因素認證",
+        "ok_disabled":       "2FA 已停用。",
+        "err_invalid_code":  "驗證碼錯誤。",
+        "err_failed":        "失敗。",
+        "backup_file_title": "JT-PROXENSE TOTP 備援碼",
+        "backup_file_acct":  "帳號：",
+        "backup_file_gen":   "產生時間：",
+        "backup_file_warn":  "警告：每個備援碼只能用一次，請當成密碼保護。",
+    },
+}
+
+
+_TEMPLATE = """<!DOCTYPE html>
+<html lang="{{LANG}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JT-PROXENSE — Two-Factor Setup</title>
+    <title>JT-PROXENSE — {{T_TITLE}}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
         :root {
@@ -220,72 +317,74 @@ HTML = """<!DOCTYPE html>
 <div class="container">
     <header>
         <div>
-            <h1>JT-<span class="accent">PROXENSE</span> &middot; 2FA Setup</h1>
+            <h1>JT-<span class="accent">PROXENSE</span> &middot; {{T_TITLE}}</h1>
         </div>
         <nav class="top">
-            <a href="/">&laquo; Dashboard</a>
+            <a href="/">{{T_BACK}}</a>
         </nav>
     </header>
 
     <div class="card" id="statusCard">
-        <h2>Status</h2>
-        <p>Loading current 2FA state for <span id="username">...</span>...</p>
+        <h2>{{T_STATUS_H}}</h2>
+        <p id="statusLoading"></p>
     </div>
 
     <div class="card hidden" id="enrollCard">
-        <h2>Enroll Authenticator</h2>
-        <p>Scan the QR code with any TOTP authenticator (Google Authenticator,
-        1Password, Authy, etc.). If you can't scan, type the secret manually.</p>
+        <h2>{{T_ENROLL_H}}</h2>
+        <p>{{T_ENROLL_LEAD}}</p>
         <div class="qr-block">
             <img id="qr" alt="">
             <div class="qr-meta">
-                <p style="margin-top:0">Manual entry:</p>
+                <p style="margin-top:0">{{T_MANUAL_ENTRY}}</p>
                 <div class="secret-row">
-                    <span class="key">Issuer</span>
+                    <span class="key">{{T_ISSUER}}</span>
                     <span>:</span>
                     <span class="val">JT-PROXENSE</span>
                 </div>
                 <div class="secret-row" style="margin-top:6px">
-                    <span class="key">Secret</span>
+                    <span class="key">{{T_SECRET}}</span>
                     <span>:</span>
                     <span class="val" id="secret"></span>
                 </div>
             </div>
         </div>
-        <p>Then type a fresh 6-digit code to confirm:</p>
+        <p>{{T_CONFIRM_LEAD}}</p>
         <input type="text" id="verifyCode" inputmode="numeric" pattern="[0-9]*"
-               autocomplete="one-time-code" placeholder="6 digits"
+               autocomplete="one-time-code" placeholder="{{T_PH_SIX}}"
                style="font-family:'Share Tech Mono',monospace; font-size:18px; letter-spacing:.4em; text-align:center;">
-        <button id="verifyBtn">Confirm &raquo;</button>
+        <button id="verifyBtn">{{T_BTN_CONFIRM}}</button>
         <div class="err hidden" id="verifyErr"></div>
     </div>
 
     <div class="card hidden" id="backupCard">
-        <h2>Backup Codes</h2>
-        <p style="color: var(--orange)">Save these now. Each works once if you lose
-        your authenticator. They will <strong>not be shown again</strong>.</p>
+        <h2>{{T_BACKUP_H}}</h2>
+        <p style="color: var(--orange)" id="backupWarn"></p>
         <div class="codes" id="codes"></div>
-        <button class="ghost" id="copyBackup">Copy all to clipboard</button>
-        <button class="ghost" id="downloadBackup" style="margin-left:8px;">Download as .txt</button>
-        <button id="doneBtn" style="margin-left:8px;">I saved them &raquo;</button>
+        <button class="ghost" id="copyBackup">{{T_BTN_COPY}}</button>
+        <button class="ghost" id="downloadBackup" style="margin-left:8px;">{{T_BTN_DOWNLOAD}}</button>
+        <button id="doneBtn" style="margin-left:8px;">{{T_BTN_DONE}}</button>
     </div>
 
     <div class="card hidden" id="disableCard">
-        <h2>Disable 2FA</h2>
-        <p>Confirms your identity by requiring a current TOTP code.</p>
+        <h2>{{T_DISABLE_H}}</h2>
+        <p>{{T_DISABLE_LEAD}}</p>
         <input type="text" id="disableCode" inputmode="numeric" pattern="[0-9]*"
-               autocomplete="one-time-code" placeholder="6 digits or backup code"
+               autocomplete="one-time-code" placeholder="{{T_PH_SIX_OR_BACKUP}}"
                style="font-family:'Share Tech Mono',monospace; font-size:18px; letter-spacing:.4em; text-align:center;">
-        <button class="danger" id="disableBtn">Disable Two-Factor</button>
+        <button class="danger" id="disableBtn">{{T_BTN_DISABLE_2FA}}</button>
         <div class="err hidden" id="disableErr"></div>
-        <div class="ok hidden" id="disableOk">2FA disabled.</div>
+        <div class="ok hidden" id="disableOk">{{T_OK_DISABLED}}</div>
     </div>
 </div>
 
 <script>
+const I18N = {{I18N_JSON}};
 const $ = (id) => document.getElementById(id);
 const show = (el) => el.classList.remove('hidden');
 const hide = (el) => el.classList.add('hidden');
+
+// 'Save these now…' line — uses an i18n string but keeps `<strong>` flavor.
+$('backupWarn').innerHTML = escapeHtml(I18N.backup_warn);
 
 let user = null;
 
@@ -295,7 +394,7 @@ async function loadStatus() {
     const d = await r.json();
     if (!d.authenticated) { window.location.replace('/login'); return; }
     user = d.user;
-    $('username').textContent = user.username;
+    $('statusLoading').textContent = I18N.status_loading.replace('{user}', user.username);
 
     let status = { enabled: false, backup_codes_remaining: 0 };
     try {
@@ -303,23 +402,26 @@ async function loadStatus() {
         if (sr.ok) status = await sr.json();
     } catch (e) { /* fall through with defaults */ }
 
+    const remaining = status.backup_codes_remaining;
+    const remainTxt = (remaining === 1 ? I18N.backup_remaining_1 : I18N.backup_remaining)
+        .replace('{n}', remaining);
     const enrolledHtml = status.enabled
-        ? `<span class="pill green">2FA enabled</span>
-           <span style="margin-left:10px; color: var(--text-dim); font-family: 'Share Tech Mono', monospace; font-size: 12px;">
-                ${status.backup_codes_remaining} backup code${status.backup_codes_remaining === 1 ? '' : 's'} remaining
+        ? `<span class="pill green">${escapeHtml(I18N.pill_enabled)}</span>
+           <span style="margin-left:10px; color: var(--text-dim); font-family: 'Share Tech Mono', monospace; font-size: 13px;">
+                ${escapeHtml(remainTxt)}
            </span>`
-        : `<span class="pill orange">2FA not enabled</span>`;
+        : `<span class="pill orange">${escapeHtml(I18N.pill_disabled)}</span>`;
 
     $('statusCard').innerHTML = `
-        <h2>Status</h2>
-        <p>Signed in as <code>${escapeHtml(user.username)}</code> &middot;
-           role <code>${escapeHtml(user.role_global || 'none')}</code></p>
+        <h2>${escapeHtml(I18N.status_h)}</h2>
+        <p>${escapeHtml(I18N.signed_in)} <code>${escapeHtml(user.username)}</code> &middot;
+           ${escapeHtml(I18N.role)} <code>${escapeHtml(user.role_global || 'none')}</code></p>
         <p>${enrolledHtml}</p>
         <div style="margin-top:12px;">
             ${status.enabled
-                ? '<button id="startEnroll" class="ghost">Re-enroll authenticator (regenerates backup codes)</button>'
-                + '<button class="danger" id="startDisable" style="margin-left:10px;">Disable 2FA</button>'
-                : '<button id="startEnroll">Set up authenticator &raquo;</button>'
+                ? '<button id="startEnroll" class="ghost">' + escapeHtml(I18N.btn_re_enroll) + '</button>'
+                + '<button class="danger" id="startDisable" style="margin-left:10px;">' + escapeHtml(I18N.btn_disable) + '</button>'
+                : '<button id="startEnroll">' + escapeHtml(I18N.btn_setup) + '</button>'
             }
         </div>
     `;
@@ -334,7 +436,7 @@ async function startEnroll() {
     hide($('backupCard'));
     show($('enrollCard'));
     $('verifyBtn').disabled = true;
-    $('verifyBtn').textContent = 'Generating...';
+    $('verifyBtn').textContent = I18N.btn_generating;
     try {
         const r = await fetch('/api/auth/totp/enroll-init', {
             method: 'POST', credentials: 'same-origin',
@@ -343,11 +445,11 @@ async function startEnroll() {
         $('qr').src = d.qr_data_uri;
         $('secret').textContent = d.secret;
         $('verifyBtn').disabled = false;
-        $('verifyBtn').innerHTML = 'Confirm &raquo;';
+        $('verifyBtn').textContent = I18N.btn_confirm;
         $('verifyCode').focus();
     } catch (e) {
         $('verifyBtn').disabled = false;
-        $('verifyErr').textContent = 'Failed to start enrollment.';
+        $('verifyErr').textContent = I18N.err_start;
         show($('verifyErr'));
     }
 }
@@ -365,8 +467,8 @@ $('verifyBtn').addEventListener('click', async () => {
         if (!r.ok) {
             const d = await r.json().catch(()=>({}));
             $('verifyErr').textContent = d.error === 'invalid_totp'
-                ? 'Code didn\\'t match — check your authenticator clock and try again.'
-                : 'Verification failed.';
+                ? I18N.err_invalid_totp
+                : I18N.err_verify;
             show($('verifyErr'));
             $('verifyBtn').disabled = false;
             return;
@@ -385,10 +487,10 @@ function backupCodesText() {
     const codes = [...$('codes').children].map(el => el.textContent);
     const ts = new Date().toISOString();
     return [
-        'JT-PROXENSE TOTP backup codes',
-        'Account:   ' + (user ? user.username : 'unknown'),
-        'Generated: ' + ts,
-        'WARNING:   Each code works ONCE. Treat as a password.',
+        I18N.backup_file_title,
+        I18N.backup_file_acct + '  ' + (user ? user.username : 'unknown'),
+        I18N.backup_file_gen + '  ' + ts,
+        I18N.backup_file_warn,
         '',
         ...codes,
         '',
@@ -396,9 +498,9 @@ function backupCodesText() {
 }
 
 $('copyBackup')?.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(backupCodesText()); $('copyBackup').textContent = 'Copied'; }
-    catch { $('copyBackup').textContent = 'Copy failed'; }
-    setTimeout(() => { $('copyBackup').textContent = 'Copy all to clipboard'; }, 1800);
+    try { await navigator.clipboard.writeText(backupCodesText()); $('copyBackup').textContent = I18N.btn_copied; }
+    catch { $('copyBackup').textContent = I18N.btn_copy_failed; }
+    setTimeout(() => { $('copyBackup').textContent = I18N.btn_copy; }, 1800);
 });
 
 $('downloadBackup')?.addEventListener('click', () => {
@@ -426,7 +528,7 @@ $('disableBtn').addEventListener('click', async () => {
     else {
         const d = await r.json().catch(()=>({}));
         $('disableErr').textContent = d.error === 'invalid_totp'
-            ? 'Invalid code.' : (d.error || 'Failed.');
+            ? I18N.err_invalid_code : (d.error || I18N.err_failed);
         show($('disableErr'));
     }
     $('disableBtn').disabled = false;
@@ -447,7 +549,32 @@ loadStatus();
 
 @auth_required
 async def totp_page_handler(request: web.Request) -> web.Response:
+    lang = pick_lang(request)
+    s = _I18N[lang]
+    html = (_TEMPLATE
+            .replace("{{LANG}}", lang)
+            .replace("{{I18N_JSON}}", json.dumps(s, ensure_ascii=False))
+            .replace("{{T_TITLE}}", s["title"])
+            .replace("{{T_BACK}}", s["back"])
+            .replace("{{T_STATUS_H}}", s["status_h"])
+            .replace("{{T_ENROLL_H}}", s["enroll_h"])
+            .replace("{{T_ENROLL_LEAD}}", s["enroll_lead"])
+            .replace("{{T_MANUAL_ENTRY}}", s["manual_entry"])
+            .replace("{{T_ISSUER}}", s["issuer"])
+            .replace("{{T_SECRET}}", s["secret"])
+            .replace("{{T_CONFIRM_LEAD}}", s["confirm_lead"])
+            .replace("{{T_PH_SIX}}", s["ph_six"])
+            .replace("{{T_BTN_CONFIRM}}", s["btn_confirm"])
+            .replace("{{T_BACKUP_H}}", s["backup_h"])
+            .replace("{{T_BTN_COPY}}", s["btn_copy"])
+            .replace("{{T_BTN_DOWNLOAD}}", s["btn_download"])
+            .replace("{{T_BTN_DONE}}", s["btn_done"])
+            .replace("{{T_DISABLE_H}}", s["disable_h"])
+            .replace("{{T_DISABLE_LEAD}}", s["disable_lead"])
+            .replace("{{T_PH_SIX_OR_BACKUP}}", s["ph_six_or_backup"])
+            .replace("{{T_BTN_DISABLE_2FA}}", s["btn_disable_2fa"])
+            .replace("{{T_OK_DISABLED}}", s["ok_disabled"]))
     return web.Response(
-        text=HTML, content_type="text/html", charset="utf-8",
+        text=html, content_type="text/html", charset="utf-8",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )

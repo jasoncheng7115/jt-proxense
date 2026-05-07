@@ -362,6 +362,82 @@ def cmd_audit_purge(args):
     print(f"  removed: {n} rows")
 
 
+def cmd_secret_list(_):
+    from server import secret_store
+    rows = secret_store.list_secrets()
+    if not rows:
+        print("(no secrets)")
+        return
+    print(f"master key fingerprint: {secret_store.fingerprint()}")
+    print()
+    print(f"{'CLUSTER':<24} {'KIND':<18} {'KEY_ID':<14} UPDATED")
+    for r in rows:
+        from datetime import datetime
+        ts = datetime.fromtimestamp(r["updated_at"] / 1000).isoformat(timespec="seconds")
+        print(f"{r['cluster_id']:<24} {r['kind']:<18} {r['key_id']:<14} {ts}")
+
+
+def cmd_secret_set(args):
+    from server import secret_store
+    import getpass
+    value = args.value
+    if not value:
+        value = getpass.getpass(f"value for {args.cluster}/{args.kind}: ")
+    if not value:
+        print("aborted: empty value", file=sys.stderr); sys.exit(1)
+    secret_store.put(args.cluster, args.kind, value, actor="cli")
+    print(f"set {args.cluster}/{args.kind} (key fp={secret_store.fingerprint()})")
+
+
+def cmd_secret_get(args):
+    """For ops sanity-checks: prints whether a secret exists, NOT its value."""
+    from server import secret_store
+    has = secret_store.has_secret(args.cluster, args.kind)
+    print("set" if has else "unset")
+    sys.exit(0 if has else 1)
+
+
+def cmd_secret_rm(args):
+    from server import secret_store
+    removed = secret_store.delete(args.cluster, args.kind, actor="cli")
+    print("removed" if removed else "(no such secret)")
+
+
+def cmd_secret_export(args):
+    from server import secret_store
+    import getpass
+    pp = args.passphrase or getpass.getpass("export passphrase (>=8 chars): ")
+    n = secret_store.export_dump(Path(args.file), passphrase=pp, actor="cli")
+    print(f"exported {n} secret(s) → {args.file}")
+
+
+def cmd_secret_import(args):
+    from server import secret_store
+    import getpass
+    pp = args.passphrase or getpass.getpass("import passphrase: ")
+    n = secret_store.import_dump(Path(args.file), passphrase=pp, actor="cli",
+                                  overwrite=args.overwrite)
+    print(f"imported {n} secret(s) (overwrite={args.overwrite})")
+
+
+def cmd_secret_rotate_key(_):
+    from server import secret_store
+    fp = secret_store.rotate_key(actor="cli")
+    print(f"rotated; new master key fingerprint = {fp}")
+
+
+def cmd_secret_migrate_yaml(_):
+    """Manually run the yaml→store migration (also runs automatically on
+    every service start; this is just for ops who want to do it now)."""
+    from server import secret_store
+    out = secret_store.migrate_from_yaml(actor="cli")
+    if not out:
+        print("nothing to migrate")
+        return
+    for cid, status in out:
+        print(f"  {cid}: {status}")
+
+
 def cmd_audit_count(_):
     """Show the current row count without touching anything."""
     with db.connect_sync() as c:
@@ -428,6 +504,35 @@ def _parser():
     p_purge.add_argument("--before", help="ISO 8601 cutoff; e.g. 2025-01-01T00:00:00Z")
     p_purge.set_defaults(func=cmd_audit_purge)
     sa.add_parser("count").set_defaults(func=cmd_audit_count)
+
+    # Encrypted secret store (per-cluster PVE passwords + similar).
+    ps = sub.add_parser("secret", help="encrypted at-rest store for per-cluster secrets")
+    ss = ps.add_subparsers(dest="action", required=True)
+    ss.add_parser("list", help="list (cluster, kind) pairs — never values").set_defaults(func=cmd_secret_list)
+    p_ss = ss.add_parser("set", help="store a secret (encrypted, overwrites existing)")
+    p_ss.add_argument("cluster"); p_ss.add_argument("kind", help="e.g. 'pve_password'")
+    p_ss.add_argument("--value", help="if omitted, prompts on stdin (hidden)")
+    p_ss.set_defaults(func=cmd_secret_set)
+    p_sg = ss.add_parser("get", help="check whether a secret exists; never prints the value")
+    p_sg.add_argument("cluster"); p_sg.add_argument("kind")
+    p_sg.set_defaults(func=cmd_secret_get)
+    p_sr = ss.add_parser("rm"); p_sr.add_argument("cluster"); p_sr.add_argument("kind")
+    p_sr.set_defaults(func=cmd_secret_rm)
+    p_sx = ss.add_parser("export", help="dump all secrets to a file, encrypted with a passphrase")
+    p_sx.add_argument("file"); p_sx.add_argument("--passphrase",
+        help="if omitted, prompts on stdin (hidden); >= 8 chars")
+    p_sx.set_defaults(func=cmd_secret_export)
+    p_si = ss.add_parser("import", help="restore secrets from an export dump")
+    p_si.add_argument("file"); p_si.add_argument("--passphrase")
+    p_si.add_argument("--overwrite", action="store_true",
+                      help="overwrite existing rows; otherwise skip")
+    p_si.set_defaults(func=cmd_secret_import)
+    ss.add_parser("rotate-key",
+                  help="generate a new master key + re-encrypt every row").set_defaults(
+        func=cmd_secret_rotate_key)
+    ss.add_parser("migrate-yaml",
+                  help="sweep cluster.auth.password from config.yaml into the store").set_defaults(
+        func=cmd_secret_migrate_yaml)
 
     sub.add_parser("version").set_defaults(func=cmd_version)
 

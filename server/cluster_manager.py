@@ -508,6 +508,36 @@ class Cluster:
                     logger.warning(f"Failed to get task log: {e}")
                 return ""
 
+            # Helper: parse most recent progress percentage from a migration task log.
+            # PVE block-mirror lines look like:
+            #   "mirror-scsi0: transferred 50.3 GiB of 52.0 GiB (96.61%) in 12m 3s"
+            # Online RAM phase lines look like:
+            #   "migration status: active (transferred 1.2 GiB, remaining 200 MiB)"
+            # We grab the largest "(NN.NN%)" we can find in a tail window.
+            async def get_migration_progress(node: str, upid: str) -> float:
+                try:
+                    log_lines = await self.client.get_task_log(node, upid, start=0, limit=1000)
+                    best = 0.0
+                    # Walk from newest entry backwards — first hit is the latest progress.
+                    for line in reversed(log_lines):
+                        text = line.get("t", "")
+                        if not text:
+                            continue
+                        m = re.search(r"\((\d+(?:\.\d+)?)\s*%\)", text)
+                        if m:
+                            try:
+                                p = float(m.group(1))
+                                if p > best:
+                                    best = p
+                                # First match from the back is recent enough — return it.
+                                return best
+                            except ValueError:
+                                continue
+                    return best
+                except Exception as e:
+                    logger.debug(f"Failed to parse migration progress for {upid}: {e}")
+                    return 0.0
+
             # First pass: build a map of vmid -> nodes with qmstart tasks
             # This helps detect migration targets (qmstart runs on target during migration)
             qmstart_map: dict[int, str] = {}  # vmid -> target node (where qmstart is running)
@@ -681,6 +711,13 @@ class Cluster:
                     if not target_node:
                         logger.warning(f"  -> No target_node detected for migration task vmid={vmid}")
 
+                # For active migrations, parse progress % from the task log.
+                progress_pct = 0.0
+                if "migrate" in task_type and not task.get("endtime"):
+                    task_node = task.get("node", "")
+                    if task_node and upid:
+                        progress_pct = await get_migration_progress(task_node, upid)
+
                 vm_task = VMTask(
                     upid=upid,
                     node=task.get("node", ""),
@@ -691,6 +728,7 @@ class Cluster:
                     user=task.get("user", ""),
                     starttime=task.get("starttime", 0),
                     endtime=task.get("endtime", 0),
+                    progress=progress_pct,
                     exitstatus=task.get("exitstatus", ""),
                     target_node=target_node,
                 )

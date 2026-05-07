@@ -7,14 +7,67 @@ will see this login page after middleware redirects them.
 """
 from __future__ import annotations
 
+import json
+
 from aiohttp import web
 
-LOGIN_HTML = """<!DOCTYPE html>
-<html lang="en">
+from .page_i18n import pick_lang
+
+
+_I18N: dict[str, dict[str, str]] = {
+    "en": {
+        "title":         "Sign in",
+        "subtitle":      "// Sign in",
+        "subtitle_2fa":  "// Two-factor verification",
+        "lbl_username":  "Username",
+        "lbl_password":  "Password",
+        "lbl_totp":      "Authenticator code",
+        "totp_placeholder": "6 digits or backup code",
+        "ttl_expires":   "Code window expires in {n}s.",
+        "ttl_expired":   "Pending token expired — refresh to retry.",
+        "btn_auth":      "Authenticate »",
+        "btn_verify":    "Verify »",
+        "btn_authing":   "Authenticating...",
+        "foot":          "JT-PROXENSE · Cyberpunk PVE Monitor",
+        "err_generic":   "Authentication failed",
+        "err_rate":      "Too many failed attempts. Try again later.",
+        "err_invalid":   "Invalid username or password.",
+        "err_totp_bad":  "Invalid code. Try again.",
+        "err_totp_exp":  "Pending login expired. Refresh and try again.",
+        "err_totp_fail": "TOTP verification failed",
+        "err_network":   "Network error. Check the server is reachable.",
+    },
+    "zh-TW": {
+        "title":         "登入",
+        "subtitle":      "// 登入",
+        "subtitle_2fa":  "// 雙因素認證",
+        "lbl_username":  "帳號",
+        "lbl_password":  "密碼",
+        "lbl_totp":      "驗證碼",
+        "totp_placeholder": "6 位數字或備援碼",
+        "ttl_expires":   "驗證碼於 {n} 秒後失效。",
+        "ttl_expired":   "登入狀態已過期 — 請重新整理頁面。",
+        "btn_auth":      "登入 »",
+        "btn_verify":    "驗證 »",
+        "btn_authing":   "驗證中...",
+        "foot":          "JT-PROXENSE · 賽博龐克 PVE 監控",
+        "err_generic":   "驗證失敗",
+        "err_rate":      "嘗試次數過多，請稍後再試。",
+        "err_invalid":   "帳號或密碼錯誤。",
+        "err_totp_bad":  "驗證碼錯誤，請重試。",
+        "err_totp_exp":  "登入狀態已過期，請重新整理後再試。",
+        "err_totp_fail": "TOTP 驗證失敗",
+        "err_network":   "網路錯誤，請確認伺服器可連線。",
+    },
+}
+
+
+_TEMPLATE = """<!DOCTYPE html>
+<html lang="{{LANG}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JT-PROXENSE — Sign in</title>
+    <title>JT-PROXENSE — {{T_TITLE}}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
         :root {
@@ -117,34 +170,35 @@ LOGIN_HTML = """<!DOCTYPE html>
 <body>
     <form class="card" id="loginForm" autocomplete="on">
         <h1>JT-PROXENSE</h1>
-        <div class="sub" id="step-label">// Sign in</div>
+        <div class="sub" id="step-label">{{T_SUBTITLE}}</div>
 
         <div id="step1">
-            <label for="username">Username</label>
+            <label for="username">{{T_LBL_USERNAME}}</label>
             <input id="username" name="username" type="text" required autofocus autocomplete="username">
 
-            <label for="password">Password</label>
+            <label for="password">{{T_LBL_PASSWORD}}</label>
             <input id="password" name="password" type="password" required autocomplete="current-password">
         </div>
 
         <div id="step2" style="display:none;">
-            <label for="totp">Authenticator code</label>
+            <label for="totp">{{T_LBL_TOTP}}</label>
             <input id="totp" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
-                   placeholder="6 digits or backup code"
+                   placeholder="{{T_TOTP_PLACEHOLDER}}"
                    style="font-family:'Share Tech Mono',monospace; font-size:18px; letter-spacing:.4em; text-align:center;">
             <div style="margin-top:8px; font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--text-dim);">
                 <span id="totpTtl"></span>
             </div>
         </div>
 
-        <button type="submit" id="submit">Authenticate &raquo;</button>
+        <button type="submit" id="submit">{{T_BTN_AUTH}}</button>
 
         <div class="err hidden" id="err"></div>
 
-        <div class="foot">JT-PROXENSE &middot; Cyberpunk PVE Monitor</div>
+        <div class="foot">{{T_FOOT}}</div>
     </form>
 
 <script>
+const I18N = {{I18N_JSON}};
 const form = document.getElementById('loginForm');
 const errBox = document.getElementById('err');
 const btn = document.getElementById('submit');
@@ -160,19 +214,19 @@ let ttlTimer = null;
 function showStep2(ttl) {
     step1.style.display = 'none';
     step2.style.display = 'block';
-    stepLabel.textContent = '// Two-factor verification';
-    btn.textContent = 'Verify &raquo;';
+    stepLabel.textContent = I18N.subtitle_2fa;
+    btn.textContent = I18N.btn_verify;
     totpInput.focus();
 
     let remaining = ttl || 120;
     const tick = () => {
         if (remaining <= 0) {
             clearInterval(ttlTimer);
-            totpTtl.textContent = 'Pending token expired — refresh to retry.';
+            totpTtl.textContent = I18N.ttl_expired;
             btn.disabled = true;
             return;
         }
-        totpTtl.textContent = 'Code window expires in ' + remaining + 's.';
+        totpTtl.textContent = I18N.ttl_expires.replace('{n}', remaining);
         remaining--;
     };
     tick();
@@ -183,8 +237,7 @@ form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errBox.classList.add('hidden');
     btn.disabled = true;
-    const orig = btn.textContent;
-    btn.textContent = 'Authenticating...';
+    btn.textContent = I18N.btn_authing;
 
     try {
         if (!pendingToken) {
@@ -203,13 +256,13 @@ form.addEventListener('submit', async (e) => {
                 pendingToken = data.pending_token;
                 showStep2(data.ttl_seconds);
                 btn.disabled = false;
-                btn.innerHTML = 'Verify &raquo;';
+                btn.textContent = I18N.btn_verify;
                 return;
             }
             if (r.ok) { window.location.replace('/'); return; }
-            let msg = 'Authentication failed';
-            if (r.status === 429) msg = 'Too many failed attempts. Try again later.';
-            else if (data.error === 'invalid_credentials') msg = 'Invalid username or password.';
+            let msg = I18N.err_generic;
+            if (r.status === 429) msg = I18N.err_rate;
+            else if (data.error === 'invalid_credentials') msg = I18N.err_invalid;
             else if (data.error) msg = data.error;
             errBox.textContent = msg;
             errBox.classList.remove('hidden');
@@ -226,9 +279,9 @@ form.addEventListener('submit', async (e) => {
             });
             if (r.ok) { window.location.replace('/'); return; }
             const data = await r.json().catch(() => ({}));
-            let msg = 'TOTP verification failed';
-            if (data.error === 'invalid_totp') msg = 'Invalid code. Try again.';
-            else if (data.error === 'pending_expired') msg = 'Pending login expired. Refresh and try again.';
+            let msg = I18N.err_totp_fail;
+            if (data.error === 'invalid_totp') msg = I18N.err_totp_bad;
+            else if (data.error === 'pending_expired') msg = I18N.err_totp_exp;
             else if (data.error) msg = data.error;
             errBox.textContent = msg;
             errBox.classList.remove('hidden');
@@ -236,12 +289,11 @@ form.addEventListener('submit', async (e) => {
             totpInput.focus();
         }
     } catch (e) {
-        errBox.textContent = 'Network error. Check the server is reachable.';
+        errBox.textContent = I18N.err_network;
         errBox.classList.remove('hidden');
     } finally {
         btn.disabled = false;
-        if (!pendingToken) btn.innerHTML = 'Authenticate &raquo;';
-        else btn.innerHTML = 'Verify &raquo;';
+        btn.textContent = pendingToken ? I18N.btn_verify : I18N.btn_auth;
     }
 });
 </script>
@@ -251,8 +303,21 @@ form.addEventListener('submit', async (e) => {
 
 
 async def login_page_handler(request: web.Request) -> web.Response:
+    lang = pick_lang(request)
+    s = _I18N[lang]
+    html = (_TEMPLATE
+            .replace("{{LANG}}", lang)
+            .replace("{{I18N_JSON}}", json.dumps(s, ensure_ascii=False))
+            .replace("{{T_TITLE}}", s["title"])
+            .replace("{{T_SUBTITLE}}", s["subtitle"])
+            .replace("{{T_LBL_USERNAME}}", s["lbl_username"])
+            .replace("{{T_LBL_PASSWORD}}", s["lbl_password"])
+            .replace("{{T_LBL_TOTP}}", s["lbl_totp"])
+            .replace("{{T_TOTP_PLACEHOLDER}}", s["totp_placeholder"])
+            .replace("{{T_BTN_AUTH}}", s["btn_auth"])
+            .replace("{{T_FOOT}}", s["foot"]))
     return web.Response(
-        text=LOGIN_HTML,
+        text=html,
         content_type="text/html",
         charset="utf-8",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},

@@ -128,26 +128,28 @@ class PVEClient:
         start_time = time.time()
         node_key = f"{node.host}:{node.port}"
 
+        from .pve_throttle import throttle
         try:
-            async with session.request(method, url, **kwargs) as response:
-                response_time = (time.time() - start_time) * 1000
+            async with throttle.acquire(node.host):
+                async with session.request(method, url, **kwargs) as response:
+                    response_time = (time.time() - start_time) * 1000
 
-                if response.status == 200:
-                    data = await response.json()
-                    # Update health
-                    self.node_health[node_key].healthy = True
-                    self.node_health[node_key].consecutive_failures = 0
-                    self.node_health[node_key].response_time_ms = response_time
-                    self.node_health[node_key].last_check = time.time()
-                    return data.get("data", data)
-                else:
-                    error_text = await response.text()
-                    raise aiohttp.ClientResponseError(
-                        response.request_info,
-                        response.history,
-                        status=response.status,
-                        message=error_text,
-                    )
+                    if response.status == 200:
+                        data = await response.json()
+                        # Update health
+                        self.node_health[node_key].healthy = True
+                        self.node_health[node_key].consecutive_failures = 0
+                        self.node_health[node_key].response_time_ms = response_time
+                        self.node_health[node_key].last_check = time.time()
+                        return data.get("data", data)
+                    else:
+                        error_text = await response.text()
+                        raise aiohttp.ClientResponseError(
+                            response.request_info,
+                            response.history,
+                            status=response.status,
+                            message=error_text,
+                        )
 
         except Exception as e:
             # Update health on failure
@@ -713,6 +715,52 @@ class PVEClient:
     async def get_storage(self, node: str) -> list:
         """Get storage on a node"""
         return await self._request("GET", f"/nodes/{node}/storage")
+
+    async def acquire_ticket(self, username: str, password: str) -> dict:
+        """POST /access/ticket — exchange username+password for a PVE auth
+        cookie + CSRF token. Used by the noVNC console proxy to mint a
+        PVEAuthCookie because PVE's vncwebsocket endpoint refuses API tokens
+        at the WebSocket Upgrade step.
+
+        Returns {ticket, csrf, expires_at_unix}. Caller should cache the
+        ticket up to ~110 minutes; PVE tickets are valid 2h, refresh early.
+        """
+        # /access/ticket is unauthenticated by definition (it IS the
+        # authentication step). We hit the current active node directly.
+        if not self.nodes:
+            raise RuntimeError("no PVE nodes configured")
+        node = self.current_node or self.nodes[0]
+        url = f"https://{node.host}:{node.port}/api2/json/access/ticket"
+        ssl_ctx = None if node.verify_ssl else ssl._create_unverified_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        import time as _time
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
+            async with s.post(url, data={"username": username, "password": password}) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(f"ticket exchange failed: HTTP {resp.status}: {body[:200]}")
+                payload = await resp.json()
+        data = (payload or {}).get("data") or {}
+        ticket = data.get("ticket")
+        csrf = data.get("CSRFPreventionToken") or ""
+        if not ticket:
+            raise RuntimeError("ticket exchange returned no ticket")
+        # PVE tickets last 2 hours; we expire ours at +110 min so callers
+        # always refresh comfortably before PVE rejects.
+        return {"ticket": ticket, "csrf": csrf, "expires_at": int(_time.time()) + 110 * 60}
+
+    async def get_node_network(self, node: str, iface_type: str | None = None) -> list:
+        """Get network interface list on a node.
+
+        Used by the cross-cluster migrate UI to enumerate bridges (for the
+        per-NIC target-bridge mapping) and IP addresses (so the operator
+        can pin the migration data transfer onto a specific subnet).
+        `iface_type` accepts PVE's filter values ('bridge', 'bond', 'eth',
+        'OVSBridge', 'any_bridge', etc.) — leave None to get everything.
+        """
+        params = {"type": iface_type} if iface_type else None
+        return await self._request("GET", f"/nodes/{node}/network", params=params)
 
     async def get_storage_status(self, node: str, storage: str) -> dict:
         """Get storage status"""

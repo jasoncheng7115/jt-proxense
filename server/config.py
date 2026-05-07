@@ -131,6 +131,24 @@ class AuthConfig:
 
 
 @dataclass
+class ConsoleConfig:
+    """Console (noVNC) authentication mode.
+
+    PVE's vncwebsocket endpoint refuses API tokens at the WS Upgrade step
+    (a long-standing PVE limitation; see PVE forum). Three modes:
+
+      - 'disabled' — console buttons are hidden / WS upgrade rejected.
+      - 'stored'   — server uses each cluster's `auth.password` (config.yaml)
+                     to mint a PVEAuthCookie on demand. Convenient but the
+                     password sits on disk; chmod 600 the config.
+      - 'prompt'   — operator types the PVE password into a modal each time;
+                     server uses it once to mint a console_token (5-minute
+                     TTL) and never persists it.
+    """
+    mode: str = "disabled"
+
+
+@dataclass
 class VmControlConfig:
     """v0.3+ VM control (write operations against PVE). Disabled by default
     so the binary remains read-only until the operator explicitly opts in."""
@@ -151,6 +169,7 @@ class Config:
     ui: UIConfig = field(default_factory=UIConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     vm_control: VmControlConfig = field(default_factory=VmControlConfig)
+    console: ConsoleConfig = field(default_factory=ConsoleConfig)
 
     def to_dict(self) -> dict:
         """Convert config to dictionary"""
@@ -182,9 +201,10 @@ class Config:
         forward_data = auth_data.pop("forward", {}) or {}
         auth_cfg = AuthConfig(**auth_data, forward=AuditForwardConfig(**forward_data))
         vm_control_cfg = VmControlConfig(**data.get("vm_control", {}))
+        console_cfg = ConsoleConfig(**data.get("console", {}))
 
         return cls(server=server, clusters=clusters, alerts=alerts, ui=ui,
-                   auth=auth_cfg, vm_control=vm_control_cfg)
+                   auth=auth_cfg, vm_control=vm_control_cfg, console=console_cfg)
 
 
 # Global config instance

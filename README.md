@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.2.0 (unreleased)
+# JT-PROXENSE v0.3.0
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
@@ -142,35 +142,121 @@ See also [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
 
 ## Reverse proxy (HTTPS 443 → 8098)
 
-Minimal nginx site:
+### Why
+
+The built-in server speaks plain HTTP on `8098` and is designed to sit behind a TLS-terminating reverse proxy. In production:
+
+- **Bind jt-proxense to localhost** (`127.0.0.1:8098`) so only the proxy can reach it.
+- **Terminate TLS at nginx** with a real cert (Let's Encrypt or your CA).
+- **Use the app's own auth** (`auth.enabled: true`) — don't layer nginx basic-auth on top, the app already has roles, audit, MFA.
+
+### Step 1 — bind the app to localhost
+
+Edit `/opt/jt-proxense/config.yaml`:
+
+```yaml
+server:
+  host: 127.0.0.1   # was 0.0.0.0
+  port: 8098
+auth:
+  enabled: true     # ← required when exposing the proxy publicly
+```
+
+Then `systemctl restart jt-proxense`. Verify with `ss -tlnp | grep 8098` — it should show `127.0.0.1:8098` only.
+
+### Step 2 — install nginx + certbot
+
+```bash
+apt install nginx python3-certbot-nginx
+```
+
+### Step 3 — nginx site config
+
+Save as `/etc/nginx/sites-available/jt-proxense` and `ln -s` into `sites-enabled/`:
 
 ```nginx
+# Redirect bare HTTP to HTTPS.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name proxense.example.com;
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name proxense.example.com;
+
+    # certbot fills these in for you in step 4.
     ssl_certificate     /etc/letsencrypt/live/proxense.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/proxense.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
 
+    # Backups + secret-store imports can be a few MB.
     client_max_body_size 100M;
 
-    # Add basic auth or your reverse-proxy of choice here.
-    auth_basic           "JT-PROXENSE";
-    auth_basic_user_file /etc/nginx/.htpasswd;
+    # noVNC + the dashboard's live WebSocket stay open for the lifetime
+    # of the console session — give them generous timeouts and disable
+    # buffering so screen updates aren't held back.
+    location /api/console/ {
+        proxy_pass             http://127.0.0.1:8098;
+        proxy_http_version     1.1;
+        proxy_set_header       Upgrade $http_upgrade;
+        proxy_set_header       Connection "upgrade";
+        proxy_set_header       Host $host;
+        proxy_set_header       X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto $scheme;
+        proxy_read_timeout     86400s;   # 24h — match a working VNC session
+        proxy_send_timeout     86400s;
+        proxy_buffering        off;
+    }
 
+    # Main dashboard — also uses WebSockets (the live state feed).
     location / {
-        proxy_pass         http://127.0.0.1:8098;
-        proxy_http_version 1.1;
-        proxy_set_header   Upgrade $http_upgrade;
-        proxy_set_header   Connection "upgrade";
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
+        proxy_pass             http://127.0.0.1:8098;
+        proxy_http_version     1.1;
+        proxy_set_header       Upgrade $http_upgrade;
+        proxy_set_header       Connection "upgrade";
+        proxy_set_header       Host $host;
+        proxy_set_header       X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto $scheme;
+        proxy_read_timeout     3600s;
+        proxy_send_timeout     3600s;
+        proxy_buffering        off;
     }
 }
 ```
 
-The app must be mounted at the **root path** `/` — templates use absolute paths, sub-path mounts are unsupported.
+### Step 4 — issue the cert and reload
+
+```bash
+nginx -t && systemctl reload nginx
+certbot --nginx -d proxense.example.com
+```
+
+certbot rewrites the `ssl_certificate*` lines and adds a renewal cron entry.
+
+### Step 5 — close port 8098 at the firewall
+
+Open `443` (and `80` for redirect + ACME), close `8098`:
+
+```bash
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw deny 8098/tcp
+```
+
+Now visit `https://proxense.example.com/` — the app login page should appear.
+
+### Notes / gotchas
+
+- The app must be mounted at the **root path** `/` — templates use absolute paths, sub-path mounts (`/proxense/`) are unsupported.
+- Don't add `auth_basic` at the nginx layer. The app's auth handles login, sessions, MFA, audit, and roles; double-auth just confuses operators.
+- noVNC needs `proxy_buffering off` *and* the long `proxy_read_timeout`. Without either, the console either freezes or dies after ~60s of idle.
+- If you change the upstream port (e.g. run multiple instances), only `proxy_pass` lines need updating.
+- For internal/intranet deployments without public DNS, generate a self-signed cert (`openssl req -x509 ...`) and skip certbot — operators will have to accept the cert once.
 
 ---
 

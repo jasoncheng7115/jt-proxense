@@ -8,6 +8,43 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.0] — 2026-05-07
+
+### 新增
+
+- **QEMU VM 的 noVNC 主控台** — Cyberpunk 風格頁面 `/console/{cluster}/{node}/{vmid}`、WS bridge `/api/console/.../ws`。noVNC 以 vendored 方式放在 `/assets/novnc/`，整條鏈不依賴外部 CDN（CSP 全 `'self'`）。一次性 2 分鐘 `console_token` + 110 分鐘 PVE ticket 快取。**為什麼：** 操作員不應為了開個 console 又另開 PVE web 分頁、再認證一次。**驗證：** 在 VM 右鍵選「主控台」→ 應顯示「已連線」、journal 看到 RFB banner。
+- **LXC 容器的 xterm.js 主控台**（走 PVE `termproxy`，跟 PVE web UI 一致）。新頁面 `/console-term/{...}`、bridge `/api/console/.../term/ws`。xterm.js + addon-fit vendored 在 `/assets/xterm/`。Bridge 在 server 端處理 termproxy 的 `<user>:<ticket>\n` 認證 frame，瀏覽器看不到 ticket。**驗證：** 任一 LXC 右鍵主控台 → 出 shell 提示符、⌃C/scrollback 都正常。
+- **noVNC 頁的「傳送按鍵」下拉** — Tab / Esc / Backspace / Super / PrintScreen，加上 Ctrl-Alt-Backspace 與 Ctrl-Alt-F1..F12（對齊 PVE noVNC 的 keyboard 選單）。
+- **主控台視窗標題包含 VM/CT 名稱** — `<title>` 與 titlebar 都顯示 `VM <id> — <name>` / `CT <id> — <name>`，名稱透過 `?name=` 帶入。
+- **加密密碼儲存**（Fernet AES-128-CBC + HMAC），master key 放 `/etc/jt-proxense/master.key`（chmod 600）。新增 CLI 子指令 `jt-proxense secret`：`set / get / rm / list / export / import / rotate-key / migrate-yaml`。設定 → 叢集面板新增「設定 / 更換 / 清除 PVE 密碼」按鈕。**為什麼：** stored 模式 console 用的 PVE root 密碼不應該明碼留在 `config.yaml`。
+- **Per-host PVE API 限流**（`server/pve_throttle.py`）— async semaphore（每 host 預設 4 並發）+ 啟動間最小間隔 50ms，已接到 `pve_client._request`。**為什麼：** PVE 的 `pveproxy` 是單行程；無節制的 fan-out 會回 596 並把整個 cluster 卡住。
+- **README 加完整 nginx HTTPS 反向代理章節** — 綁 localhost、HTTP→HTTPS 轉址、certbot、ufw，含 noVNC 專屬的 `proxy_buffering off` + `proxy_read_timeout 86400s`（缺一就會在 60 秒後凍住）。
+
+### 變更
+
+- **概觀頁的計數動畫只在首次掛載時跑**，後續即時資料直接 snap。原本每次 WS 更新會在 ~27 個元件上各起一條 60fps tween，瀏覽器 CPU 維持在 30–50%；改完同樣畫面待機在 1–3%。
+- **`ParticleBackground` 上限 ~30fps**，粒子數 80 → 40，拿掉 canvas `shadowBlur` 雙重 fill（每 frame 最貴的一段）。
+- **矩陣表格列分隔線**改用 `rgba(0,240,255,.08)` — 之前用未定義的 `--border-dim` 變數，整條 CSS 規則無效。
+- **空標籤不再渲染成空 pill**（PVE 對只有分隔符的 tag 字串會回 `[""]`）。
+
+### 修正
+
+- **noVNC 一直以 WS code 1006 失敗。** 根因：aiohttp 的 `cookies={...}` 會把 cookie 值百分號編碼，但 PVE ticket 含 `+ / = :` 必須原樣送到 PVE — vncproxy 收到後靜默回 401。Bridge 改用 raw `Cookie:` header，vncproxy POST 與 `ws_connect` 都這樣送。另外，vncproxy 回的 ticket 同時也是 RFB 層的 VNC 密碼，原本傳空字串；現在 `/prepare` 階段就 mint 好、透過 URL fragment（`#vp=...`，不會進 server log / proxy 快取）帶到 console 頁，再餵給 noVNC `credentials.password`。
+- **第一次顯示時 console 畫面太小** — noVNC 的 `scaleViewport` 要在收到 framebuffer init 後才知道遠端尺寸，所以 constructor 階段設沒效。改成 `connect` 事件內 toggle-and-reset，並在 `window.resize` 時重 fit。
+- **雷達 tooltip 下緣文字被切掉**（先前全域 +1px 字級沒跟著調卡片高度）— 高度改 145 / 175。
+
+### 安全
+
+- **CSP**：console 頁面送出 `default-src 'self'; ... connect-src 'self' wss: ws:` — 無第三方來源、無 eval、無 inline event handler。noVNC 與 xterm.js 都 vendored。
+- **PVE `vnc_password`** 走 URL fragment 進 console 頁；頁面讀完後立即用 `history.replaceState` 把 fragment 從網址列抹掉，避免 refresh / 旁觀者從網址欄取得。
+
+### 驗證
+
+- 後端測試：245 個全綠（132 秒）。
+- 端對端：noVNC bridge 收到 PVE 的 `RFB 003.008\n`；xterm bridge 收到 termproxy 的 `OK` 認證 ack。
+
+---
+
 ## [Unreleased] — v0.2 開發中於 `v0.2-auth` 分支
 
 ### 新增（預覽，僅在 feature branch，尚未進 `main`）

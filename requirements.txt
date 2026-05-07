@@ -19,6 +19,10 @@ qrcode[pil]>=7.4.2
 # v0.2.x: PAM authentication backend (optional, only loaded when auth.backend='pam')
 python-pam>=2.0.2
 
+# v0.3.x: Encrypted at-rest store for per-cluster secrets
+# (PVE passwords used by the noVNC console; never written to config.yaml).
+cryptography>=41.0.0
+
 # SSL handling
 certifi>=2024.0.0
 

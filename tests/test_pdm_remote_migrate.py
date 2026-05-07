@@ -15,30 +15,43 @@ class _FakeVM:
 
 
 class _FakeClient:
-    def __init__(self):
+    def __init__(self, *, vm_config=None, storages=None, network=None,
+                 cluster_status=None):
         self.calls = []
         self.fail_next = None
+        # Stubbed PVE API responses for the new layout endpoints.
+        self._vm_config = vm_config or {}
+        self._storages = storages or []
+        self._network = network or []
+        self._cluster_status = cluster_status or []
     async def vm_remote_migrate(self, node, vmid, *, target_endpoint,
                                  target_vmid, target_bridge, target_storage,
                                  online=True, delete_source=False, bwlimit=None):
         if self.fail_next:
             e = self.fail_next; self.fail_next = None; raise e
-        # Capture WITHOUT the secret-bearing target_endpoint string; we don't
-        # want it visible in test logs by accident either.
         self.calls.append((
             "vm_remote_migrate", node, vmid, target_vmid,
             target_bridge, target_storage, online, delete_source,
         ))
         return f"UPID:fake:0001:remote-migrate-{vmid}"
+    async def get_vm_config(self, node, vmid):
+        return dict(self._vm_config)
+    async def get_storage(self, node):
+        return list(self._storages)
+    async def get_node_network(self, node, iface_type=None):
+        return list(self._network)
+    async def get_cluster_status(self):
+        return list(self._cluster_status)
 
 
 class _FakeCluster:
-    def __init__(self, cid, vms):
+    def __init__(self, cid, vms, *, client=None, nodes=None):
         self.id = cid
-        self.client = _FakeClient()
+        self.client = client or _FakeClient()
         class _Cache: pass
         self.cache = _Cache()
         self.cache.vms = {f"{v.node}/{v.vmid}": v for v in vms}
+        self.cache.nodes = {n: object() for n in (nodes or [])}
 
 
 @pytest.fixture
@@ -221,6 +234,82 @@ def test_build_target_endpoint_format():
     assert "port=8006" in s
     assert "fingerprint=AA:BB:CC" in s
 
+
+# ---------------------------------------------------------------- source layout
+
+@pytest.mark.asyncio
+async def test_source_layout_returns_disks_and_nics(fake_clusters, monkeypatch, aiohttp_client):
+    """The migration-source endpoint parses VM config into disk/NIC summaries
+    so the modal can render one dropdown per resource. Cdroms and unallocated
+    slots must be filtered out — they don't migrate as block volumes."""
+    src = fake_clusters["src"]
+    src.client = _FakeClient(vm_config={
+        "scsi0": "ceph1:vm-123-disk-0,size=52G,iothread=1",
+        "scsi1": "local-zfs:vm-123-disk-1,size=10G",
+        "ide2":  "none,media=cdrom",   # excluded
+        "net0":  "virtio=AA:BB:CC:DD:EE:01,bridge=vmbr0,firewall=1",
+        "net1":  "virtio=AA:BB:CC:DD:EE:02,bridge=vmbr10,tag=100",
+    })
+    client = await aiohttp_client(_make_app())
+    r = await client.get("/api/clusters/cluster1/vms/123/migration-source")
+    assert r.status == 200
+    body = await r.json()
+    assert {d["key"] for d in body["disks"]} == {"scsi0", "scsi1"}
+    assert next(d for d in body["disks"] if d["key"] == "scsi0")["storage"] == "ceph1"
+    assert next(d for d in body["disks"] if d["key"] == "scsi0")["size"] == "52G"
+    assert {n["key"] for n in body["nics"]} == {"net0", "net1"}
+    assert next(n for n in body["nics"] if n["key"] == "net0")["bridge"] == "vmbr0"
+    assert next(n for n in body["nics"] if n["key"] == "net1")["bridge"] == "vmbr10"
+
+
+@pytest.mark.asyncio
+async def test_source_layout_404s_unknown_vm(fake_clusters, aiohttp_client):
+    client = await aiohttp_client(_make_app())
+    r = await client.get("/api/clusters/cluster1/vms/9999/migration-source")
+    assert r.status == 404
+
+
+# ---------------------------------------------------------------- target layout
+
+@pytest.mark.asyncio
+async def test_target_layout_filters_to_image_capable_storage(fake_clusters, aiohttp_client):
+    """The modal's per-disk dropdown must only offer storages that can hold
+    VM disk images. ISO-only / backup-only storages would silently fail
+    later if we let them through."""
+    tgt = fake_clusters["tgt"]
+    tgt.client = _FakeClient(
+        storages=[
+            {"storage": "Backup_1-zfs", "type": "zfspool",
+             "content": "images,rootdir", "avail": 4_000_000_000_000,
+             "total": 11_000_000_000_000, "active": 1, "enabled": 1},
+            {"storage": "iso-only", "type": "dir", "content": "iso",
+             "avail": 1, "total": 1, "active": 1, "enabled": 1},
+        ],
+        network=[
+            {"iface": "vmbr0",  "type": "bridge",
+             "address": "203.0.113.107", "netmask": "24"},
+            {"iface": "vmbr10", "type": "bridge",
+             "address": "172.16.100.107", "netmask": "24"},
+            {"iface": "lo",     "type": "loopback", "address": "127.0.0.1"},
+        ],
+    )
+    client = await aiohttp_client(_make_app())
+    r = await client.get("/api/clusters/host-107/nodes/host-107/migration-targets")
+    assert r.status == 200
+    body = await r.json()
+    storage_ids = {s["storage"] for s in body["storages"]}
+    assert storage_ids == {"Backup_1-zfs"}
+    bridge_names = {b["iface"] for b in body["bridges"]}
+    assert bridge_names == {"vmbr0", "vmbr10"}
+    # IPs surface every interface with a v4 address — including loopback,
+    # since the operator may legitimately want to enumerate it (we don't
+    # second-guess routing).
+    addrs = {i["address"] for i in body["ips"]}
+    assert "172.16.100.107" in addrs
+    assert "203.0.113.107" in addrs
+
+
+# ---------------------------------------------------------------- endpoint string format
 
 def test_build_target_endpoint_field_order():
     """PVE expects comma-separated key=value; we emit a stable order."""

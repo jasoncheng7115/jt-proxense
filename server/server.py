@@ -31,8 +31,11 @@ from . import pdm_remote_migrate
 from . import pdm_vm_ext
 from . import console_proxy
 from . import console_page
+from . import console_term_page
 from . import notifications_handlers
 from . import audit_forwarder
+from . import secret_handlers
+from . import secret_store
 from .middleware import (
     request_id_middleware, security_headers_middleware,
     make_auth_middleware, role_required,
@@ -50,6 +53,13 @@ _last_broadcast_message = ""
 
 # Static files directory
 DIST_DIR = Path(__file__).parent.parent / "dist"
+
+
+def _ws_is_paused(ws) -> bool:
+    """Each connected WS carries a `_jtp_paused` flag we set when the client
+    reports its tab as hidden. Paused clients are skipped by broadcast so
+    we don't burn CPU JSON-encoding for a tab nobody is looking at."""
+    return getattr(ws, "_jtp_paused", False)
 
 
 async def broadcast_to_clients(data: dict):
@@ -71,9 +81,11 @@ async def broadcast_to_clients(data: dict):
         "timestamp": time.time(),
     })
 
-    # Broadcast to all clients
+    # Broadcast to all clients (skip ones whose tab is hidden)
     dead_clients = set()
     for ws in ws_clients:
+        if _ws_is_paused(ws):
+            continue
         try:
             await asyncio.wait_for(
                 ws.send_str(_last_broadcast_message),
@@ -121,6 +133,24 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 
                     if msg_type == "ping":
                         await ws.send_json({"type": "pong", "timestamp": time.time()})
+                    elif msg_type == "pause":
+                        # Client tab went hidden — skip broadcasts until resume.
+                        ws._jtp_paused = True
+                    elif msg_type == "resume":
+                        ws._jtp_paused = False
+                    elif msg_type == "refresh":
+                        # Re-arm with a fresh snapshot — used right after the
+                        # tab becomes visible so the UI shows current data.
+                        ws._jtp_paused = False
+                        try:
+                            snapshot = cluster_manager.get_all_data()
+                            await ws.send_json({
+                                "type": "initial",
+                                "data": snapshot,
+                                "timestamp": time.time(),
+                            })
+                        except Exception as e:
+                            logger.debug(f"refresh failed: {e}")
                     elif msg_type == "subscribe":
                         # Future: handle cluster-specific subscriptions
                         pass
@@ -144,12 +174,18 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 async def get_config_handler(request: web.Request) -> web.Response:
     """Get current configuration"""
     config = get_config()
-    # Don't expose sensitive auth data
+    # Don't expose sensitive auth data — replace with a sentinel so the UI
+    # can show a "configured" badge without ever seeing the value.
     config_dict = config.to_dict()
     for cluster in config_dict.get("clusters", []):
+        cid = cluster.get("id", "")
         if "auth" in cluster:
             cluster["auth"]["token_value"] = "***" if cluster["auth"].get("token_value") else ""
-            cluster["auth"]["password"] = "***" if cluster["auth"].get("password") else ""
+            # `auth.password` is sourced from BOTH the encrypted secret store
+            # AND (legacy) the yaml field — treat either as "configured".
+            yaml_pw = cluster["auth"].get("password") or ""
+            store_has = secret_store.has_secret(cid, "pve_password") if cid else False
+            cluster["auth"]["password"] = "***" if (yaml_pw or store_has) else ""
 
     return web.json_response(config_dict)
 
@@ -478,14 +514,31 @@ def create_app() -> web.Application:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
-    # v0.3.x noVNC console: WS bridge + server-rendered page
+    # v0.3.x encrypted per-cluster secret store (admin only)
+    for method, path, handler in secret_handlers.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x noVNC console: prepare + WS bridge + server-rendered page
+    app.router.add_post(
+        "/api/console/prepare",
+        console_proxy.console_prepare_handler,
+    )
     app.router.add_get(
         "/api/console/{cluster_id}/{node}/{vmid}/ws",
         console_proxy.console_ws_handler,
     )
     app.router.add_get(
+        "/api/console/{cluster_id}/{node}/{vmid}/term/ws",
+        console_proxy.console_term_ws_handler,
+    )
+    app.router.add_get(
         "/console/{cluster_id}/{node}/{vmid}",
         console_page.console_page_handler,
+    )
+    app.router.add_get(
+        "/console-term/{cluster_id}/{node}/{vmid}",
+        console_term_page.console_term_page_handler,
     )
 
     # v0.2 login page (always public; the SPA root is gated by auth middleware)
@@ -537,6 +590,20 @@ async def start_server():
                     config.auth.backend, config.auth.db_path, db.schema_version())
     else:
         logger.warning("auth.enabled=false — service is OPEN to anyone who can reach the port.")
+
+    # Encrypted secret store: ensure master.key exists, then sweep any
+    # plaintext PVE passwords still in config.yaml into the store and clear
+    # them from yaml. Idempotent — does nothing on subsequent boots.
+    try:
+        secret_store.ensure_master_key()
+        migrated = secret_store.migrate_from_yaml(actor="system:boot")
+        if migrated:
+            ok = [m[0] for m in migrated if m[1] == "ok"]
+            if ok:
+                logger.warning("migrated %d cluster password(s) from yaml → encrypted store: %s",
+                               len(ok), ", ".join(ok))
+    except Exception as e:
+        logger.error("secret store bootstrap failed: %s", e)
 
     # Audit forwarding (optional, set up after DB so the forwarder is ready
     # before the first audit row is written).

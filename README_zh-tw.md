@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.2.0（尚未發布）
+# JT-PROXENSE v0.3.0
 
 > English version: [README.md](README.md)
 
@@ -142,35 +142,120 @@ sudo jt-proxense user reset-totp admin # 清除遺失的 authenticator
 
 ## 反向代理（HTTPS 443 → 8098）
 
-最小 nginx 設定：
+### 為什麼要這樣做
+
+內建 server 只走純 HTTP `8098`，設計上就是要放在 TLS 反向代理後面。正式環境請：
+
+- **jt-proxense 綁 localhost**（`127.0.0.1:8098`），只有反向代理連得到。
+- **nginx 端做 TLS 終結**，用 Let's Encrypt 或自家憑證。
+- **用 app 自己的認證**（`auth.enabled: true`），別在 nginx 再疊一層 basic auth — app 已經有角色、稽核、MFA 一整套。
+
+### 步驟 1 — 把服務綁回 localhost
+
+編輯 `/opt/jt-proxense/config.yaml`：
+
+```yaml
+server:
+  host: 127.0.0.1   # 原本是 0.0.0.0
+  port: 8098
+auth:
+  enabled: true     # ← 對外開放前必開
+```
+
+然後 `systemctl restart jt-proxense`。用 `ss -tlnp | grep 8098` 確認，應該只看到 `127.0.0.1:8098`。
+
+### 步驟 2 — 安裝 nginx + certbot
+
+```bash
+apt install nginx python3-certbot-nginx
+```
+
+### 步驟 3 — nginx site 設定
+
+存成 `/etc/nginx/sites-available/jt-proxense` 並 `ln -s` 到 `sites-enabled/`：
 
 ```nginx
+# HTTP → HTTPS 強制轉址
+server {
+    listen 80;
+    listen [::]:80;
+    server_name proxense.example.com;
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name proxense.example.com;
+
+    # certbot 會在步驟 4 幫你填好憑證路徑
     ssl_certificate     /etc/letsencrypt/live/proxense.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/proxense.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
 
+    # 備份 / 加密金鑰匯入動輒幾 MB
     client_max_body_size 100M;
 
-    # 在這裡接上你想用的認證機制
-    auth_basic           "JT-PROXENSE";
-    auth_basic_user_file /etc/nginx/.htpasswd;
+    # noVNC 與儀表板的即時 WebSocket 在整個 console 連線期間都會開著 —
+    # 給寬鬆 timeout、關掉 buffering，畫面更新才不會被緩衝住。
+    location /api/console/ {
+        proxy_pass             http://127.0.0.1:8098;
+        proxy_http_version     1.1;
+        proxy_set_header       Upgrade $http_upgrade;
+        proxy_set_header       Connection "upgrade";
+        proxy_set_header       Host $host;
+        proxy_set_header       X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto $scheme;
+        proxy_read_timeout     86400s;   # 24 小時，配合一般 VNC 操作時長
+        proxy_send_timeout     86400s;
+        proxy_buffering        off;
+    }
 
+    # 主畫面 — 同樣會用到 WebSocket（即時資料）
     location / {
-        proxy_pass         http://127.0.0.1:8098;
-        proxy_http_version 1.1;
-        proxy_set_header   Upgrade $http_upgrade;
-        proxy_set_header   Connection "upgrade";
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
+        proxy_pass             http://127.0.0.1:8098;
+        proxy_http_version     1.1;
+        proxy_set_header       Upgrade $http_upgrade;
+        proxy_set_header       Connection "upgrade";
+        proxy_set_header       Host $host;
+        proxy_set_header       X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto $scheme;
+        proxy_read_timeout     3600s;
+        proxy_send_timeout     3600s;
+        proxy_buffering        off;
     }
 }
 ```
 
-服務必須掛在根路徑 `/`，模板使用絕對路徑，子路徑掛載目前不支援。
+### 步驟 4 — 簽憑證 + reload
+
+```bash
+nginx -t && systemctl reload nginx
+certbot --nginx -d proxense.example.com
+```
+
+certbot 會自動改寫 `ssl_certificate*` 兩行並排好續約。
+
+### 步驟 5 — 防火牆關掉 8098
+
+開 `443`（與 `80` 用於跳轉與 ACME 驗證），關掉 `8098`：
+
+```bash
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw deny 8098/tcp
+```
+
+接著用 `https://proxense.example.com/` 進入，看到登入頁就成功。
+
+### 注意事項
+
+- 服務必須掛在根路徑 `/`，模板使用絕對路徑，子路徑掛載（`/proxense/`）目前不支援。
+- 別在 nginx 加 `auth_basic` — app 已經處理登入、session、MFA、稽核、角色，再多一層只會把操作員搞混。
+- noVNC 一定要 `proxy_buffering off`、加上長 `proxy_read_timeout`，少了任一個 console 不是凍住就是 60 秒後直接斷。
+- 換 upstream port（例如同機跑多份）時，只要改 `proxy_pass` 那兩行就好。
+- 內網 / 沒有公開 DNS 的環境，可以用 `openssl req -x509 ...` 自簽，跳過 certbot — 操作員第一次連會被瀏覽器要求接受憑證。
 
 ---
 

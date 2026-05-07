@@ -5,17 +5,70 @@ changes happen via the system's passwd tooling.
 """
 from __future__ import annotations
 
+import json
+
 from aiohttp import web
 
 from .middleware import auth_required
+from .page_i18n import pick_lang
 
 
-HTML = """<!DOCTYPE html>
-<html lang="en">
+_I18N: dict[str, dict[str, str]] = {
+    "en": {
+        "title":           "Account settings",
+        "back":            "« Dashboard",
+        "profile":         "Profile",
+        "loading":         "loading...",
+        "signed_in_as":    "// signed in as",
+        "change_pw":       "Change password",
+        "change_pw_lead":  "Enter your current password to confirm, then a new one (min 8 chars).",
+        "label_current":   "Current password",
+        "label_new1":      "New password",
+        "label_new2":      "Confirm new password",
+        "btn_change":      "Change password »",
+        "ok_updated":      "Password updated.",
+        "tfa_title":       "Two-factor authentication",
+        "tfa_lead":        "Manage TOTP enrollment + backup codes.",
+        "tfa_open":        "Open 2FA setup »",
+        "err_required":    "All fields required",
+        "err_mismatch":    "New passwords do not match",
+        "err_too_short":   "New password must be at least 8 characters",
+        "err_pam":         "This account is managed by your system's PAM — change it via passwd.",
+        "err_current_bad": "Current password is incorrect.",
+        "err_generic":     "Password change failed",
+    },
+    "zh-TW": {
+        "title":           "帳號設定",
+        "back":            "« 儀表板",
+        "profile":         "個人資料",
+        "loading":         "載入中...",
+        "signed_in_as":    "// 目前登入帳號",
+        "change_pw":       "變更密碼",
+        "change_pw_lead":  "請先輸入目前的密碼進行確認，再設定新密碼（至少 8 個字元）。",
+        "label_current":   "目前密碼",
+        "label_new1":      "新密碼",
+        "label_new2":      "確認新密碼",
+        "btn_change":      "變更密碼 »",
+        "ok_updated":      "密碼已更新。",
+        "tfa_title":       "雙因素認證",
+        "tfa_lead":        "管理 TOTP 註冊與備援碼。",
+        "tfa_open":        "開啟 2FA 設定 »",
+        "err_required":    "所有欄位必填",
+        "err_mismatch":    "兩次新密碼不一致",
+        "err_too_short":   "新密碼至少需 8 個字元",
+        "err_pam":         "此帳號由系統 PAM 管理 — 請使用 passwd 指令變更。",
+        "err_current_bad": "目前密碼錯誤。",
+        "err_generic":     "密碼變更失敗",
+    },
+}
+
+
+_TEMPLATE = """<!DOCTYPE html>
+<html lang="{{LANG}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JT-PROXENSE — Account</title>
+    <title>JT-PROXENSE — {{T_TITLE}}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
         :root {
@@ -66,39 +119,40 @@ HTML = """<!DOCTYPE html>
 <body>
 <div class="container">
     <header>
-        <h1>JT-<span class="accent">PROXENSE</span> &middot; Account</h1>
-        <nav class="top"><a href="/">&laquo; Dashboard</a></nav>
+        <h1>JT-<span class="accent">PROXENSE</span> &middot; {{T_TITLE}}</h1>
+        <nav class="top"><a href="/">{{T_BACK}}</a></nav>
     </header>
 
     <div class="card">
-        <h2>Profile</h2>
-        <div class="meta" id="profile">loading...</div>
+        <h2>{{T_PROFILE}}</h2>
+        <div class="meta" id="profile">{{T_LOADING}}</div>
     </div>
 
     <div class="card" id="pwCard">
-        <h2>Change password</h2>
-        <p id="pwLead">Enter your current password to confirm, then a new one (min 8 chars).</p>
+        <h2>{{T_CHANGE_PW}}</h2>
+        <p id="pwLead">{{T_CHANGE_PW_LEAD}}</p>
         <div id="pwForm">
-            <label for="cur">Current password</label>
+            <label for="cur">{{T_LABEL_CURRENT}}</label>
             <input id="cur" type="password" autocomplete="current-password">
-            <label for="new1">New password</label>
+            <label for="new1">{{T_LABEL_NEW1}}</label>
             <input id="new1" type="password" autocomplete="new-password">
-            <label for="new2">Confirm new password</label>
+            <label for="new2">{{T_LABEL_NEW2}}</label>
             <input id="new2" type="password" autocomplete="new-password">
-            <button id="pwBtn">Change password &raquo;</button>
+            <button id="pwBtn">{{T_BTN_CHANGE}}</button>
             <div class="err hidden" id="pwErr"></div>
-            <div class="ok hidden" id="pwOk">Password updated.</div>
+            <div class="ok hidden" id="pwOk">{{T_OK_UPDATED}}</div>
         </div>
     </div>
 
     <div class="card">
-        <h2>Two-factor authentication</h2>
-        <p>Manage TOTP enrollment + backup codes.</p>
-        <a href="/totp"><button class="ghost">Open 2FA setup &raquo;</button></a>
+        <h2>{{T_TFA_TITLE}}</h2>
+        <p>{{T_TFA_LEAD}}</p>
+        <a href="/totp"><button class="ghost">{{T_TFA_OPEN}}</button></a>
     </div>
 </div>
 
 <script>
+const I18N = {{I18N_JSON}};
 const $=id=>document.getElementById(id);
 const show=el=>el.classList.remove('hidden'); const hide=el=>el.classList.add('hidden');
 
@@ -110,7 +164,7 @@ async function loadProfile(){
     if(!d.authenticated){window.location.replace('/login');return}
     me=d.user;
     $('profile').innerHTML = `
-        <span>// signed in as <strong style="color:var(--text)">${esc(me.username)}</strong></span>
+        <span>${esc(I18N.signed_in_as)} <strong style="color:var(--text)">${esc(me.username)}</strong></span>
         <span class="pill ${roleClass(me.role_global)}">${esc(me.role_global||'guest')}</span>`;
 }
 function roleClass(r){return r==='admin'?'orange':(r?'cyan':'muted')}
@@ -119,9 +173,9 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;',
 $('pwBtn').addEventListener('click', async ()=>{
     hide($('pwErr')); hide($('pwOk'));
     const cur=$('cur').value, n1=$('new1').value, n2=$('new2').value;
-    if(!cur||!n1){$('pwErr').textContent='All fields required';show($('pwErr'));return}
-    if(n1!==n2){$('pwErr').textContent='New passwords do not match';show($('pwErr'));return}
-    if(n1.length<8){$('pwErr').textContent='New password must be at least 8 characters';show($('pwErr'));return}
+    if(!cur||!n1){$('pwErr').textContent=I18N.err_required;show($('pwErr'));return}
+    if(n1!==n2){$('pwErr').textContent=I18N.err_mismatch;show($('pwErr'));return}
+    if(n1.length<8){$('pwErr').textContent=I18N.err_too_short;show($('pwErr'));return}
     $('pwBtn').disabled=true;
     const r=await fetch('/api/auth/change-password',{
         method:'POST',credentials:'same-origin',
@@ -134,10 +188,10 @@ $('pwBtn').addEventListener('click', async ()=>{
         $('cur').value=''; $('new1').value=''; $('new2').value='';
     } else {
         const d=await r.json().catch(()=>({}));
-        const map={pam_managed:'This account is managed by your system\\'s PAM — change it via passwd.',
-                   current_password_invalid:'Current password is incorrect.',
-                   new_too_short:'New password must be at least 8 characters.'};
-        $('pwErr').textContent=map[d.error]||d.error||'Password change failed';
+        const map={pam_managed:I18N.err_pam,
+                   current_password_invalid:I18N.err_current_bad,
+                   new_too_short:I18N.err_too_short};
+        $('pwErr').textContent=map[d.error]||d.error||I18N.err_generic;
         show($('pwErr'));
     }
 });
@@ -151,7 +205,26 @@ loadProfile();
 
 @auth_required
 async def account_page_handler(request: web.Request) -> web.Response:
+    lang = pick_lang(request)
+    s = _I18N[lang]
+    html = (_TEMPLATE
+            .replace("{{LANG}}", lang)
+            .replace("{{I18N_JSON}}", json.dumps(s, ensure_ascii=False))
+            .replace("{{T_TITLE}}", s["title"])
+            .replace("{{T_BACK}}", s["back"])
+            .replace("{{T_PROFILE}}", s["profile"])
+            .replace("{{T_LOADING}}", s["loading"])
+            .replace("{{T_CHANGE_PW}}", s["change_pw"])
+            .replace("{{T_CHANGE_PW_LEAD}}", s["change_pw_lead"])
+            .replace("{{T_LABEL_CURRENT}}", s["label_current"])
+            .replace("{{T_LABEL_NEW1}}", s["label_new1"])
+            .replace("{{T_LABEL_NEW2}}", s["label_new2"])
+            .replace("{{T_BTN_CHANGE}}", s["btn_change"])
+            .replace("{{T_OK_UPDATED}}", s["ok_updated"])
+            .replace("{{T_TFA_TITLE}}", s["tfa_title"])
+            .replace("{{T_TFA_LEAD}}", s["tfa_lead"])
+            .replace("{{T_TFA_OPEN}}", s["tfa_open"]))
     return web.Response(
-        text=HTML, content_type="text/html", charset="utf-8",
+        text=html, content_type="text/html", charset="utf-8",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )

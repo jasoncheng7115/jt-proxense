@@ -5,17 +5,102 @@ don't have to touch the React bundle. Cyberpunk styling matches the rest.
 """
 from __future__ import annotations
 
+import json
+
 from aiohttp import web
 
 from .middleware import role_required
+from .page_i18n import pick_lang
 
 
-AUDIT_HTML = """<!DOCTYPE html>
-<html lang="en">
+_I18N: dict[str, dict[str, str]] = {
+    "en": {
+        "title":          "Audit",
+        "loading_session": "loading session…",
+        "nav_dashboard":  "Dashboard",
+        "nav_logout":     "Logout",
+        "f_user":         "User",
+        "f_user_ph":      "any",
+        "f_action":       "Action (LIKE)",
+        "f_action_ph":    "e.g. auth.% or vm.start",
+        "f_cluster":      "Cluster",
+        "f_since":        "Since (UTC)",
+        "f_until":        "Until (UTC)",
+        "f_limit":        "Limit",
+        "btn_refresh":    "Refresh »",
+        "btn_auto_off":   "Auto: off",
+        "btn_auto_on":    "Auto: 5s",
+        "btn_csv":        "CSV",
+        "btn_csv_title":  "Download visible rows as CSV",
+        "th_ts":          "Timestamp",
+        "th_user":        "User",
+        "th_action":      "Action",
+        "th_target":      "Target",
+        "th_result":      "Result",
+        "th_ip":          "Source IP",
+        "th_req":         "Request ID",
+        "empty_initial":  "No rows yet. Hit Refresh.",
+        "empty_filtered": "No rows match the filters.",
+        "rows_initial":   "— rows",
+        "rows_total":     "{n} rows total",
+        "page":           "page",
+        "page_of":        "of",
+        "btn_prev":       "« Prev",
+        "btn_next":       "Next »",
+        "err_403":        "403 forbidden — admin role required.",
+        "err_admin_only": "Admin role required to view the audit log.",
+        "alert_no_rows":  "No rows to export — run a query first.",
+        "signed_in":      "// signed in as {user} ({role})",
+        "no_role":        "no role",
+    },
+    "zh-TW": {
+        "title":          "稽核記錄",
+        "loading_session": "載入工作階段中…",
+        "nav_dashboard":  "儀表板",
+        "nav_logout":     "登出",
+        "f_user":         "使用者",
+        "f_user_ph":      "任意",
+        "f_action":       "動作 (LIKE)",
+        "f_action_ph":    "例：auth.% 或 vm.start",
+        "f_cluster":      "叢集",
+        "f_since":        "起始時間 (UTC)",
+        "f_until":        "結束時間 (UTC)",
+        "f_limit":        "筆數上限",
+        "btn_refresh":    "重新整理 »",
+        "btn_auto_off":   "自動：關",
+        "btn_auto_on":    "自動：5 秒",
+        "btn_csv":        "匯出 CSV",
+        "btn_csv_title":  "把目前列匯出成 CSV",
+        "th_ts":          "時間",
+        "th_user":        "使用者",
+        "th_action":      "動作",
+        "th_target":      "目標",
+        "th_result":      "結果",
+        "th_ip":          "來源 IP",
+        "th_req":         "請求 ID",
+        "empty_initial":  "尚未查詢，請按重新整理。",
+        "empty_filtered": "沒有符合條件的紀錄。",
+        "rows_initial":   "— 筆",
+        "rows_total":     "共 {n} 筆",
+        "page":           "第",
+        "page_of":        "頁／共",
+        "btn_prev":       "« 上一頁",
+        "btn_next":       "下一頁 »",
+        "err_403":        "403 禁止存取 — 需要 admin 角色。",
+        "err_admin_only": "查看稽核記錄需要 admin 角色。",
+        "alert_no_rows":  "目前無資料可匯出，請先執行查詢。",
+        "signed_in":      "// 目前登入：{user} ({role})",
+        "no_role":        "未指派角色",
+    },
+}
+
+
+_TEMPLATE = """<!DOCTYPE html>
+<html lang="{{LANG}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JT-PROXENSE — Audit log</title>
+    <title>JT-PROXENSE — {{T_TITLE}}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
         :root {
@@ -156,32 +241,32 @@ AUDIT_HTML = """<!DOCTYPE html>
 <div class="container">
     <header>
         <div>
-            <h1>JT-<span class="accent">PROXENSE</span> &middot; Audit</h1>
-            <div class="meta" id="userInfo">loading session…</div>
+            <h1>JT-<span class="accent">PROXENSE</span> &middot; {{T_TITLE}}</h1>
+            <div class="meta" id="userInfo">{{T_LOADING_SESSION}}</div>
         </div>
         <nav class="top">
-            <a href="/">Dashboard</a>
-            <a href="#" id="logoutBtn" class="danger">Logout</a>
+            <a href="/">{{T_NAV_DASHBOARD}}</a>
+            <a href="#" id="logoutBtn" class="danger">{{T_NAV_LOGOUT}}</a>
         </nav>
     </header>
 
     <div class="filters">
-        <label>User
-            <input type="text" id="fUser" placeholder="any" autocomplete="off">
+        <label>{{T_F_USER}}
+            <input type="text" id="fUser" placeholder="{{T_F_USER_PH}}" autocomplete="off">
         </label>
-        <label>Action (LIKE)
-            <input type="text" id="fAction" placeholder="e.g. auth.% or vm.start" autocomplete="off">
+        <label>{{T_F_ACTION}}
+            <input type="text" id="fAction" placeholder="{{T_F_ACTION_PH}}" autocomplete="off">
         </label>
-        <label>Cluster
-            <input type="text" id="fCluster" placeholder="any" autocomplete="off">
+        <label>{{T_F_CLUSTER}}
+            <input type="text" id="fCluster" placeholder="{{T_F_USER_PH}}" autocomplete="off">
         </label>
-        <label>Since (UTC)
+        <label>{{T_F_SINCE}}
             <input type="datetime-local" id="fSince" step="1">
         </label>
-        <label>Until (UTC)
+        <label>{{T_F_UNTIL}}
             <input type="datetime-local" id="fUntil" step="1">
         </label>
-        <label>Limit
+        <label>{{T_F_LIMIT}}
             <select id="fLimit">
                 <option>50</option>
                 <option selected>100</option>
@@ -190,9 +275,9 @@ AUDIT_HTML = """<!DOCTYPE html>
             </select>
         </label>
         <div class="actions">
-            <button id="refresh" class="primary">Refresh &raquo;</button>
-            <button id="auto">Auto: off</button>
-            <button id="exportCsv" title="Download visible rows as CSV">CSV</button>
+            <button id="refresh" class="primary">{{T_BTN_REFRESH}}</button>
+            <button id="auto">{{T_BTN_AUTO_OFF}}</button>
+            <button id="exportCsv" title="{{T_BTN_CSV_TITLE}}">{{T_BTN_CSV}}</button>
         </div>
     </div>
 
@@ -200,30 +285,31 @@ AUDIT_HTML = """<!DOCTYPE html>
 
     <table>
         <thead><tr>
-            <th style="width: 165px">Timestamp</th>
-            <th style="width: 120px">User</th>
-            <th>Action</th>
-            <th>Target</th>
-            <th style="width: 90px">Result</th>
-            <th style="width: 110px">Source IP</th>
-            <th style="width: 110px">Request ID</th>
+            <th style="width: 165px">{{T_TH_TS}}</th>
+            <th style="width: 120px">{{T_TH_USER}}</th>
+            <th>{{T_TH_ACTION}}</th>
+            <th>{{T_TH_TARGET}}</th>
+            <th style="width: 90px">{{T_TH_RESULT}}</th>
+            <th style="width: 110px">{{T_TH_IP}}</th>
+            <th style="width: 110px">{{T_TH_REQ}}</th>
         </tr></thead>
         <tbody id="rows">
-            <tr><td colspan="7" class="empty">No rows yet. Hit Refresh.</td></tr>
+            <tr><td colspan="7" class="empty">{{T_EMPTY_INITIAL}}</td></tr>
         </tbody>
     </table>
 
     <div class="pager">
-        <div id="totalInfo">— rows</div>
+        <div id="totalInfo">{{T_ROWS_INITIAL}}</div>
         <div>
-            <button id="prev">&laquo; Prev</button>
-            <span id="pageInfo" style="margin: 0 12px;">page 1</span>
-            <button id="next">Next &raquo;</button>
+            <button id="prev">{{T_BTN_PREV}}</button>
+            <span id="pageInfo" style="margin: 0 12px;">{{T_PAGE}} 1</span>
+            <button id="next">{{T_BTN_NEXT}}</button>
         </div>
     </div>
 </div>
 
 <script>
+const I18N = {{I18N_JSON}};
 let offset = 0;
 let limit = 100;
 let autoTimer = null;
@@ -263,13 +349,13 @@ async function fetchAndRender() {
     try {
         const r = await fetch('/api/audit?' + params, { credentials: 'same-origin' });
         if (r.status === 401) { window.location.href = '/login'; return; }
-        if (r.status === 403) { errBox.innerHTML = '<div class="err">403 forbidden — admin role required.</div>'; return; }
+        if (r.status === 403) { errBox.innerHTML = '<div class="err">' + escapeHtml(I18N.err_403) + '</div>'; return; }
         if (!r.ok) { errBox.innerHTML = '<div class="err">HTTP ' + r.status + '</div>'; return; }
         const data = await r.json();
         const tbody = document.getElementById('rows');
         lastRows = data.rows || [];
         if (lastRows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="empty">No rows match the filters.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="empty">' + escapeHtml(I18N.empty_filtered) + '</td></tr>';
         } else {
             tbody.innerHTML = lastRows.map((r, i) => `
                 <tr data-row="${i}" class="row-main" style="cursor: pointer">
@@ -298,8 +384,8 @@ async function fetchAndRender() {
                 });
             });
         }
-        document.getElementById('totalInfo').textContent = data.total + ' rows total';
-        document.getElementById('pageInfo').textContent = `page ${Math.floor(offset/limit)+1} of ${Math.max(1, Math.ceil(data.total/limit))}`;
+        document.getElementById('totalInfo').textContent = I18N.rows_total.replace('{n}', data.total);
+        document.getElementById('pageInfo').textContent = `${I18N.page} ${Math.floor(offset/limit)+1} ${I18N.page_of} ${Math.max(1, Math.ceil(data.total/limit))}`;
     } catch (e) {
         errBox.innerHTML = '<div class="err">' + escapeHtml(e.message || 'fetch failed') + '</div>';
     }
@@ -375,8 +461,41 @@ loadMe().then(fetchAndRender);
 
 @role_required("admin")
 async def audit_page_handler(request: web.Request) -> web.Response:
+    lang = pick_lang(request)
+    s = _I18N[lang]
+    html = (_TEMPLATE
+            .replace("{{LANG}}", lang)
+            .replace("{{I18N_JSON}}", json.dumps(s, ensure_ascii=False))
+            .replace("{{T_TITLE}}", s["title"])
+            .replace("{{T_LOADING_SESSION}}", s["loading_session"])
+            .replace("{{T_NAV_DASHBOARD}}", s["nav_dashboard"])
+            .replace("{{T_NAV_LOGOUT}}", s["nav_logout"])
+            .replace("{{T_F_USER}}", s["f_user"])
+            .replace("{{T_F_USER_PH}}", s["f_user_ph"])
+            .replace("{{T_F_ACTION}}", s["f_action"])
+            .replace("{{T_F_ACTION_PH}}", s["f_action_ph"])
+            .replace("{{T_F_CLUSTER}}", s["f_cluster"])
+            .replace("{{T_F_SINCE}}", s["f_since"])
+            .replace("{{T_F_UNTIL}}", s["f_until"])
+            .replace("{{T_F_LIMIT}}", s["f_limit"])
+            .replace("{{T_BTN_REFRESH}}", s["btn_refresh"])
+            .replace("{{T_BTN_AUTO_OFF}}", s["btn_auto_off"])
+            .replace("{{T_BTN_CSV}}", s["btn_csv"])
+            .replace("{{T_BTN_CSV_TITLE}}", s["btn_csv_title"])
+            .replace("{{T_TH_TS}}", s["th_ts"])
+            .replace("{{T_TH_USER}}", s["th_user"])
+            .replace("{{T_TH_ACTION}}", s["th_action"])
+            .replace("{{T_TH_TARGET}}", s["th_target"])
+            .replace("{{T_TH_RESULT}}", s["th_result"])
+            .replace("{{T_TH_IP}}", s["th_ip"])
+            .replace("{{T_TH_REQ}}", s["th_req"])
+            .replace("{{T_EMPTY_INITIAL}}", s["empty_initial"])
+            .replace("{{T_ROWS_INITIAL}}", s["rows_initial"])
+            .replace("{{T_PAGE}}", s["page"])
+            .replace("{{T_BTN_PREV}}", s["btn_prev"])
+            .replace("{{T_BTN_NEXT}}", s["btn_next"]))
     return web.Response(
-        text=AUDIT_HTML,
+        text=html,
         content_type="text/html",
         charset="utf-8",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
