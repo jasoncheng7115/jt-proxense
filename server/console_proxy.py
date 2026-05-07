@@ -35,6 +35,7 @@ from . import console_sessions
 from . import secret_store
 from .cluster_manager import cluster_manager
 from .config import get_config
+from .pve_throttle import throttle
 
 
 logger = logging.getLogger(__name__)
@@ -195,7 +196,7 @@ async def console_prepare_handler(request: web.Request) -> web.Response:
             # vncproxy needs websocket=1; termproxy doesn't take that param.
             post_data = ({"websocket": 1, "generate-password": 0}
                          if not is_term else {})
-            async with cs.post(
+            async with throttle.acquire(pve_node_cfg.host), cs.post(
                 proxy_url, headers=headers, data=post_data,
             ) as r:
                 if r.status != 200:

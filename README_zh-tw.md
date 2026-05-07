@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.3.0
+# JT-PROXENSE v0.3.1
 
 > English version: [README.md](README.md)
 

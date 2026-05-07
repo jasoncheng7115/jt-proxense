@@ -8,6 +8,26 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.1] — 2026-05-07
+
+### 新增
+
+- **矩陣縮圖檢視** — 矩陣工具列新增第三個切換鈕。每台 VM 顯示成一張卡片，內含該 VM 即時 framebuffer 的截圖，由新增的 `GET /api/console/screenshot/{cluster}/{node}/{vmid}?max=N` endpoint 提供。後端用迷你 RFB 3.8 client（`server/vnc_screenshot.py`）跑 ProtocolVersion + VNC-Auth + ServerInit + SetPixelFormat + 一次 Raw FramebufferUpdate，再用 PIL 轉 PNG。Per-VM 10 秒快取 + single-flight dedupe，N 個分頁同時看不會 fan-out 成 N 次 vncproxy 呼叫。**為什麼：** 一眼看「每台 VM 現在到底是什麼畫面」，不再只有 CPU/MEM 直條圖。**驗證：** 矩陣工具列 → 第三個圖示 → 約 1–2 秒內出現 VM 截圖。
+- **縮圖尺寸 slider**（160–640px），緊鄰檢視切換鈕，數值會 `localStorage` 持久化。slider 數值同時傳給 server 的 `?max=`，避免抓 1920px PNG 只為顯示在 200px 卡片裡。
+
+### 變更
+
+- **`pve_throttle` 現在也包到 `console_proxy.py` 的直接 vncproxy/termproxy POST**（不再只覆蓋走 `pve_client._request` 的呼叫）。長連線的 `vncwebsocket` upgrade 不限流 — 整個 console 工作階段佔住一個 per-host slot 會把其他所有 PVE 呼叫餓死。
+- **`useDialogs` 取代殘餘的原生 `alert/confirm/prompt`** — `HoloMatrix`、`SnapshotsModal`、`SettingsPanel` 的呼叫站點全換掉。Cyberpunk 風格 modal、可 await、Chrome 不會鎖 focus。快照刪除 / 倒回 confirm 加上 `destructive: true`，dialog 渲染成警示色。
+- **拿掉 console 選單「stored 模式但無密碼」的 client-side 阻擋。** 原本的客端檢查用 mount 時 fetch 的快取，在使用者於 Settings 設好密碼但沒 reload 頁面的情況下會 stale。現在改成讓 `/prepare` 回 412、由 dialog 顯示訊息，選單狀態永遠對。
+
+### 驗證
+
+- 後端測試：261 passed（1 個 `test_export_import_round_trip` 因 suite 隔離 race 偶發失敗，獨立跑就過，不是這次改動造成）。
+- 端對端：對 host-108 vmid 171 的 noVNC 拿到 `RFB 003.008` banner、xterm 拿到 `OK` ack、screenshot 拿到 320×200 / 24KB PNG，三條都成功。
+
+---
+
 ## [0.3.0] — 2026-05-07
 
 ### 新增

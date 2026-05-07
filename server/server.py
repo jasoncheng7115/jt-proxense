@@ -32,6 +32,7 @@ from . import pdm_vm_ext
 from . import console_proxy
 from . import console_page
 from . import console_term_page
+from . import console_screenshot
 from . import notifications_handlers
 from . import audit_forwarder
 from . import secret_handlers
@@ -539,6 +540,11 @@ def create_app() -> web.Application:
     app.router.add_get(
         "/console-term/{cluster_id}/{node}/{vmid}",
         console_term_page.console_term_page_handler,
+    )
+    # v0.3.x: server-side framebuffer capture for the matrix thumbnail view.
+    app.router.add_get(
+        "/api/console/screenshot/{cluster_id}/{node}/{vmid}",
+        console_screenshot.screenshot_handler,
     )
 
     # v0.2 login page (always public; the SPA root is gated by auth middleware)
