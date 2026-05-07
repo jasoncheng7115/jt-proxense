@@ -97,7 +97,10 @@ _TEMPLATE = """<!DOCTYPE html>
         .card{background:linear-gradient(180deg,var(--bg-elev),var(--bg));border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:18px;position:relative;overflow:hidden;animation:fadeIn .4s ease}
         .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--magenta));transform:scaleX(0);transform-origin:left;transition:transform .4s}
         .card:hover::before{transform:scaleX(1)}
-        h2{font-family:Orbitron,sans-serif;font-size:15px;letter-spacing:.04em;margin:0 0 14px;color:var(--text);text-transform:uppercase}
+        h2{display:flex;align-items:center;gap:8px;font-family:Orbitron,sans-serif;font-size:15px;letter-spacing:.04em;margin:0 0 14px;color:var(--text);text-transform:uppercase}
+        h2 .h-ico{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;color:var(--cyan);filter:drop-shadow(0 0 4px var(--cyan-glow))}
+        button{display:inline-flex;align-items:center;gap:7px}
+        button .b-ico{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px}
         p{color:var(--text-dim);line-height:1.55}
         code{font-family:'Share Tech Mono',monospace;background:#02050b;color:var(--cyan);padding:1px 6px;border-radius:3px;font-size:13px}
         label{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin:14px 0 6px;font-weight:500}
@@ -124,12 +127,18 @@ _TEMPLATE = """<!DOCTYPE html>
     </header>
 
     <div class="card">
-        <h2>{{T_PROFILE}}</h2>
+        <h2>
+            <span class="h-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+            {{T_PROFILE}}
+        </h2>
         <div class="meta" id="profile">{{T_LOADING}}</div>
     </div>
 
     <div class="card" id="pwCard">
-        <h2>{{T_CHANGE_PW}}</h2>
+        <h2>
+            <span class="h-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+            {{T_CHANGE_PW}}
+        </h2>
         <p id="pwLead">{{T_CHANGE_PW_LEAD}}</p>
         <div id="pwForm">
             <label for="cur">{{T_LABEL_CURRENT}}</label>
@@ -138,16 +147,25 @@ _TEMPLATE = """<!DOCTYPE html>
             <input id="new1" type="password" autocomplete="new-password">
             <label for="new2">{{T_LABEL_NEW2}}</label>
             <input id="new2" type="password" autocomplete="new-password">
-            <button id="pwBtn">{{T_BTN_CHANGE}}</button>
+            <button id="pwBtn">
+                <span class="b-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></span>
+                {{T_BTN_CHANGE}}
+            </button>
             <div class="err hidden" id="pwErr"></div>
             <div class="ok hidden" id="pwOk">{{T_OK_UPDATED}}</div>
         </div>
     </div>
 
     <div class="card">
-        <h2>{{T_TFA_TITLE}}</h2>
+        <h2>
+            <span class="h-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></span>
+            {{T_TFA_TITLE}}
+        </h2>
         <p>{{T_TFA_LEAD}}</p>
-        <a href="/totp"><button class="ghost">{{T_TFA_OPEN}}</button></a>
+        <a href="/totp"><button class="ghost">
+            <span class="b-ico"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>
+            {{T_TFA_OPEN}}
+        </button></a>
     </div>
 </div>
 

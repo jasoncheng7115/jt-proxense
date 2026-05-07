@@ -46,12 +46,13 @@ _CACHE_TTL_S = 10.0
 
 
 class _CacheEntry:
-    __slots__ = ("png", "expires_at", "future")
+    __slots__ = ("png", "is_blank", "expires_at", "future")
 
     def __init__(self):
         self.png: Optional[bytes] = None
+        self.is_blank: bool = False
         self.expires_at: float = 0.0
-        self.future: Optional[asyncio.Future[bytes]] = None
+        self.future: Optional[asyncio.Future[tuple[bytes, bool]]] = None
 
 
 _cache: dict[str, _CacheEntry] = {}
@@ -65,13 +66,13 @@ def _cache_key(cluster_id: str, node: str, vmid: int, max_dim: int) -> str:
 async def _get_or_grab(
     key: str,
     grab_coro_factory,
-) -> bytes:
+) -> tuple[bytes, bool]:
     """Memoise upstream grabs. Single-flight per key."""
     now = time.time()
     async with _cache_lock:
         entry = _cache.get(key)
         if entry and entry.png is not None and entry.expires_at > now:
-            return entry.png
+            return entry.png, entry.is_blank
         if entry and entry.future is not None:
             # In-flight already; wait on the same future.
             fut = entry.future
@@ -86,11 +87,12 @@ async def _get_or_grab(
 
 async def _run_grab(key: str, entry: _CacheEntry, grab_coro_factory) -> None:
     try:
-        png = await grab_coro_factory()
+        png, is_blank = await grab_coro_factory()
         entry.png = png
+        entry.is_blank = is_blank
         entry.expires_at = time.time() + _CACHE_TTL_S
         if entry.future and not entry.future.done():
-            entry.future.set_result(png)
+            entry.future.set_result((png, is_blank))
     except Exception as e:
         if entry.future and not entry.future.done():
             entry.future.set_exception(e)
@@ -156,14 +158,9 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "vm_not_found"}, status=404)
     if actual_node != node:
         node = actual_node
-    if vm_type == "lxc":
-        # LXC has no framebuffer — refuse and let the UI show a placeholder.
-        return web.json_response(
-            {"error": "lxc_no_framebuffer",
-             "message": "LXC containers have no graphical framebuffer; "
-                        "screenshots are not available."},
-            status=415,
-        )
+    # LXC vncproxy returns the container's text-console framebuffer
+    # (login prompt, dmesg, getty etc) — small but useful for "is this
+    # CT alive at a glance?" thumbnails. We accept both qemu and lxc.
 
     err = _check_role(request, cluster, vmid, vm_name or "")
     if err:
@@ -194,25 +191,42 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
 
     key = _cache_key(cluster_id, node, vmid, max_dim)
 
-    async def grab() -> bytes:
+    async def grab() -> tuple[bytes, bool]:
         # Mint / reuse PVE ticket.
         ticket, csrf = await console_sessions.get_or_mint_pve_ticket(
             cluster_id, cluster.client,
             username=user_for_pve, password=pw_to_use,
         )
-        # vncproxy via throttle.
+
+        # LXC: PVE's lxc/vncproxy returns a near-empty framebuffer (CTs
+        # don't have a graphical console). Use termproxy + a vt100
+        # emulator instead — that's what PVE's webui does for CT consoles.
+        if vm_type == "lxc":
+            from . import lxc_thumb
+            return await lxc_thumb.capture_lxc_text_png(
+                pve_host=pve_node_cfg.host,
+                pve_port=pve_node_cfg.port,
+                pve_auth_cookie=ticket,
+                pve_csrf=csrf,
+                pve_user=user_for_pve,
+                node=node, vmid=vmid,
+                verify_ssl=pve_node_cfg.verify_ssl,
+                max_dimension=max_dim,
+            )
+
+        # QEMU: classic vncproxy + RFB framebuffer grab.
         pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
         url = (f"https://{pve_node_cfg.host}:{pve_node_cfg.port}"
                f"/api2/json/nodes/{node}/qemu/{vmid}/vncproxy")
         headers = {"Cookie": f"PVEAuthCookie={ticket}"}
         if csrf:
             headers["CSRFPreventionToken"] = csrf
+        post_data = {"websocket": 1, "generate-password": 0}
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=pve_ssl),
         ) as cs:
             async with throttle.acquire(pve_node_cfg.host), cs.post(
-                url, headers=headers,
-                data={"websocket": 1, "generate-password": 0},
+                url, headers=headers, data=post_data,
             ) as r:
                 if r.status != 200:
                     body = await r.text()
@@ -223,7 +237,7 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
         if not vnc_ticket or not pve_port:
             raise RuntimeError("vncproxy returned no ticket/port")
 
-        png = await vnc_screenshot.capture_framebuffer_png(
+        return await vnc_screenshot.capture_framebuffer_png(
             pve_host=pve_node_cfg.host,
             pve_port=pve_node_cfg.port,
             pve_auth_cookie=ticket,
@@ -234,10 +248,9 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
             overall_timeout=12.0,
             max_dimension=max_dim,
         )
-        return png
 
     try:
-        png = await _get_or_grab(key, grab)
+        png, is_blank = await _get_or_grab(key, grab)
     except Exception as e:
         logger.warning("screenshot failed cluster=%s vmid=%d: %s", cluster_id, vmid, e)
         await audit.write(
@@ -258,5 +271,12 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
         # re-hit the endpoint immediately.
         "Cache-Control": f"private, max-age={int(_CACHE_TTL_S)}",
         "X-Content-Type-Options": "nosniff",
+        # 1 = blank/empty thumbnail (all-black VM, CT with no visible text).
+        # The matrix view uses this to deprioritise these guests in the
+        # "prefer with content" sort. Header name is exposed via CORS for
+        # cross-origin uses (we don't actually serve cross-origin in prod
+        # but it costs nothing to declare).
+        "X-Thumb-Empty": "1" if is_blank else "0",
+        "Access-Control-Expose-Headers": "X-Thumb-Empty",
     }
     return web.Response(body=png, content_type="image/png", headers=headers)

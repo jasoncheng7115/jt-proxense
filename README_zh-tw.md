@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.3.1
+# JT-PROXENSE v0.3.2
 
 > English version: [README.md](README.md)
 
@@ -280,6 +280,77 @@ pveum aclmod / -user monitoring@pve -role PVEAuditor
 | `clusters[].poll_interval` | 即時資料 polling 秒數 | `2` |
 | `alerts.cpu_warning` / `_critical` | CPU 門檻（%） | `80` / `95` |
 | `ui.language` | `en` / `zh-TW` | `en` |
+
+---
+
+## 補充主機指標（Telegraf / InfluxDB）
+
+PVE API 提供的指標相對粗粒度。為了呈現 PVE 拿不到的東西 — per-process CPU、硬體感測器、SMART、IPMI、細粒度 net/disk-IO — jt-proxense 內建一個 **InfluxDB line-protocol 接收器**。每台 PVE host 上的 Telegraf agent 把指標推到 jt-proxense，dashboard 為每組 `(host, measurement)` 保留最近 60 筆樣本，並透過 REST 暴露。
+
+### 啟用接收器
+
+```yaml
+# /opt/jt-proxense/config.yaml
+server:
+  influx_enabled: true
+  influx_port: 8086             # 預設值;Telegraf 設定要對齊
+  influx_token: "long-random"   # 選填;空 = 不檢查(內網信任)
+```
+
+重啟 `jt-proxense`。接收器跑在 `:8086`，跟主 UI 的 `:8098` 完全獨立 — 接收器掛掉不會影響 UI。
+
+### Telegraf agent 設定 (PVE host)
+
+每台 PVE host 安裝 telegraf（`apt install telegraf`），然後寫入 `/etc/telegraf/telegraf.conf`:
+
+```toml
+[agent]
+  interval = "10s"
+  flush_interval = "10s"
+  hostname = ""                 # 空 = 用系統 hostname;jt-proxense 用這個欄位 index
+
+[[outputs.influxdb_v2]]
+  urls = ["http://<jt-proxense>:8086"]
+  organization = "any"          # 不驗證,任意字串
+  bucket = "any"                # 同上
+  token = "long-random"         # 對齊 server.influx_token;若不啟用 auth 可省略
+
+# 想要的 input plugins。標準組合:
+[[inputs.cpu]]
+  percpu = true
+  totalcpu = true
+[[inputs.mem]]
+[[inputs.diskio]]
+[[inputs.net]]
+[[inputs.system]]
+[[inputs.processes]]
+[[inputs.smart]]                # 需要 `apt install smartmontools`
+[[inputs.sensors]]              # 需要 `apt install lm-sensors`(先跑一次 sensors-detect)
+[[inputs.ipmi_sensor]]          # 需要 `apt install freeipmi-tools`;root 或 setuid
+```
+
+重啟 telegraf：`systemctl restart telegraf`。
+
+### 驗證
+
+```bash
+# 1. 接收器健康狀態
+curl -s http://<jt-proxense>:8086/health | jq .
+
+# 2. 已推送過指標的 host 清單(透過主 app auth, admin/operator)
+curl -s -b cookie http://<jt-proxense>:8098/api/telegraf/hosts | jq .
+
+# 3. 單一 host 的最近樣本
+curl -s -b cookie http://<jt-proxense>:8098/api/telegraf/<hostname> | jq .
+```
+
+若一分鐘後 `hosts` 仍是空的，到 PVE host 上看 `journalctl -u telegraf -n 50` — 多半是 token 不對（接收器 log 會看到 401）或防火牆擋住 8086。
+
+### 注意事項
+
+- 接收器**不掛**主 app 的 auth middleware — 用 `influx_token` 保護或綁在私網介面。
+- Ring buffer 只在記憶體裡（10 秒間隔約 10 分鐘）。歷史保存不在範圍 — 若要長期保留請把 Telegraf 直接指向真正的 InfluxDB，jt-proxense 只做即時監看。
+- 不想要的 measurements 可在 telegraf 端用 `[outputs.influxdb_v2.tagdrop]` / `[inputs.<name>.tagpass]` 過濾掉 — 接收器拿到什麼就 bucket 什麼。
 
 ---
 

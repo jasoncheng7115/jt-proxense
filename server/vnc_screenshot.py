@@ -73,8 +73,12 @@ async def capture_framebuffer_png(
     verify_ssl: bool = False,
     overall_timeout: float = 10.0,
     max_dimension: Optional[int] = None,  # if set, downscale (preserving aspect)
-) -> bytes:
-    """Connect, auth, grab one frame, return PNG bytes.
+) -> tuple[bytes, bool]:
+    """Connect, auth, grab one frame, return (PNG bytes, is_blank).
+
+    `is_blank` is True when the framebuffer's average luminance is below a
+    near-black threshold — used by the matrix view to deprioritise VMs
+    whose screens are off / on a blank console / showing nothing.
 
     Raises RuntimeError on protocol error / timeout / auth failure.
     """
@@ -236,6 +240,18 @@ async def _rfb_grab(
         rgb = Image.merge("RGB", (r, g, b))
         full.paste(rgb, (rx, ry))
 
+    # Sample the rendered framebuffer for "blank-ness". Sampling on the
+    # full-res image (before downscale) is more accurate. We compute the
+    # mean grey value via a 1-channel conversion. Threshold ~6/255 catches
+    # solid-black QEMU consoles (screensaver / off / not-yet-rendered)
+    # without false-positiving genuinely dark UIs.
+    is_blank = False
+    try:
+        gray_mean = sum(full.convert("L").getdata()) / max(1, full.width * full.height)
+        is_blank = gray_mean < 6.0
+    except Exception:  # noqa: BLE001 — mean is best-effort only
+        is_blank = False
+
     # Optional downscale (preserve aspect ratio). Saves bytes and CPU on
     # the clients rendering many thumbnails.
     if max_dimension and (full.width > max_dimension or full.height > max_dimension):
@@ -245,4 +261,4 @@ async def _rfb_grab(
 
     out = BytesIO()
     full.save(out, format="PNG", optimize=False)
-    return out.getvalue()
+    return out.getvalue(), is_blank

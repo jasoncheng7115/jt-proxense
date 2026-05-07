@@ -26,6 +26,7 @@ from . import sessions_page
 from . import vm_control
 from . import pdm_resources
 from . import pdm_backups
+from . import storage_content
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -348,19 +349,55 @@ async def get_health_handler(request: web.Request) -> web.Response:
     return web.json_response(health)
 
 
+async def get_telegraf_hosts_handler(request: web.Request) -> web.Response:
+    """List PVE hosts that have pushed Telegraf metrics."""
+    from . import influx_receiver
+    return web.json_response({
+        "hosts": influx_receiver.get_all_hosts(),
+        "stats": influx_receiver.stats(),
+    })
+
+
+async def get_telegraf_host_handler(request: web.Request) -> web.Response:
+    """Snapshot of recent Telegraf samples for a single host.
+
+    Response shape: {measurement: [{tags, fields, received_at, timestamp_ns}, …]}
+    """
+    from . import influx_receiver
+    host = request.match_info["host"]
+    samples = influx_receiver.get_host_metrics(host)
+    return web.json_response({
+        m: [
+            {
+                "tags": s.tags,
+                "fields": s.fields,
+                "received_at": s.received_at,
+                "timestamp_ns": s.timestamp_ns,
+            }
+            for s in samples_list
+        ]
+        for m, samples_list in samples.items()
+    })
+
+
+# SPA shell headers — applied to EVERY index.html response, including the
+# SPA fallback at the bottom of static_handler. Without this, Chrome
+# heuristic-caches the HTML based on Last-Modified and serves stale HTML
+# pointing at non-existent (deleted) hashed JS bundles after every deploy.
+# Users would see no UI updates without manual cache clearing.
+_SPA_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 # Static file handler (SPA)
 async def index_handler(request: web.Request) -> web.Response:
     """Serve index.html for SPA"""
     index_path = DIST_DIR / "index.html"
     if index_path.exists():
-        return web.FileResponse(
-            index_path,
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            }
-        )
+        return web.FileResponse(index_path, headers=_SPA_HEADERS)
     return web.Response(text="Frontend not built. Run: npm run build", status=404)
 
 
@@ -404,12 +441,19 @@ async def static_handler(request: web.Request) -> web.Response:
     file_path = DIST_DIR / filename
 
     if file_path.exists() and file_path.is_file():
-        return web.FileResponse(file_path)
+        # Top-level files like favicon.svg can rotate too, so also discourage
+        # heuristic caching here (these are not hash-versioned).
+        return web.FileResponse(
+            file_path,
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
 
-    # SPA fallback - serve index.html for client-side routing
+    # SPA fallback — must use the same no-store headers as index_handler.
+    # Chrome heuristic-caches FileResponse otherwise, pinning users to a
+    # stale HTML that references deleted asset bundle hashes.
     index_path = DIST_DIR / "index.html"
     if index_path.exists():
-        return web.FileResponse(index_path)
+        return web.FileResponse(index_path, headers=_SPA_HEADERS)
 
     return web.Response(text="Not found", status=404)
 
@@ -474,6 +518,11 @@ def create_app() -> web.Application:
         ("POST", "/api/users",             auth_handlers.users_create_handler),
         ("DELETE","/api/users/{username}", auth_handlers.users_delete_handler),
         ("GET",  "/api/audit",             auth_handlers.audit_query_handler),
+        # Telegraf-fed supplemental host metrics (admin/operator scope —
+        # the data is host-level, not cluster-level, so we don't gate by
+        # cluster scope; viewer can read).
+        ("GET",  "/api/telegraf/hosts",     get_telegraf_hosts_handler),
+        ("GET",  "/api/telegraf/{host}",    get_telegraf_host_handler),
     ]
 
     for method, path, handler in api_routes:
@@ -492,6 +541,11 @@ def create_app() -> web.Application:
 
     # v0.3.x backup orchestration
     for method, path, handler in pdm_backups.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x storage content (list / delete; upload + download in later phases)
+    for method, path, handler in storage_content.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
@@ -644,6 +698,25 @@ async def start_server():
     await site.start()
     logger.info(f"HTTP listener up on http://{config.server.host}:{config.server.http_port}")
 
+    # Optional InfluxDB-line-protocol receiver — Telegraf agents push host
+    # metrics here on a separate port. Zero deps in the parser; runs in its
+    # own aiohttp Application so the main UI's auth/CORS don't get in
+    # Telegraf's way.
+    if config.server.influx_enabled:
+        try:
+            from . import influx_receiver
+            recv = influx_receiver.InfluxReceiver(
+                host=config.server.host,
+                port=config.server.influx_port,
+                token=config.server.influx_token,
+                on_points=influx_receiver.store_points,
+            )
+            await recv.start()
+            # Stash on the main runner so stop_server can reach it.
+            setattr(runner, "_jtp_influx_recv", recv)
+        except Exception as e:
+            logger.warning("InfluxDB receiver failed to start: %s", e)
+
     # Cluster polling in the background.
     asyncio.create_task(_bring_up_clusters())
 
@@ -652,6 +725,12 @@ async def start_server():
 
 async def stop_server(runner: web.AppRunner):
     """Stop the server"""
+    recv = getattr(runner, "_jtp_influx_recv", None)
+    if recv is not None:
+        try:
+            await recv.stop()
+        except Exception as e:
+            logger.warning("InfluxDB receiver shutdown error: %s", e)
     fwd = audit_forwarder.get_forwarder()
     if fwd is not None:
         await fwd.stop()

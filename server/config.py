@@ -55,9 +55,14 @@ class ServerConfig:
     """HTTP/WebSocket server configuration"""
     host: str = "0.0.0.0"
     http_port: int = 8099
-    # InfluxDB receiver mode
+    # InfluxDB-line-protocol receiver. Telegraf agents on each PVE host
+    # POST host metrics to /api/v2/write — see server/influx_receiver.py.
     influx_enabled: bool = False
     influx_port: int = 8086
+    # Optional bearer token. Telegraf sends `Authorization: Token <t>`.
+    # Empty = no auth (LAN-trust mode); the receiver should be bound to a
+    # private interface in that case.
+    influx_token: str = ""
 
 
 @dataclass

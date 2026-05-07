@@ -9,10 +9,30 @@
     <title>JT-PROXENSE</title>
     <!-- Local Fonts (no external network required) -->
     <link rel="stylesheet" href="/fonts/fonts.css">
-    <script type="module" crossorigin src="/assets/index-CIBUriw3.js"></script>
+    <script type="module" crossorigin src="/assets/index-BhPRKJQo.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DIRKjYKc.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Self-heal stale HTML cache. After a new deploy the server deletes the
+      // old hashed JS bundle, but Chrome may still hold the previous index.html
+      // (heuristic cache from FileResponse without Cache-Control). The
+      // referenced /assets/index-XXX.js then 404s — we detect that and force
+      // a full reload so the user gets the fresh HTML + matching bundle.
+      (function () {
+        var s = document.querySelector('script[type=module][src^="/assets/"]');
+        if (!s) return;
+        var url = s.src + (s.src.indexOf('?') === -1 ? '?' : '&') + '_hb=' + Date.now();
+        fetch(url, { method: 'HEAD', cache: 'no-store' })
+          .then(function (r) {
+            if (!r.ok) {
+              try { sessionStorage.setItem('__jtp_reload', '1'); } catch (_) {}
+              location.reload();
+            }
+          })
+          .catch(function () { /* network blip — leave the SPA to handle it */ });
+      })();
+    </script>
   </body>
 </html>

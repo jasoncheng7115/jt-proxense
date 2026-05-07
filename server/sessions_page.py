@@ -102,7 +102,7 @@ _TEMPLATE = """<!DOCTYPE html>
         .toolbar{display:flex;align-items:center;gap:12px;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px}
         .toolbar input{padding:7px 10px;background:#02050b;color:var(--text);border:1px solid var(--border);border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:14px;outline:none;flex:1;max-width:240px}
         .toolbar input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-soft)}
-        button{padding:7px 14px;font-family:Orbitron,sans-serif;font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);background:rgba(0,240,255,.05);border:1px solid var(--cyan-soft);border-radius:4px;cursor:pointer;transition:background .15s}
+        button{padding:7px 14px;font-family:Orbitron,sans-serif;font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);background:rgba(0,240,255,.05);border:1px solid var(--cyan-soft);border-radius:4px;cursor:pointer;transition:background .15s;white-space:nowrap}
         button:hover{background:rgba(0,240,255,.18)}
         button.primary{color:#001018;background:linear-gradient(135deg,var(--cyan),#00b8d4);border:none;box-shadow:0 0 12px rgba(0,240,255,.35)}
         button.danger{color:#1a0006;background:linear-gradient(135deg,var(--red),#c41a3a);border:none;box-shadow:0 0 10px rgba(255,56,96,.4)}

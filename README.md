@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.3.1
+# JT-PROXENSE v0.3.2
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
@@ -281,6 +281,77 @@ Paste the token value into `/opt/jt-proxense/config.yaml`. See [`config.example.
 | `clusters[].poll_interval` | Live-data poll seconds | `2` |
 | `alerts.cpu_warning` / `_critical` | CPU thresholds (%) | `80` / `95` |
 | `ui.language` | `en` / `zh-TW` | `en` |
+
+---
+
+## Supplemental host metrics (Telegraf / InfluxDB)
+
+PVE's API exposes coarse per-VM and per-node metrics. To surface things PVE doesn't — per-process CPU, hardware sensors, SMART, IPMI, fine-grained net/disk-IO — jt-proxense ships an **InfluxDB-line-protocol receiver**. Telegraf agents on each PVE host push host metrics directly to jt-proxense; the dashboard ring-buffers the last 60 samples per `(host, measurement)` and exposes them via REST.
+
+### Enable the receiver
+
+```yaml
+# /opt/jt-proxense/config.yaml
+server:
+  influx_enabled: true
+  influx_port: 8086             # default — match this in Telegraf
+  influx_token: "long-random"   # optional; empty = no auth (LAN trust)
+```
+
+Restart `jt-proxense`. The receiver listens on `:8086` independently of the main `:8098` UI; crashing the receiver doesn't take the UI down.
+
+### Telegraf agent config (PVE host)
+
+Install `telegraf` on each PVE host (`apt install telegraf`), then drop this into `/etc/telegraf/telegraf.conf`:
+
+```toml
+[agent]
+  interval = "10s"
+  flush_interval = "10s"
+  hostname = ""                 # empty = use system hostname; jt-proxense indexes by this
+
+[[outputs.influxdb_v2]]
+  urls = ["http://<jt-proxense>:8086"]
+  organization = "any"          # not validated, leave any string
+  bucket = "any"                # ditto
+  token = "long-random"         # match server.influx_token; or omit if no auth
+
+# Pick whichever input plugins you want surfaced. Standard set:
+[[inputs.cpu]]
+  percpu = true
+  totalcpu = true
+[[inputs.mem]]
+[[inputs.diskio]]
+[[inputs.net]]
+[[inputs.system]]
+[[inputs.processes]]
+[[inputs.smart]]                # needs `apt install smartmontools`
+[[inputs.sensors]]              # needs `apt install lm-sensors` (run sensors-detect once)
+[[inputs.ipmi_sensor]]          # needs `apt install freeipmi-tools`; root or setuid required
+```
+
+Restart telegraf: `systemctl restart telegraf`.
+
+### Verify
+
+```bash
+# 1. Receiver health
+curl -s http://<jt-proxense>:8086/health | jq .
+
+# 2. Hosts that have pushed metrics (auth via main app, admin/operator)
+curl -s -b cookie http://<jt-proxense>:8098/api/telegraf/hosts | jq .
+
+# 3. Recent samples for one host
+curl -s -b cookie http://<jt-proxense>:8098/api/telegraf/<hostname> | jq .
+```
+
+If `hosts` is empty after a minute, check the host's `journalctl -u telegraf -n 50` — most issues are token mismatch (401 in receiver logs) or firewall blocking port 8086.
+
+### Caveats
+
+- The receiver runs **without** the main app's auth middleware — protect with `influx_token` OR bind to a private interface.
+- Ring buffer is in-memory only (last ~10 minutes at 10s interval). Persistent storage is out of scope; if you need historical retention, point Telegraf at a real InfluxDB instead and use jt-proxense for live monitoring only.
+- Drop telegraf measurements you don't care about with `[outputs.influxdb_v2.tagdrop]` / `[inputs.<name>.tagpass]` — the receiver buckets everything it gets.
 
 ---
 

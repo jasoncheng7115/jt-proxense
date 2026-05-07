@@ -8,6 +8,38 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.2] — 2026-05-07
+
+### 新增
+
+- **儲存區詳細頁面** — 點任一 file-level 儲存區的 tank 卡片，按「管理」（或右鍵 → 內容）會打開 `/storage/{cluster}/{node}/{name}` 專屬頁面。頁籤依儲存區的 `content` 動態出現（備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄），每個都有專屬 type-coded icon。表格欄位：名稱 / 日期 / 格式 / 大小，欄位標題可點按排序。Phase 1 端點：`GET /api/clusters/{cid}/nodes/{node}/storage/{name}/content?type=...`（viewer+）+ `DELETE .../content/{volume:.+}`（operator+），都接到既有的 `pve_client.list_storage_content` / `delete_storage_content`，刪除動作有 audit log。Block-level 儲存區（rbd / lvm / zfspool）只給瀏覽（無上傳/刪除 UI），因為 disk image 屬於 VM。
+- **InfluxDB Telegraf line-protocol 接收器**（`server/influx_receiver.py`）— 接受 `/write`（v1）和 `/api/v2/write`（v2）端點、支援 gzip、可選 bearer token。把 tags / fields / timestamp 解析後塞入 per-host ring buffer（每組 60 筆最新樣本），用 `host` tag 索引。讀取端點 `/api/telegraf/hosts` 與 `/api/telegraf/{host}` 暴露 buffered points。
+- **LXC 文字模式縮圖** — CT 主控台 framebuffer 幾乎是空的，矩陣縮圖端點在 LXC 改走 `lxc_thumb.py`：開 termproxy WS、送 Ctrl-L 觸發 bash 重畫、捕捉 2 秒 shell 輸出、灌進 `pyte`（vt100 emulator）解析螢幕狀態、再用 PIL + 等寬字型 + cyan 文字渲染成 PNG。CT 縮圖現在會看到 prompt 或執行中的 TUI（htop 之類），不再黑白一片。
+- **矩陣縮圖 UX**：類型篩選（全部 / VM / CT）、優先有內容排序（空白縮圖排到最後 — server 端 QEMU 用平均亮度判斷、CT 用「是否有任何非空白文字」判斷，透過 `X-Thumb-Empty` header 暴露）、分組（節點 / 類型 / 標籤）配明顯 sticky 分組標題。排序變化時用 FLIP 動畫；初次資料抓取期間關掉動畫避免卡片亂跳。Footer 加 30 秒縮圖更新頻率指示。
+- **科幻載入動畫**：每張縮圖的 CRT 無訊號雜訊（SVG `feTurbulence` + scanlines + RGB 色差 label），點擊放大的 modal 用旋轉雙環 + 上下彈跳 scan-bar + 角括號 + 狀態文字。
+- **雷達異常卡片右鍵選單** — 跟矩陣同一套（詳細資訊、開啟 PVE、主控台、快照、立即備份、開機/關機/重啟/強制停止、跨叢集遷移）。共用 `VMContextMenu` 抽到 `components/VMContextMenu.tsx`。Modal shim（`useMemo` 穩定 `vm` 物件參考）避免雷達 50ms 重畫 reset wizard state。
+- **矩陣表格排序動畫** — 拿掉舊的左右晃，改成 cyan 光棒從上掃到下 + 每列 staggered 淡入 + blur 重建。同款動畫也套到儲存詳細頁的表格排序。
+- **儲存詳細頁切頁籤動畫**：cyan 光棒在剛載入的清單上由上到下掃過，表格內容 fade + blur 入場。
+- **工具列全面加 icon** — 矩陣每個工具列按鈕（篩選、排序、分組、檢視、類型篩選）、尺寸 slider 標籤、帳號設定每個段落、儲存詳細頁籤都帶 12–18px 的 SVG icon（用 currentColor 上色）。
+
+### 變更
+
+- **`RemoteMigrateModal` 內所有原生 `<select>` 全換成 `CyberSelect`**（目標端點、資料路徑 IP、磁碟對應、NIC 對應）。`CyberSelect` 的下拉清單改用 portal 渲染到 `document.body`，座標固定、空間不足會自動翻上開 — 不會再被父層 modal 的 `overflow: hidden` 裁掉。
+- **SPA fallback Cache-Control 修正**：所有回傳 `index.html` 的路由都加 `no-cache, no-store, must-revalidate`。之前 Chrome heuristic cache 會卡住舊的 `index.html`（指向已刪除的 `index-*.js` bundle），下一次部署後是空白頁。HTML 也加自我修復腳本：HEAD 檢查 bundle URL，404 就 force-reload。
+- **縮圖 fetch 並發限制 6 個**：60+ 同時 fetch 撞到 Chrome per-origin 連線上限（`ERR_INSUFFICIENT_RESOURCES`）會吃掉一半請求。矩陣 effect 用 sliding-window pool 把同時間 in-flight 限 6 個，剛好對應 server `pve_throttle` 每 host 4 並發 + 50ms gap 的預算。
+- **FLIP 重排位置改用 layout-relative**（沿 offsetParent 鏈累加 `offsetTop` / `offsetLeft`），不再用 viewport-relative 的 `getBoundingClientRect`。原本的做法在使用者捲動後遇到 2 秒 cluster broadcast re-render 時，會誤判每張卡都動了（其實是 viewport 位置變了）→ 觸發一波幻影動畫。
+- **VMContextMenu 樣式跟著 component 走** — `.vm-context-menu` / `.context-menu-*` 的 CSS 移到 component 自己的 `<style>` 內，這樣 RadarScan、HoloMatrix、未來任何 host render 時都自動帶樣式。
+- **帳號設定頁（`/account`）** — h2 區段標題（個人資料 / 變更密碼 / 雙因素認證）和主要按鈕都加 icon。
+
+### 修正
+
+- **儲存頁下拉超出 modal**：RemoteMigrateModal 內長 endpoint 清單會被 modal overflow 裁切。CyberSelect 改 portal 渲染後全面修好。
+- **右上工具列按鈕變壞**：CSS class 撞名（HoloMatrix 又定義了 `.btn-icon`）把 App.tsx 的全域 pause / lang / user / settings 按鈕變成迷你版。把矩陣工具列內部 class 改名為 `.tb-ico` 避撞。
+- **`<style>` template literal 被反引號截斷** — CSS 註解內出現 backtick 會中止 React component 的 template string，build 會在不相關的行號爆 `TS1381 / TS1005`。已在 CLAUDE.md 加「Recurring mistakes」一條警示。
+- **CT 縮圖行距太擠** — pyte/PIL renderer 改用 ~1.45× 字級當作行高，終端機輸出可讀性恢復。
+
+---
+
 ## [0.3.1] — 2026-05-07
 
 ### 新增

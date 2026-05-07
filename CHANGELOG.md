@@ -8,6 +8,38 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.2] — 2026-05-07
+
+### Added
+
+- **Storage detail page** — click any file-level storage tank → "管理" button (or right-click → 內容) opens a per-storage page at `/storage/{cluster}/{node}/{name}`. Tabs are dynamically shown based on the storage's `content` field (備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄), each with its own type-coded icon. Lists items with name / date / format / size, click any column header to sort. Phase 1 endpoints: `GET /api/clusters/{cid}/nodes/{node}/storage/{name}/content?type=...` (viewer+) and `DELETE .../content/{volume:.+}` (operator+) — both wired through the existing `pve_client.list_storage_content` / `delete_storage_content` helpers, with audit log entries on delete. Block-level storages (rbd / lvm / zfspool) get a list-only view (no upload/delete UI), since their volumes are owned by the VMs.
+- **InfluxDB Telegraf line-protocol receiver** (`server/influx_receiver.py`) — accepts `/write` (v1) and `/api/v2/write` (v2) endpoints, gzip transparent, optional bearer token. Parses tags / fields / timestamp into a per-host ring buffer (60 most-recent samples) keyed by `host` tag. Read endpoints `/api/telegraf/hosts` and `/api/telegraf/{host}` expose the buffered points.
+- **LXC text-mode thumbnails** — CT consoles return mostly-empty framebuffers, so the matrix thumb screenshot endpoint now routes LXC through `lxc_thumb.py`: opens a termproxy WS, sends Ctrl-L to nudge bash to redraw, captures 2s of shell output, feeds it through `pyte` (vt100 emulator), then renders the resolved screen state to a PNG with monospace font + cyber-cyan text. CT thumbnails now show actual prompts / running TUIs (htop, etc.) instead of black boxes.
+- **Matrix thumbnail UX**: type filter (全部 / VM / CT), prefer-content sort (blank thumbs sink to the bottom — server detects via mean luminance for QEMU and "any non-whitespace text" for CTs, exposed via `X-Thumb-Empty` header), group-by (節點 / 類型 / 標籤) with prominent sticky group headers. FLIP reorder animation when the sort changes; suppressed during the initial fetch wave so cards don't jump around while blobs arrive piecemeal. Footer indicator showing the 30s thumbnail refresh cadence.
+- **Cyber-style loaders**: per-thumb "no signal" CRT static (SVG `feTurbulence` filter + scanlines + RGB-aberration label), and click-to-zoom modal loader with rotating dual-arc rings + bouncing scan-bar + corner brackets + status text.
+- **Radar anomaly cards: right-click context menu** — same actions as the matrix view (details, open in PVE, console, snapshots, backup, power on/off/reboot/shutdown, remote migrate). The shared `VMContextMenu` component was extracted to `components/VMContextMenu.tsx`. Modal shims (`useMemo`-stabilised `vm` props) keep the radar's 50ms scan-angle re-renders from continuously resetting the wizard state.
+- **Matrix table sort animation** — replaced the old left-right wiggle with a top-to-bottom scan-bar sweep + per-row staggered fade/blur entry. Same animation now drives the storage detail table sort.
+- **Storage detail tab transition**: cyan light bar sweeps top-to-bottom across the freshly loaded list, table content fades + blurs in.
+- **Toolbar icons everywhere** — every matrix toolbar button (filter, sort, group, view, type filter), the size slider label, account-settings sections, and storage detail tab labels now lead with a 12–18px SVG icon tinted with currentColor.
+
+### Changed
+
+- **All native `<select>` elements in `RemoteMigrateModal` swapped for `CyberSelect`** (target endpoint, data-path IP, disk-storage map, NIC-bridge map). `CyberSelect`'s dropdown is now portaled to `document.body` with viewport-fixed positioning + flip-up when there isn't enough space below — so it can't be clipped by a parent modal's `overflow: hidden`.
+- **SPA fallback Cache-Control fix**: every route returning `index.html` now sets `no-cache, no-store, must-revalidate`. Prior behaviour let Chrome's heuristic cache pin a stale `index.html` referencing a deleted `index-*.js` bundle, which surfaced as a blank app on next deploy. The HTML also includes a self-heal script that HEAD-checks its own bundle URL and force-reloads on 404.
+- **Thumbnail fetch concurrency capped at 6** — fan-out to 60+ guests at once was hitting Chrome's per-origin connection limit (`ERR_INSUFFICIENT_RESOURCES`) and silently rejecting the overflow. A simple sliding-window pool inside the matrix view's effect keeps the rate to 6 in flight, and matches the server-side `pve_throttle` 4-concurrent + 50ms-gap budget per host.
+- **FLIP reorder positions are now layout-relative** (`offsetTop` / `offsetLeft` cumulatively up the offsetParent chain) instead of viewport-relative (`getBoundingClientRect`). The previous viewport-relative path triggered phantom animations whenever a 2s cluster broadcast re-rendered the matrix while the user had scrolled, because every card's viewport-y had genuinely changed even though no card moved in the document.
+- **VMContextMenu styles travel with the component** — moved the `.vm-context-menu` / `.context-menu-*` CSS into the component file itself so RadarScan, HoloMatrix, or any future host gets them automatically when the menu is rendered.
+- **Account-settings page (`/account`)** — h2 section headers (個人資料 / 變更密碼 / 雙因素認證) and primary buttons now have icons.
+
+### Fixed
+
+- **Storage detail dropdown overflow**: when a long endpoint list opened inside `RemoteMigrateModal` it was clipped by the modal's overflow. Portal-rendered `CyberSelect` lists fix this everywhere they appear.
+- **Right-top topbar buttons regression**: a CSS class collision (`.btn-icon` redefined in HoloMatrix) shrank the global pause / lang / user / settings buttons into broken micro-icons. Renamed the matrix-toolbar inner class to `.tb-ico` to avoid the collision.
+- **Storage `<style>` template-literal break**: backticks inside a CSS comment were terminating the React component's template string and producing `TS1381 / TS1005` build errors at unrelated line numbers. Added a CLAUDE.md "Recurring mistakes" rule against this.
+- **CT thumbnail line spacing** — pyte/PIL renderer now uses ~1.45× font-size for line height so terminal output is readable instead of crammed.
+
+---
+
 ## [0.3.1] — 2026-05-07
 
 ### Added
