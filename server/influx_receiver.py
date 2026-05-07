@@ -56,7 +56,16 @@ class InfluxPoint:
 #   measurement[,tagk=tagv,tagk=tagv] fieldk=fieldv[,fieldk=fieldv] [timestamp]
 # Escape chars: \, in tag/measurement; \" inside string field values.
 
-def parse_line_protocol(body: str) -> list[InfluxPoint]:
+_PRECISION_TO_NS = {
+    "ns": 1,
+    "us": 1_000,
+    "u":  1_000,        # legacy alias some clients use
+    "ms": 1_000_000,
+    "s":  1_000_000_000,
+}
+
+
+def parse_line_protocol(body: str, precision: str = "ns") -> list[InfluxPoint]:
     """Parse a Telegraf line-protocol payload into InfluxPoint records.
 
     Robust to:
@@ -69,6 +78,10 @@ def parse_line_protocol(body: str) -> list[InfluxPoint]:
 
     Lines that fail to parse are logged at DEBUG and skipped — never raises.
     """
+    # InfluxDB v2 accepts a `precision` query param: ns | us | ms | s.
+    # Convert any non-ns timestamps up to ns so the rest of the system
+    # (ring buffer, /api/telegraf/*) only ever sees nanosecond values.
+    mult = _PRECISION_TO_NS.get(precision.lower(), 1)
     out: list[InfluxPoint] = []
     for raw in body.splitlines():
         line = raw.strip()
@@ -76,8 +89,16 @@ def parse_line_protocol(body: str) -> list[InfluxPoint]:
             continue
         try:
             point = _parse_one_line(line)
-            if point is not None:
-                out.append(point)
+            if point is None:
+                continue
+            if point.timestamp_ns is not None and mult != 1:
+                point = InfluxPoint(
+                    measurement=point.measurement,
+                    tags=point.tags,
+                    fields=point.fields,
+                    timestamp_ns=point.timestamp_ns * mult,
+                )
+            out.append(point)
         except Exception as e:
             logger.debug("influx parse skip: %s | line=%r", e, line[:200])
     return out
@@ -114,7 +135,9 @@ def _parse_one_line(line: str) -> Optional[InfluxPoint]:
     if not fields:
         return None
 
-    # Section 3: optional nanosecond timestamp
+    # Section 3: optional timestamp. InfluxDB v2 lets the writer choose
+    # ns / us / ms / s via a `precision` query param (default ns). We
+    # multiply up so the cache always stores nanosecond timestamps.
     ts: Optional[int] = None
     if sec3 is not None:
         try:
@@ -281,10 +304,12 @@ class InfluxReceiver:
 
     async def start(self) -> None:
         app = web.Application(client_max_size=8 * 1024 * 1024)  # 8MB cap
-        # Telegraf v2 default endpoint
+        # InfluxDB v2 write endpoint. This is the only supported write
+        # path — pair Telegraf with `outputs.influxdb_v2`. The legacy
+        # `/write` endpoint is intentionally not registered: v2-only
+        # keeps auth (Authorization: Token) consistent and surfaces a
+        # clean 404 if an old v1 agent points at us by mistake.
         app.router.add_post("/api/v2/write", self._handle_write)
-        # Telegraf v1 still uses /write
-        app.router.add_post("/write", self._handle_write)
         # Health probe so operators can verify the receiver is up
         app.router.add_get("/health", self._handle_health)
         app.router.add_get("/", self._handle_health)
@@ -327,6 +352,16 @@ class InfluxReceiver:
                 self._stats["auth_fail"] += 1
                 return web.Response(status=401, text="unauthorized")
 
+        # v2 query params: org, bucket, precision (ns | us | ms | s).
+        # We don't actually route by org/bucket — the receiver is a
+        # single sink — but logging them makes mis-targeted agents
+        # easier to spot. precision is honoured by the parser so
+        # timestamps land in the cache as nanoseconds regardless of
+        # what unit the agent sent.
+        precision = (request.query.get("precision") or "ns").strip().lower()
+        org    = request.query.get("org",    "")
+        bucket = request.query.get("bucket", "")
+
         body_bytes = await request.read()
         # aiohttp transparently decompresses Content-Encoding: gzip on
         # `request.read()`. Just in case a Telegraf agent uses a body that
@@ -345,9 +380,14 @@ class InfluxReceiver:
         except Exception:
             return web.Response(status=400, text="invalid utf-8")
 
-        points = parse_line_protocol(body)
+        points = parse_line_protocol(body, precision=precision)
         self._stats["writes"] += 1
         self._stats["points"] += len(points)
+        if org or bucket:
+            logger.debug(
+                "influx v2 write: org=%s bucket=%s precision=%s points=%d",
+                org or "-", bucket or "-", precision, len(points),
+            )
 
         if points:
             try:

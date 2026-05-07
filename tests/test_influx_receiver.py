@@ -236,7 +236,10 @@ async def test_receiver_handles_gzip_bodies() -> None:
 
 
 @pytest.mark.asyncio
-async def test_receiver_v1_write_endpoint_works_too() -> None:
+async def test_receiver_v1_endpoint_disabled() -> None:
+    """The legacy v1 `/write` endpoint is intentionally NOT registered;
+    we only support InfluxDB v2 (`/api/v2/write`). An old v1 agent
+    pointed at us must get a clear 404 rather than a silent success."""
     ir._metrics.clear()
     port = _free_port()
     recv = ir.InfluxReceiver(
@@ -249,8 +252,8 @@ async def test_receiver_v1_write_endpoint_works_too() -> None:
                 f"http://127.0.0.1:{port}/write",
                 data="mem,host=v1h used=512i",
             ) as r:
-                assert r.status == 204
-        assert "v1h" in ir.get_all_hosts()
+                assert r.status == 404
+        assert "v1h" not in ir.get_all_hosts()
     finally:
         await recv.stop()
 

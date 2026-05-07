@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.3] — 2026-05-08
+
+### Changed
+
+- **InfluxDB receiver: v2-only.** The legacy `/write` (v1) endpoint has been removed. Telegraf agents must use `outputs.influxdb_v2` writing to `/api/v2/write`. The handler now reads the `precision` (ns/us/ms/s), `org`, and `bucket` query params; timestamps are normalised to nanoseconds in the cache regardless of the agent's chosen precision. Auth still uses `Authorization: Token <t>`. Mis-pointed v1 agents now get a clean `404` instead of silently succeeding under a path we don't actually support.
+
+### Notes
+
+- This release also rolls forward the entire `v0.3.2` set into the `main` branch (previously only on `v0.2-auth`), so the public landing page no longer displays the long-stale `v0.1.0` README.
+
+---
+
 ## [0.3.2] — 2026-05-07
 
 ### Added

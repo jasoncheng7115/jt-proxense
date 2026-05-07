@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.3] — 2026-05-08
+
+### 變更
+
+- **InfluxDB 接收器：v2 唯一支援。** 舊的 `/write`（v1）端點已移除。Telegraf agent 請改用 `outputs.influxdb_v2` 寫入 `/api/v2/write`。Handler 現在讀取 `precision`（ns/us/ms/s）、`org`、`bucket` query 參數；不論 agent 用什麼精度，timestamp 一律正規化成 ns 存進快取。Auth 仍然用 `Authorization: Token <t>`。誤連 v1 的舊 agent 現在會收到乾淨的 `404`，不再有偽成功。
+
+### 備註
+
+- 本次同時把整個 `v0.3.2` 內容 fast-forward 進 `main` 分支（先前只在 `v0.2-auth`），GitHub 公開首頁不再顯示卡很久的 `v0.1.0` README。
+
+---
+
 ## [0.3.2] — 2026-05-07
 
 ### 新增
