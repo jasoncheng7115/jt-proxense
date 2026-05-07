@@ -140,6 +140,13 @@ sudo jt-proxense user reset-totp admin # 清除遺失的 authenticator
 - Tier 確認（hard stop / migrate 需 admin）
 - 每個動作都進稽核日誌；改 `vm_control.enabled: true` 即啟用
 
+### 操作層（v0.3.x）
+
+- **矩陣縮圖預覽** — 每台運作中虛擬機的 framebuffer 即時截圖，可依節點 / 類型 / 標籤分組。QEMU 透過迷你 RFB 3.8 client；LXC 透過 termproxy + vt100 emulator，CT 卡片直接顯示 shell 輸出。點任一卡片開啟全尺寸放大，附 CRT 雜訊載入特效。
+- **跨叢集遷移** — Wizard 會剖析來源 VM、選擇目標叢集端點、取得 TLS fingerprint、列出磁碟與 NIC 對應。包含驗證、預檢、online / offline 模式、頻寬限速。Admin only；僅 QEMU（PVE API 限制）。失敗時跳出 toast 顯示可複製貼上的 `qm unlock` 解鎖指令。
+- **儲存內容瀏覽** — 點任一 file-level 儲存區，依 content 動態出頁籤（備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄）— 只列出該儲存實際支援的類型。可排序清單、搜尋、含 audit 的刪除。Block-level（RBD / LVM / ZFSpool）只給瀏覽。
+- **Telegraf 接收器** — InfluxDB v2 端點 `/api/v2/write`（token 認證、支援 gzip）。Per-host ring buffer 透過 `/api/telegraf/{hosts,host}` 讀取。在 PVE 各主機跑你自己的 Telegraf `outputs.influxdb_v2`，補強 API 輪詢之外的指標。
+
 ## 反向代理（HTTPS 443 → 8098）
 
 ### 為什麼要這樣做

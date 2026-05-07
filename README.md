@@ -140,6 +140,13 @@ See also [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
 - tier confirmations (admin required for hard stop / migrate)
 - every action audited; flip `vm_control.enabled: true` in config to enable
 
+### Operations layer (v0.3.x)
+
+- **Matrix thumbnail preview** — live framebuffer screenshot for every running guest, group-able by node / type / tag. QEMU via a minimal RFB 3.8 client; LXC via termproxy + a vt100 emulator so CT cards show real shell output. Click any card for a full-size view with a CRT-static loading effect.
+- **Cross-cluster migration** — wizard that introspects the source VM, picks a target endpoint, fetches the TLS fingerprint, and lays out disk + NIC mappings. Validation, dry-run pre-checks, online / offline modes, bandwidth limits. Admin-only; QEMU-only (PVE API limit). Lock-recovery toast with copy-paste `qm unlock` hint when migration fails.
+- **Storage content browse** — click any file-level storage → tabs by content type (Backups / ISO / CT templates / Snippets / Import / Disk images / CT root) — only the tabs the storage actually carries. Sortable list, search, delete with audit. Block-level storages (RBD / LVM / ZFSpool) get a list-only view.
+- **Telegraf receiver** — InfluxDB v2 endpoint at `/api/v2/write` (token auth, gzip-tolerant). Per-host ring buffer surfaced via `/api/telegraf/{hosts,host}`. Bring your own Telegraf `outputs.influxdb_v2` on each PVE host for supplemental metrics alongside the API-polled ones.
+
 ## Reverse proxy (HTTPS 443 → 8098)
 
 ### Why
