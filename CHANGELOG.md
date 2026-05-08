@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.13] — 2026-05-09
+
+### Added
+
+- **VM / CT hardware viewer** — VM context menu → 「硬體 / 設定 / Hardware / config」 opens a read-only modal showing the VM's parsed hardware config: general (cores / sockets / memory / OS / boot / BIOS / agent / etc.), disks (bus, volume, size, options), NICs (model / bridge / MAC / VLAN / firewall flag), mountpoints (LXC), and any other config keys. Equivalent of the PVE web UI's Hardware tab; editing intentionally not exposed (much larger surface). New endpoints `GET /api/clusters/{cid}/nodes/{node}/qemu/{vmid}/config` and `.../lxc/{vmid}/config` (15 s cache).
+
+### Internal
+
+- New module `server/vm_config.py`. New component `src/client/components/VMConfigModal.tsx`.
+
+---
+
 ## [0.3.12] — 2026-05-09
 
 ### Added

@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.13] — 2026-05-09
+
+### 新增
+
+- **VM / CT 硬體檢視** — VM 右鍵選單新增「硬體 / 設定」開啟唯讀 modal：解析後的硬體設定 — 一般（cores / sockets / 記憶體 / OS / boot / BIOS / agent…）、磁碟（匯流排、卷、大小、選項）、網卡（型號、橋接、MAC、VLAN、防火牆 flag）、掛載點（LXC）、其他 config keys。等同於 PVE web UI Hardware 頁；編輯故意不開放（範圍太大）。新 endpoint `GET /api/clusters/{cid}/nodes/{node}/qemu/{vmid}/config` 和 `.../lxc/{vmid}/config`（15 秒快取）。
+
+### 內部
+
+- 新模組 `server/vm_config.py`、新元件 `src/client/components/VMConfigModal.tsx`。
+
+---
+
 ## [0.3.12] — 2026-05-09
 
 ### 新增

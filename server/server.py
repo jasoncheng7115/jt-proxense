@@ -36,6 +36,7 @@ from . import node_inspect
 from . import rrd_proxy
 from . import vm_backups
 from . import host_shell
+from . import vm_config as vm_config_mod
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -612,6 +613,11 @@ def create_app() -> web.Application:
 
     # v0.3.11 PVE host shell (xterm.js terminal directly to a node)
     for method, path, handler in host_shell.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.13 VM / CT hardware config viewer (read-only)
+    for method, path, handler in vm_config_mod.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

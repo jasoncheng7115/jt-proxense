@@ -262,6 +262,10 @@ class PVEClient:
         """Get VM config (includes disk info)"""
         return await self._request("GET", f"/nodes/{node}/qemu/{vmid}/config")
 
+    async def get_lxc_config(self, node: str, vmid: int) -> dict:
+        """Get LXC container config (memory, swap, mp/rootfs, net etc.)"""
+        return await self._request("GET", f"/nodes/{node}/lxc/{vmid}/config")
+
     async def get_vm_rrddata(
         self, node: str, vmid: int, timeframe: str = "hour", cf: str = "AVERAGE"
     ) -> list:
