@@ -12,7 +12,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ### 新增
 
-- **PVE 任務 / VM 操作紀錄查看頁**（`/tasks`）— 新的頂層頁面，從 PVE `/cluster/tasks` 拉真實的 PVE 端任務（qmstart / qmshutdown / qmsnapshot / qmrestore / vzdump / qmigrate / vncproxy 等），用 matrix 風格的表格顯示。可依叢集、類型、狀態（進行中 / 成功 / 錯誤）、VMID、使用者篩選。點擊列開啟側邊抽屜顯示完整任務日誌（從 `/nodes/{node}/tasks/{upid}/log` 串），任務進行中時每 2.5 秒自動更新。VM 右鍵選單新增 **「任務紀錄」** 直接帶 `/tasks?vmid=…&cluster=…` 跳轉。與 `/audit` 區別：audit 紀錄 *JT-PROXENSE 自己做了什麼*，這個顯示 *PVE 端真實發生了什麼*，包含其他人經由 PVE web UI / pvesh / API 進行的動作。
+- **PVE 作業 / VM 操作紀錄查看頁**（`/tasks`）— 新的頂層頁面，從 PVE `/cluster/tasks` 拉真實的 PVE 端作業（qmstart / qmshutdown / qmsnapshot / qmrestore / vzdump / qmigrate / vncproxy 等），用 matrix 風格的表格顯示。可依叢集、類型、狀態（進行中 / 成功 / 錯誤）、VMID、使用者篩選。點擊列開啟側邊抽屜顯示完整作業日誌（從 `/nodes/{node}/tasks/{upid}/log` 串），作業進行中時每 2.5 秒自動更新。VM 右鍵選單新增 **「作業紀錄」** 直接帶 `/tasks?vmid=…&cluster=…` 跳轉。與 `/audit` 區別：audit 紀錄 *JT-PROXENSE 自己做了什麼*，這個顯示 *PVE 端真實發生了什麼*，包含其他人經由 PVE web UI / pvesh / API 進行的動作。
 - **主控台貼上 → 模擬鍵盤輸入** — noVNC 主控台 toolbar 新「貼上」按鈕：開啟對話框，貼/輸入 ASCII 文字後，透過 `RFB.sendKey()` 重放成鍵盤事件。三檔速度（5 / 15 / 40 ms 字元間延遲），明確標註僅支援 ASCII（CJK / Emoji 無法表達為 RFB 鍵盤通道的 X11 keysym）。`Ctrl/⌘+Enter` 送出、Esc 關閉。
 - **OCR 語言選單**位於主控台 toolbar：中+英 / English / 繁中 / 简+英 / 简中 / 日本語（依 host 的 `tesseract --list-langs` 動態提供），存於 `localStorage['ocr_lang']`。預設 `chi_tra+eng` 給台灣常見的中英混雜畫面。
 - **OCR overlay 浮動提示** — 拖拉模式啟動時，畫面正中浮一個橘色提示「請避開進度條」約 3 秒後淡出。
