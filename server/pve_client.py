@@ -272,6 +272,16 @@ class PVEClient:
             params={"timeframe": timeframe, "cf": cf},
         )
 
+    async def get_lxc_rrddata(
+        self, node: str, vmid: int, timeframe: str = "hour", cf: str = "AVERAGE"
+    ) -> list:
+        """Get LXC container RRD data"""
+        return await self._request(
+            "GET",
+            f"/nodes/{node}/lxc/{vmid}/rrddata",
+            params={"timeframe": timeframe, "cf": cf},
+        )
+
     # ----- VM lifecycle (v0.3+ writes; require write-scoped PVE token) -----
 
     async def vm_start(self, node: str, vmid: int) -> str:

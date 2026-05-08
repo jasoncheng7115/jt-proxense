@@ -88,12 +88,16 @@ _TEMPLATE = """<!DOCTYPE html>
         body::after{content:'';position:fixed;inset:0;pointer-events:none;background-image:repeating-linear-gradient(180deg,transparent 0,transparent 2px,rgba(255,255,255,.012) 2px,rgba(255,255,255,.012) 3px)}
         @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
         @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
-        .container{max-width:680px;margin:0 auto;padding:32px 24px;position:relative;z-index:2;animation:fadeIn .35s ease}
-        header{display:flex;align-items:baseline;justify-content:space-between;border-bottom:1px solid var(--border);padding-bottom:14px;margin-bottom:26px}
-        h1{margin:0;font-family:Orbitron,sans-serif;font-weight:700;font-size:22px;letter-spacing:.08em;text-transform:uppercase}
-        h1 .accent{color:var(--cyan)}
-        nav.top a{color:var(--text-dim);margin-left:16px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;text-decoration:none;transition:color .15s,text-shadow .15s}
-        nav.top a:hover{color:var(--cyan);text-shadow:0 0 8px var(--cyan-glow)}
+        .container{max-width:780px;margin:0 auto;padding:24px 32px;position:relative;z-index:2;animation:fadeIn .35s ease}
+        header.page-header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:24px;gap:24px;flex-wrap:wrap}
+        .title-section{display:flex;flex-direction:column;gap:2px}
+        h1.page-title{display:flex;align-items:center;gap:10px;margin:0;font-family:Orbitron,sans-serif;font-weight:600;font-size:22px;letter-spacing:.12em;text-transform:uppercase;color:var(--text)}
+        h1.page-title .title-icon{stroke:var(--cyan);filter:drop-shadow(0 0 6px rgba(0,240,255,.6));animation:titlePulse 2s ease-in-out infinite}
+        @keyframes titlePulse{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+        .page-sub{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--text-dim)}
+        nav.top{display:flex;align-items:center;gap:4px}
+        nav.top a{display:inline-flex;align-items:center;gap:6px;color:var(--text-dim);padding:6px 12px;font-family:Orbitron,sans-serif;font-size:11px;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;border-radius:4px;border:1px solid transparent;transition:color .15s,border-color .15s,background .15s}
+        nav.top a:hover{color:var(--cyan);border-color:var(--cyan-soft);background:rgba(0,240,255,.05)}
         .card{background:linear-gradient(180deg,var(--bg-elev),var(--bg));border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:18px;position:relative;overflow:hidden;animation:fadeIn .4s ease}
         .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--magenta));transform:scaleX(0);transform-origin:left;transition:transform .4s}
         .card:hover::before{transform:scaleX(1)}
@@ -121,9 +125,19 @@ _TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
-    <header>
-        <h1>JT-<span class="accent">PROXENSE</span> &middot; {{T_TITLE}}</h1>
-        <nav class="top"><a href="/">{{T_BACK}}</a></nav>
+    <header class="page-header">
+        <div class="title-section">
+            <h1 class="page-title">
+                <svg class="title-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                </svg>
+                {{T_TITLE}}
+            </h1>
+        </div>
+        <nav class="top">
+            <a href="/"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>{{T_BACK}}</a>
+        </nav>
     </header>
 
     <div class="card">

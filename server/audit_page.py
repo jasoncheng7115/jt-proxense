@@ -133,28 +133,55 @@ _TEMPLATE = """<!DOCTYPE html>
             content: ''; position: fixed; inset: 0; pointer-events: none;
             background-image: repeating-linear-gradient(180deg, transparent 0, transparent 2px, rgba(255,255,255,.012) 2px, rgba(255,255,255,.012) 3px);
         }
-        .container { max-width: 1300px; margin: 0 auto; padding: 24px; position: relative; z-index: 2; }
-        header {
-            display: flex; align-items: baseline; justify-content: space-between;
-            border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 22px;
+        .container { max-width: 1300px; margin: 0 auto; padding: 24px 32px; position: relative; z-index: 2; }
+        /* Header aligned with the React SPA's matrix / radar / users views:
+           font-display title, inline cyan icon w/ drop-shadow + pulse,
+           mono subtitle. Different vocabulary than the legacy "JT-<span
+           accent>PROXENSE</span> · Title" the page used to have, so the
+           operator gets the same visual language whether they're in the
+           SPA or in a server-rendered admin page. */
+        header.page-header {
+            display: flex; align-items: flex-end; justify-content: space-between;
+            margin-bottom: 24px; gap: 24px; flex-wrap: wrap;
         }
-        h1 {
+        .title-section { display: flex; flex-direction: column; gap: 2px; }
+        h1.page-title {
+            display: flex; align-items: center; gap: 10px;
             margin: 0;
-            font-family: Orbitron, sans-serif; font-weight: 700;
-            font-size: 22px; letter-spacing: .08em; text-transform: uppercase;
+            font-family: Orbitron, sans-serif; font-weight: 600;
+            font-size: 22px; letter-spacing: 0.12em; text-transform: uppercase;
+            color: var(--text);
         }
-        h1 .accent { color: var(--cyan); }
+        h1.page-title .title-icon {
+            stroke: var(--cyan);
+            filter: drop-shadow(0 0 6px rgba(0,240,255,.6));
+            animation: titlePulse 2s ease-in-out infinite;
+        }
+        @keyframes titlePulse {
+            0%,100% { opacity: .85; transform: scale(1); }
+            50%     { opacity: 1;   transform: scale(1.05); }
+        }
+        .page-sub {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 12px; color: var(--text-dim);
+        }
         .meta {
             font-family: 'Share Tech Mono', monospace;
             font-size: 12px; color: var(--text-muted); letter-spacing: .04em;
         }
+        nav.top { display: flex; align-items: center; gap: 4px; }
         nav.top a {
-            color: var(--text-dim); margin-right: 16px;
-            font-size: 13px; letter-spacing: .04em; text-transform: uppercase;
-            text-decoration: none;
+            display: inline-flex; align-items: center; gap: 6px;
+            color: var(--text-dim); padding: 6px 12px;
+            font-family: Orbitron, sans-serif; font-size: 11px;
+            letter-spacing: .1em; text-transform: uppercase;
+            text-decoration: none; border-radius: 4px;
+            border: 1px solid transparent;
+            transition: color .15s, border-color .15s, background .15s;
         }
-        nav.top a:hover { color: var(--cyan); }
+        nav.top a:hover { color: var(--cyan); border-color: var(--cyan-soft); background: rgba(0,240,255,.05); }
         nav.top a.danger { color: var(--orange); }
+        nav.top a.danger:hover { color: var(--red); border-color: rgba(255,56,96,.4); background: rgba(255,56,96,.06); }
 
         .filters {
             display: flex; flex-wrap: wrap; gap: 10px;
@@ -246,14 +273,29 @@ _TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
-    <header>
-        <div>
-            <h1>JT-<span class="accent">PROXENSE</span> &middot; {{T_TITLE}}</h1>
-            <div class="meta" id="userInfo">{{T_LOADING_SESSION}}</div>
+    <header class="page-header">
+        <div class="title-section">
+            <h1 class="page-title">
+                <svg class="title-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="9" y1="13" x2="15" y2="13"/>
+                    <line x1="9" y1="17" x2="15" y2="17"/>
+                    <line x1="9" y1="9" x2="11" y2="9"/>
+                </svg>
+                {{T_TITLE}}
+            </h1>
+            <div class="page-sub" id="userInfo">{{T_LOADING_SESSION}}</div>
         </div>
         <nav class="top">
-            <a href="/">{{T_NAV_DASHBOARD}}</a>
-            <a href="#" id="logoutBtn" class="danger">{{T_NAV_LOGOUT}}</a>
+            <a href="/">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>
+                {{T_NAV_DASHBOARD}}
+            </a>
+            <a href="#" id="logoutBtn" class="danger">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                {{T_NAV_LOGOUT}}
+            </a>
         </nav>
     </header>
 

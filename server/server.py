@@ -31,6 +31,9 @@ from . import storage_download
 from . import user_admin
 from . import ocr
 from . import pve_tasks
+from . import backup_jobs
+from . import node_inspect
+from . import rrd_proxy
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -582,6 +585,21 @@ def create_app() -> web.Application:
 
     # v0.3.6 PVE task / VM operation history viewer
     for method, path, handler in pve_tasks.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.8 cluster backup-jobs viewer
+    for method, path, handler in backup_jobs.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.8 per-node certs / pending updates / subscription
+    for method, path, handler in node_inspect.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.8 RRD time-series proxy (node / qemu / lxc historical charts)
+    for method, path, handler in rrd_proxy.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

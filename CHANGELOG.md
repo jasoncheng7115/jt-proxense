@@ -8,6 +8,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.8] — 2026-05-09
+
+### Added
+
+- **Health monitor** (`/health`) — at-a-glance dashboard aggregating proactive checks across every cluster: offline nodes, storage ≥85/95% used, ceph HEALTH_WARN/ERR, sustained CPU/memory >92%, recent PVE task failures (last 24h), certificates expiring (<60 days), pending apt updates per node. Each finding is clickable → drilldown to the relevant view (cluster-core / storage / ceph / tasks). Stats strip up top: nodes online ratio, VMs/CTs running ratio, storage count.
+- **Backup schedules viewer** (`/backups`) — read-only list of cluster-level vzdump cron jobs from `/cluster/backup`: schedule, next run, target storage, scope (all / pool / vmid), mode, enabled state, comment. Filter by enable state.
+- **PVE task viewer CSV export** — download the currently-filtered task list as CSV (UTC ISO timestamps, duration in seconds). Filename includes cluster + timestamp.
+- **Performance charts (RRD)** — new `RRDChartModal` reads PVE's RRD ring via three new endpoints (`/api/clusters/{cid}/nodes/{node}/rrddata`, plus `/qemu/{vmid}/rrddata` and `/lxc/{vmid}/rrddata`), draws CPU / memory / network / disk-IO time-series as inline SVG (no chart library — bundle stays under the 500 KB ceiling). Timeframes: 1H / 24H / 7D / 30D / 1Y. Wired into the VM context menu (`vm.perf_charts`) AND the node context menu in cluster-core.
+- **Server-rendered admin pages now match the SPA visual language** — `/account`, `/audit`, `/sessions` all switched from the old "JT-PROXENSE · Title" header to the same h1 + cyan icon + drop-shadow + pulse pattern used by HoloMatrix / RadarScan / UserAdmin / PveTasks. Same nav button styling (Orbitron caps with cyan-soft hover ring), same subtitle treatment.
+
+### Internal
+
+- New modules: `server/backup_jobs.py`, `server/node_inspect.py` (certificates / apt-update / subscription with 60 s cache), `server/rrd_proxy.py` (30 s cache).
+- New views: `src/client/views/HealthMonitor.tsx`, `src/client/views/BackupJobs.tsx`, `src/client/components/RRDChartModal.tsx`.
+
+---
+
 ## [0.3.7] — 2026-05-09
 
 ### Added

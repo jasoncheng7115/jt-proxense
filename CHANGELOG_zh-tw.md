@@ -8,6 +8,23 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.8] — 2026-05-09
+
+### 新增
+
+- **健康監測**（`/health`）— 跨叢集即時聚合健康指標的單頁儀表板：節點離線、儲存 ≥85/95% 使用率、ceph HEALTH_WARN/ERR、CPU/記憶體 >92%、最近 24h 作業失敗、憑證即將到期（<60 天）、節點待更新套件數量。每張卡片可點擊直接跳到對應 view（節點 / 儲存 / Ceph / 作業）。上方有總覽統計：節點在線比、VM/CT 執行中比、儲存數。
+- **備份排程查看頁**（`/backups`）— 從 `/cluster/backup` 拉取叢集層級 vzdump 排程的唯讀清單：排程時間、下次執行、目標儲存、對象（全部 / 池 / vmid）、模式、啟用狀態、備註。可依啟用狀態篩選。
+- **PVE 作業 CSV 匯出** — 下載目前篩選結果為 CSV（UTC ISO 時間戳、duration 秒數），檔名含叢集 ID + 時間。
+- **效能歷史圖表（RRD）** — 新增 `RRDChartModal`，後端三個新 endpoint（`/api/clusters/{cid}/nodes/{node}/rrddata` 加上 qemu/lxc 變體）拉 PVE RRD ring，前端用 inline SVG 繪 CPU / 記憶體 / 網路 / 磁碟 IO 時序圖（不引入圖表 lib，bundle 保持在 500 KB 警示線下）。時間範圍 1H / 24H / 7D / 30D / 1Y。VM 右鍵選單 (`vm.perf_charts`) 和 cluster-core 節點右鍵選單都接好了。
+- **server-rendered 管理頁面視覺對齊 SPA** — `/account`、`/audit`、`/sessions` 改用跟 HoloMatrix / RadarScan / UserAdmin / PveTasks 同款 header（h1 + cyan icon + drop-shadow + pulse）。導覽按鈕也同款（Orbitron 全大寫 + cyan-soft hover ring），副標 mono 字。
+
+### 內部
+
+- 新模組：`server/backup_jobs.py`、`server/node_inspect.py`（憑證 / apt-update / subscription，60 秒快取）、`server/rrd_proxy.py`（30 秒快取）。
+- 新元件 / view：`src/client/views/HealthMonitor.tsx`、`src/client/views/BackupJobs.tsx`、`src/client/components/RRDChartModal.tsx`。
+
+---
+
 ## [0.3.7] — 2026-05-09
 
 ### 新增
