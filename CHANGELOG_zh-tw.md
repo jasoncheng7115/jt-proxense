@@ -8,6 +8,14 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.12] — 2026-05-09
+
+### 新增
+
+- **命令搜尋（⌘/Ctrl+K）** — 跨所有叢集的全域 fuzzy 搜尋：VM / CT / 節點 / 儲存都吃。token-prefix scoring + substring fallback，最多顯示 30 筆，可鍵盤操作（↑↓⏎、Esc 關閉）。選中目標自動跳到對應 view 並切到該叢集。完全 client-side（吃 WS broadcast 的 cluster 資料），不增加 server 負擔。新元件 `src/client/components/CommandPalette.tsx`。
+
+---
+
 ## [0.3.11] — 2026-05-09
 
 ### 新增

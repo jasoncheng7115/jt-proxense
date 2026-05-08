@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.12] — 2026-05-09
+
+### Added
+
+- **Command palette (⌘/Ctrl+K)** — global fuzzy search across every entity in every cluster: VMs, CTs, nodes, storages. Token-prefix scoring + substring fallback, top 30 hits, keyboard-navigable (↑↓⏎, Esc closes). Selecting a hit jumps to the right view with the cluster pre-selected. Runs entirely client-side off the WS-broadcast cluster data — zero extra server load. New `src/client/components/CommandPalette.tsx`.
+
+---
+
 ## [0.3.11] — 2026-05-09
 
 ### Added
