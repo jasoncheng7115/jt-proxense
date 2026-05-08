@@ -8,6 +8,24 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.15] — 2026-05-09
+
+### Added
+
+- **HA + replication monitoring** — Health monitor now surfaces:
+  - **HA resource state** when any HA-managed VM/CT isn't in the steady `started`/`stopped` state (`error` → critical; `fence` / `freeze` / `migrate` → warning).
+  - **Replication errors** when any replication job has a non-empty error or non-zero `fail_count`.
+  Both fetched on demand via two new read-only endpoints:
+  `GET /api/clusters/{cid}/ha/status` and `GET /api/clusters/{cid}/replication-jobs`.
+
+### Internal
+
+- New module `server/ha_view.py` — read-only viewers for HA status (splits PVE's `/cluster/ha/status/current` mixed-row response into `resources / masters / lrms / quorum`) and replication jobs. Both behind a 10 s cache.
+- `pve_client.list_ha_status()` and `list_replication_jobs()` added.
+- Updated `CLAUDE.md` Pending TODO list to reflect everything closed in the v0.3.5 → v0.3.15 sprint.
+
+---
+
 ## [0.3.14] — 2026-05-09
 
 ### Added

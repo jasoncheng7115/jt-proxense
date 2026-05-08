@@ -672,6 +672,18 @@ class PVEClient:
     async def list_ha_resources(self) -> list:
         return await self._request("GET", "/cluster/ha/resources")
 
+    async def list_ha_status(self) -> list:
+        """`/cluster/ha/status/current` — per-resource live state (started /
+        stopped / error), node, max_relocate, last reboot, request_state, etc."""
+        return await self._request("GET", "/cluster/ha/status/current")
+
+    async def list_replication_jobs(self) -> list:
+        """List storage replication jobs (`/cluster/replication`)."""
+        try:
+            return await self._request("GET", "/cluster/replication")
+        except Exception:
+            return []
+
     async def add_ha_resource(self, sid: str, *, group: str | None = None,
                               state: str = "started", comment: str = "") -> None:
         """sid is e.g. 'vm:100' or 'ct:101'."""

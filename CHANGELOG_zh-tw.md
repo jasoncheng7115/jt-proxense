@@ -8,6 +8,23 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.15] — 2026-05-09
+
+### 新增
+
+- **HA + 複寫作業監測** — 健康監測現在會浮出：
+  - **HA 資源狀態異常**：任何 HA-managed VM/CT 不在 `started`/`stopped` 穩定狀態時都會顯示（`error` → 嚴重；`fence` / `freeze` / `migrate` → 警告）。
+  - **複寫作業錯誤**：任何 replication job 有 error 或 `fail_count > 0` 都會列出。
+  兩者都用 on-demand 新 endpoint 拉資料：`GET /api/clusters/{cid}/ha/status` 和 `GET /api/clusters/{cid}/replication-jobs`。
+
+### 內部
+
+- 新模組 `server/ha_view.py` — HA / replication 唯讀檢視。把 PVE `/cluster/ha/status/current` 的混合 row 分成 `resources / masters / lrms / quorum`。兩者都 10 秒快取。
+- `pve_client.list_ha_status()` / `list_replication_jobs()` 新增。
+- 更新 `CLAUDE.md` Pending TODO list 反映 v0.3.5 → v0.3.15 期間關掉的所有項目。
+
+---
+
 ## [0.3.14] — 2026-05-09
 
 ### 新增
