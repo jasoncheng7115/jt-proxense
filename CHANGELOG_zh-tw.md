@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.5] — 2026-05-08
+
+### 新增
+
+- **noVNC OCR 文字複製** — 在 QEMU 主控台拖拉矩形 → server 端 `tesseract`（系統 binary，安裝一次：`apt install tesseract-ocr tesseract-ocr-chi-tra` 即可支援繁中）→ 辨識後文字自動寫入剪貼簿。新增 endpoints：`GET /api/ocr/langs`（viewer）、`POST /api/ocr`（operator）。預設語言 `chi_tra+eng`，依 `localStorage['ocr_lang']`。8 秒硬性超時、圖片 8 MB 上限。如同其他 operator 動作均寫入 audit log。
+
+### 為何如此設計
+
+- 用 server 端而非 `tesseract.js`：每個瀏覽器要下載 ~10 MB wasm+JS 對偶爾用的功能不划算；系統 tesseract 用 `apt` 管理語言包；速度比 wasm 快；每次 OCR 都進 audit log（含叢集 + VM 上下文）。
+
+---
+
 ## [0.3.4] — 2026-05-08
 
 ### 新增

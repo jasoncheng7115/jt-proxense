@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.5] — 2026-05-08
+
+### Added
+
+- **noVNC OCR copy** — drag-rect on the QEMU console → server-side `tesseract` (host's system binary; install once: `apt install tesseract-ocr tesseract-ocr-chi-tra` for Traditional Chinese) → recognized text auto-copied to the clipboard. New endpoints: `GET /api/ocr/langs` (viewer), `POST /api/ocr` (operator). Default lang `chi_tra+eng`; honoured `localStorage['ocr_lang']`. Hard timeout 8s, image cap 8 MB. Audited like every other operator action.
+
+### Why
+
+- Server-side instead of `tesseract.js` because: ~10 MB JS+wasm download per browser was wasteful for an occasional feature; system tesseract handles language packs via `apt`; faster than wasm; and every OCR shows up in the audit log with cluster + VM context.
+
+---
+
 ## [0.3.4] — 2026-05-08
 
 ### Added

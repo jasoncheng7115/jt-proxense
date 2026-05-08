@@ -39,6 +39,13 @@ _I18N: dict[str, dict[str, str]] = {
         "btn_reconnect":       "Reconnect",
         "btn_fullscreen":      "Fullscreen",
         "btn_send_keys":       "Send keys",
+        "btn_ocr":             "OCR copy",
+        "btn_ocr_title":       "Drag a rectangle on the screen to OCR + copy text",
+        "ocr_running":         "OCR running…",
+        "ocr_copied":          "Text copied to clipboard",
+        "ocr_no_text":         "No text recognised",
+        "ocr_failed":          "OCR failed: ",
+        "ocr_lang":            "OCR language",
         "overlay_lead":        "// initialising",
         "overlay_msg":         "opening WebSocket bridge to PVE…",
         "err_init":            "noVNC init failed: ",
@@ -60,6 +67,13 @@ _I18N: dict[str, dict[str, str]] = {
         "btn_reconnect":       "重新連線",
         "btn_fullscreen":      "全螢幕",
         "btn_send_keys":       "傳送按鍵",
+        "btn_ocr":             "OCR 複製",
+        "btn_ocr_title":       "在畫面上拉出矩形 → OCR 文字並複製",
+        "ocr_running":         "OCR 辨識中…",
+        "ocr_copied":          "文字已複製到剪貼簿",
+        "ocr_no_text":         "未辨識到文字",
+        "ocr_failed":          "OCR 失敗：",
+        "ocr_lang":            "OCR 語言",
         "overlay_lead":        "// 初始化中",
         "overlay_msg":         "正在開啟到 PVE 的連線通道…",
         "err_init":            "noVNC 初始化失敗：",
@@ -190,6 +204,44 @@ _TEMPLATE = """<!DOCTYPE html>
         }
         .overlay.hidden { display: none; }
         .overlay .lead { display: block; color: var(--cyan); margin-bottom: 8px; font-family: Orbitron, sans-serif; font-size: 14px; letter-spacing: .12em; text-transform: uppercase; }
+
+        /* OCR overlay — draggable rect on top of the noVNC canvas. */
+        #ocr.active { background: rgba(0,240,255,.25); border-color: var(--cyan); color: var(--cyan); }
+        .ocr-overlay {
+            position: absolute; inset: 0;
+            cursor: crosshair;
+            background: rgba(0,0,0,0.18);
+            z-index: 50;
+        }
+        .ocr-rect {
+            position: absolute;
+            border: 2px solid var(--cyan);
+            background: rgba(0,240,255,0.10);
+            box-shadow: 0 0 12px rgba(0,240,255,0.45);
+            display: none;
+            pointer-events: none;
+        }
+        .ocr-toast {
+            position: fixed; bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 18px;
+            background: linear-gradient(180deg, #0d1320, #050810);
+            border: 1px solid var(--cyan);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 13px;
+            box-shadow: 0 0 24px rgba(0,240,255,0.4);
+            z-index: 9999;
+            animation: ocrToastIn .18s ease-out;
+        }
+        .ocr-toast.ok   { border-color: var(--green); color: var(--green); box-shadow: 0 0 24px rgba(0,255,136,0.4); }
+        .ocr-toast.warn { border-color: var(--orange); color: var(--orange); box-shadow: 0 0 24px rgba(255,138,60,0.4); }
+        .ocr-toast.err  { border-color: var(--red); color: var(--red); box-shadow: 0 0 24px rgba(255,56,96,0.4); }
+        @keyframes ocrToastIn {
+            from { opacity: 0; transform: translate(-50%, 8px); }
+            to   { opacity: 1; transform: translate(-50%, 0); }
+        }
     </style>
 </head>
 <body>
@@ -226,6 +278,7 @@ _TEMPLATE = """<!DOCTYPE html>
             <button id="cad" disabled title="{{T_BTN_CAD_TITLE}}">{{T_BTN_CAD}}</button>
             <button id="reconnect" disabled>{{T_BTN_RECONNECT}}</button>
             <button id="full" disabled>{{T_BTN_FULLSCREEN}}</button>
+            <button id="ocr" disabled title="{{T_BTN_OCR_TITLE}}">{{T_BTN_OCR}}</button>
         </div>
     </div>
     <div id="screen">
@@ -363,6 +416,8 @@ async function connect() {
         cad.disabled = false; recon.disabled = false; fs.disabled = false;
         const kb = document.getElementById('keys-btn');
         if (kb) kb.disabled = false;
+        const ocrBtn = document.getElementById('ocr');
+        if (ocrBtn) ocrBtn.disabled = false;
         // Re-apply scaleViewport after connect: noVNC only has the remote
         // dimensions once the framebuffer init message arrives, so the value
         // we set in the constructor is sometimes a no-op for the first paint.
@@ -377,6 +432,8 @@ async function connect() {
         cad.disabled = true; fs.disabled = true; recon.disabled = false;
         const kb = document.getElementById('keys-btn');
         if (kb) kb.disabled = true;
+        const ocrBtn = document.getElementById('ocr');
+        if (ocrBtn) ocrBtn.disabled = true;
         if (ev.detail && ev.detail.clean) {
             setStatus('closed', I18N.msg_closed_clean);
         } else {
@@ -483,6 +540,152 @@ keysMenu.querySelectorAll('button[data-key]').forEach((b) => {
 });
 
 connect();
+
+// ----- OCR copy ---------------------------------------------------------
+// User clicks the OCR button → we draw a transparent overlay on top of
+// the noVNC canvas, let them drag-select a rectangle, then crop that
+// region out of the canvas, POST it to /api/ocr, copy the result to
+// the clipboard. Server-side tesseract handles language packs (chi_tra,
+// jpn, etc. install via `apt`).
+const ocrBtn = document.getElementById('ocr');
+if (ocrBtn) {
+    let ocrActive = false;
+    let dragStart = null;
+    let dragRect = null;
+    let overlayEl = null;
+    let rectEl = null;
+    let toastEl = null;
+
+    const showToast = (msg, kind) => {
+        if (toastEl) toastEl.remove();
+        toastEl = document.createElement('div');
+        toastEl.className = 'ocr-toast ' + (kind || '');
+        toastEl.textContent = msg;
+        document.body.appendChild(toastEl);
+        setTimeout(() => { if (toastEl) toastEl.remove(); }, 2400);
+    };
+
+    const startOcr = () => {
+        if (!rfb) return;
+        const screenEl = document.getElementById('screen');
+        const canvas = screenEl.querySelector('canvas');
+        if (!canvas) {
+            showToast(I18N.ocr_failed + 'no canvas', 'err');
+            return;
+        }
+        ocrActive = true;
+        ocrBtn.classList.add('active');
+        overlayEl = document.createElement('div');
+        overlayEl.className = 'ocr-overlay';
+        rectEl = document.createElement('div');
+        rectEl.className = 'ocr-rect';
+        overlayEl.appendChild(rectEl);
+        screenEl.appendChild(overlayEl);
+
+        overlayEl.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            dragStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            dragRect = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
+            rectEl.style.left = dragRect.x + 'px';
+            rectEl.style.top  = dragRect.y + 'px';
+            rectEl.style.width = '0'; rectEl.style.height = '0';
+            rectEl.style.display = 'block';
+        });
+        overlayEl.addEventListener('mousemove', (e) => {
+            if (!dragStart) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            dragRect.x = Math.min(dragStart.x, x);
+            dragRect.y = Math.min(dragStart.y, y);
+            dragRect.w = Math.abs(x - dragStart.x);
+            dragRect.h = Math.abs(y - dragStart.y);
+            rectEl.style.left = dragRect.x + 'px';
+            rectEl.style.top  = dragRect.y + 'px';
+            rectEl.style.width = dragRect.w + 'px';
+            rectEl.style.height = dragRect.h + 'px';
+        });
+        overlayEl.addEventListener('mouseup', async () => {
+            const start = dragStart;
+            const dr = dragRect;
+            dragStart = null;
+            dragRect = null;
+            stopOcr();
+            if (!start || !dr || dr.w < 8 || dr.h < 8) return;
+            // Crop the canvas region. The display canvas may be CSS-scaled
+            // to fit the screen container; map back to canvas coordinates
+            // via the scale factor.
+            const cssRect = canvas.getBoundingClientRect();
+            const sx = canvas.width  / cssRect.width;
+            const sy = canvas.height / cssRect.height;
+            const cx = Math.round(dr.x * sx);
+            const cy = Math.round(dr.y * sy);
+            const cw = Math.round(dr.w * sx);
+            const ch = Math.round(dr.h * sy);
+            if (cw < 4 || ch < 4) return;
+            const out = document.createElement('canvas');
+            out.width = cw; out.height = ch;
+            out.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+            showToast(I18N.ocr_running);
+            // Pick OCR language. Default chi_tra+eng works for the common
+            // Taiwan workload; English-only users fall back automatically
+            // if chi_tra isn't installed via the server's lang whitelist.
+            const lang = (localStorage.getItem('ocr_lang') || 'chi_tra+eng');
+            try {
+                const blob = await new Promise((res) => out.toBlob(res, 'image/png'));
+                if (!blob) throw new Error('toBlob failed');
+                const r = await fetch('/api/ocr?lang=' + encodeURIComponent(lang), {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'image/png' },
+                    body: blob,
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    throw new Error(data.detail || data.error || ('HTTP ' + r.status));
+                }
+                const text = (data.text || '').trim();
+                if (!text) {
+                    showToast(I18N.ocr_no_text, 'warn');
+                    return;
+                }
+                try {
+                    await navigator.clipboard.writeText(text);
+                    showToast(I18N.ocr_copied + ' (' + text.length + ' chars)', 'ok');
+                } catch (clipErr) {
+                    // Clipboard API can be blocked; fall back to a textarea trick.
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); showToast(I18N.ocr_copied, 'ok'); }
+                    catch { showToast(I18N.ocr_failed + clipErr, 'err'); }
+                    finally { ta.remove(); }
+                }
+            } catch (e) {
+                showToast(I18N.ocr_failed + (e && e.message || e), 'err');
+            }
+        });
+        // Esc cancels.
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                stopOcr();
+                document.removeEventListener('keydown', onKey);
+            }
+        };
+        document.addEventListener('keydown', onKey);
+    };
+
+    const stopOcr = () => {
+        ocrActive = false;
+        ocrBtn.classList.remove('active');
+        if (overlayEl) { overlayEl.remove(); overlayEl = null; rectEl = null; }
+        dragStart = null; dragRect = null;
+    };
+
+    ocrBtn.addEventListener('click', () => {
+        if (ocrActive) stopOcr(); else startOcr();
+    });
+}
 </script>
 </body>
 </html>
@@ -527,7 +730,13 @@ async def console_page_handler(request: web.Request) -> web.Response:
             .replace("{{T_BTN_FULLSCREEN}}", s["btn_fullscreen"])
             .replace("{{T_BTN_SEND_KEYS}}", s["btn_send_keys"])
             .replace("{{T_OVERLAY_LEAD}}", s["overlay_lead"])
-            .replace("{{T_OVERLAY_MSG}}", s["overlay_msg"]))
+            .replace("{{T_OVERLAY_MSG}}", s["overlay_msg"])
+            .replace("{{T_BTN_OCR}}", s["btn_ocr"])
+            .replace("{{T_BTN_OCR_TITLE}}", s["btn_ocr_title"])
+            .replace("{{T_OCR_RUNNING}}", s["ocr_running"])
+            .replace("{{T_OCR_COPIED}}", s["ocr_copied"])
+            .replace("{{T_OCR_NO_TEXT}}", s["ocr_no_text"])
+            .replace("{{T_OCR_FAILED}}", s["ocr_failed"]))
 
     return web.Response(
         text=html,

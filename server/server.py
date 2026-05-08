@@ -29,6 +29,7 @@ from . import pdm_backups
 from . import storage_content
 from . import storage_download
 from . import user_admin
+from . import ocr
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -569,6 +570,12 @@ def create_app() -> web.Application:
     # bin/jt-proxense user CLI; lets web admins manage users + roles
     # + reset 2FA without SSH access to the host.
     for method, path, handler in user_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x OCR — used by the noVNC console "select to copy" feature.
+    # Spawns the system tesseract binary; absent → returns 501.
+    for method, path, handler in ocr.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
