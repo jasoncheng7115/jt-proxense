@@ -8,6 +8,23 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.7] — 2026-05-09
+
+### 新增
+
+- **`console_proxy.py` 的 WebSocket bridge 接上 pve_throttle** — `/console/.../vncws`（noVNC）和 `/term/ws`（xterm.js）的 `session.ws_connect(...)` 升級握手現在用 `pve_throttle.acquire(host)` 包起來，主控台連線啟動不會在繁忙時段擠掉其他 PVE 呼叫。橋接建立後馬上釋放 slot（不然 N 個同時開的主控台會把 4-slot semaphore 鎖死）。
+- **Telegraf 資料餵進 cluster_manager** — `Cluster.get_data()` 在每個 node payload 上加 `telegraf` 欄位：`{measurement: 最新一筆 fields, …}`，從 influx ring buffer 取出。PVE node hostname 要跟 Telegraf 的 `host` tag 對得起來（agent 預設就是這樣）。完整樣本歷史仍走 `/api/telegraf/{host}` 給需要時間序列的 view。
+
+### 變更
+
+- **`backdrop-filter: blur()` 全面審查** — 把所有 10/12/16-px blur 砍到 6/8 px（視覺幾乎沒差，macOS Chrome 合成器負擔大幅減輕）。視窗失去焦點時全域關閉 `backdrop-filter`（延伸既有的 `data-app-visible="false"` 規則）。新增 `@media (prefers-reduced-motion: reduce)` 區塊：歸零所有 backdrop-filter、把 animation / transition duration 折成 0.01ms — 慢 Mac / 開了系統「降低動態效果」的使用者自動得到精簡版 UI，不需要我們做一個專屬「省電模式」開關。
+
+### 內部
+
+- pve_throttle 現在透明地涵蓋所有對外 PVE 呼叫類型（HTTP 經 `pve_client._request`、vncproxy/termproxy POST 在 `console_proxy._prepare`、vncws/term WebSocket handshake、lxc_thumb termproxy）。一個天花板、一個地方調。
+
+---
+
 ## [0.3.6] — 2026-05-08
 
 ### 新增

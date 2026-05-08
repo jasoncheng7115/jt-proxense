@@ -348,43 +348,51 @@ async def console_ws_handler(request: web.Request) -> web.WebSocketResponse:
     )
     logger.info("vncwebsocket connecting cluster=%s node=%s vmid=%d port=%s",
                 cluster_id, node, vmid, pve_port)
+    ws_pve = None
     try:
-        async with session.ws_connect(
-            pve_url, protocols=("binary",), max_msg_size=0,
-            headers=ws_headers,
-        ) as ws_pve:
+        # Throttle the WS handshake only — pveproxy charges its single-process
+        # cost during the upgrade. Once the bridge is up the slot is released;
+        # otherwise N concurrent consoles would deadlock the per-host limiter
+        # (4-slot semaphore vs. arbitrarily many sessions).
+        async with throttle.acquire(pve_node_cfg.host):
+            ws_pve = await session.ws_connect(
+                pve_url, protocols=("binary",), max_msg_size=0,
+                headers=ws_headers,
+            )
 
-            async def browser_to_pve():
-                async for msg in ws_browser:
-                    if msg.type == aiohttp.WSMsgType.BINARY:
-                        await ws_pve.send_bytes(msg.data)
-                    elif msg.type == aiohttp.WSMsgType.TEXT:
-                        await ws_pve.send_str(msg.data)
-                    elif msg.type in (aiohttp.WSMsgType.CLOSE,
-                                      aiohttp.WSMsgType.CLOSED,
-                                      aiohttp.WSMsgType.ERROR):
-                        return
-                await ws_pve.close()
+        async def browser_to_pve():
+            async for msg in ws_browser:
+                if msg.type == aiohttp.WSMsgType.BINARY:
+                    await ws_pve.send_bytes(msg.data)
+                elif msg.type == aiohttp.WSMsgType.TEXT:
+                    await ws_pve.send_str(msg.data)
+                elif msg.type in (aiohttp.WSMsgType.CLOSE,
+                                  aiohttp.WSMsgType.CLOSED,
+                                  aiohttp.WSMsgType.ERROR):
+                    return
+            await ws_pve.close()
 
-            async def pve_to_browser():
-                async for msg in ws_pve:
-                    if msg.type == aiohttp.WSMsgType.BINARY:
-                        await ws_browser.send_bytes(msg.data)
-                    elif msg.type == aiohttp.WSMsgType.TEXT:
-                        await ws_browser.send_str(msg.data)
-                    elif msg.type in (aiohttp.WSMsgType.CLOSE,
-                                      aiohttp.WSMsgType.CLOSED,
-                                      aiohttp.WSMsgType.ERROR):
-                        return
-                await ws_browser.close()
+        async def pve_to_browser():
+            async for msg in ws_pve:
+                if msg.type == aiohttp.WSMsgType.BINARY:
+                    await ws_browser.send_bytes(msg.data)
+                elif msg.type == aiohttp.WSMsgType.TEXT:
+                    await ws_browser.send_str(msg.data)
+                elif msg.type in (aiohttp.WSMsgType.CLOSE,
+                                  aiohttp.WSMsgType.CLOSED,
+                                  aiohttp.WSMsgType.ERROR):
+                    return
+            await ws_browser.close()
 
-            await asyncio.gather(browser_to_pve(), pve_to_browser(),
-                                  return_exceptions=True)
+        await asyncio.gather(browser_to_pve(), pve_to_browser(),
+                              return_exceptions=True)
     except Exception as e:
         logger.warning("console proxy error vmid=%d: %s", vmid, e)
         if not ws_browser.closed:
             await ws_browser.close()
     finally:
+        if ws_pve is not None and not ws_pve.closed:
+            await ws_pve.close()
         await session.close()
 
     return ws_browser
@@ -481,44 +489,49 @@ async def console_term_ws_handler(request: web.Request) -> web.WebSocketResponse
     session = aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(ssl=pve_ssl),
     )
+    ws_pve = None
     try:
-        async with session.ws_connect(
-            pve_url, max_msg_size=0, headers=ws_headers,
-        ) as ws_pve:
-            # Auth: send `<user>:<ticket>\n` to PVE; never to the browser.
-            await ws_pve.send_str(f"{entry.pve_user}:{entry.vnc_ticket}\n")
+        # Throttle handshake only (see vncwebsocket bridge above for rationale).
+        async with throttle.acquire(pve_node_cfg.host):
+            ws_pve = await session.ws_connect(
+                pve_url, max_msg_size=0, headers=ws_headers,
+            )
+        # Auth: send `<user>:<ticket>\n` to PVE; never to the browser.
+        await ws_pve.send_str(f"{entry.pve_user}:{entry.vnc_ticket}\n")
 
-            async def browser_to_pve():
-                async for msg in ws_browser:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        await ws_pve.send_str(msg.data)
-                    elif msg.type == aiohttp.WSMsgType.BINARY:
-                        await ws_pve.send_bytes(msg.data)
-                    elif msg.type in (aiohttp.WSMsgType.CLOSE,
-                                       aiohttp.WSMsgType.CLOSED,
-                                       aiohttp.WSMsgType.ERROR):
-                        return
-                await ws_pve.close()
+        async def browser_to_pve():
+            async for msg in ws_browser:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    await ws_pve.send_str(msg.data)
+                elif msg.type == aiohttp.WSMsgType.BINARY:
+                    await ws_pve.send_bytes(msg.data)
+                elif msg.type in (aiohttp.WSMsgType.CLOSE,
+                                   aiohttp.WSMsgType.CLOSED,
+                                   aiohttp.WSMsgType.ERROR):
+                    return
+            await ws_pve.close()
 
-            async def pve_to_browser():
-                async for msg in ws_pve:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        await ws_browser.send_str(msg.data)
-                    elif msg.type == aiohttp.WSMsgType.BINARY:
-                        await ws_browser.send_bytes(msg.data)
-                    elif msg.type in (aiohttp.WSMsgType.CLOSE,
-                                       aiohttp.WSMsgType.CLOSED,
-                                       aiohttp.WSMsgType.ERROR):
-                        return
-                await ws_browser.close()
+        async def pve_to_browser():
+            async for msg in ws_pve:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    await ws_browser.send_str(msg.data)
+                elif msg.type == aiohttp.WSMsgType.BINARY:
+                    await ws_browser.send_bytes(msg.data)
+                elif msg.type in (aiohttp.WSMsgType.CLOSE,
+                                   aiohttp.WSMsgType.CLOSED,
+                                   aiohttp.WSMsgType.ERROR):
+                    return
+            await ws_browser.close()
 
-            await asyncio.gather(browser_to_pve(), pve_to_browser(),
-                                  return_exceptions=True)
+        await asyncio.gather(browser_to_pve(), pve_to_browser(),
+                              return_exceptions=True)
     except Exception as e:
         logger.warning("term proxy error vmid=%d: %s", vmid, e)
         if not ws_browser.closed:
             await ws_browser.close()
     finally:
+        if ws_pve is not None and not ws_pve.closed:
+            await ws_pve.close()
         await session.close()
 
     return ws_browser

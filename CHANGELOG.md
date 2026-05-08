@@ -8,6 +8,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.7] — 2026-05-09
+
+### Added
+
+- **`console_proxy.py` WebSocket bridges now throttle the handshake** — both `/console/.../vncws` (noVNC) and `/term/ws` (xterm.js) wrap their `session.ws_connect(...)` upgrade in `pve_throttle.acquire(host)`, so console openings never starve other PVE traffic on a busy host. The slot is released as soon as the bridge is alive (otherwise N concurrent consoles would deadlock the 4-slot semaphore).
+- **Telegraf data feeds cluster_manager** — `Cluster.get_data()` now annotates each node payload with a compact `telegraf` field: `{measurement: latest_fields, …}` pulled from the influx ring buffer. PVE node hostnames must match Telegraf's `host` tag (the agent default). Full sample history is still available via `/api/telegraf/{host}` for views that need it.
+
+### Changed
+
+- **`backdrop-filter: blur()` audit** — dropped all 10/12/16-px blur radii to 6/8 px (perceptually identical, materially cheaper to composite on macOS Chrome). Globally killed `backdrop-filter` while the window is unfocused (extends the existing `data-app-visible="false"` rule). Added `@media (prefers-reduced-motion: reduce)` block: zero out backdrop-filters and collapse all animation/transition durations — operators on slower Macs (or the OS-level Reduce Motion preference) get a leaner UI without us shipping a custom toggle.
+
+### Internal
+
+- pve_throttle is now layered transparently across every outbound PVE call type (HTTP via `pve_client._request`, vncproxy/termproxy POST in `console_proxy._prepare`, vncws/term WebSocket handshakes, lxc_thumb termproxy). One ceiling, one place to tune.
+
+---
+
 ## [0.3.6] — 2026-05-08
 
 ### Added

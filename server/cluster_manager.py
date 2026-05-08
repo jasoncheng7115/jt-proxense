@@ -1267,11 +1267,35 @@ class Cluster:
 
     def get_data(self) -> dict:
         """Get all cached data as dict"""
+        nodes_payload = {}
+        # Pull the latest telegraf sample per measurement per node, if any.
+        # `host` tag in incoming line-protocol matches NodeMetrics.node, so
+        # operators just point Telegraf agents at /api/v2/write with their
+        # PVE node name as the `host` tag (Telegraf's default) and the data
+        # automatically lights up the node detail panel.
+        try:
+            from . import influx_receiver
+            tg_hosts = set(influx_receiver.get_all_hosts())
+        except Exception:
+            tg_hosts = set()
+        for k, v in self.cache.nodes.items():
+            d = asdict(v)
+            if v.node in tg_hosts:
+                snap = influx_receiver.get_host_metrics(v.node)
+                # Compact summary: just the most recent fields per
+                # measurement. Full ring buffer is still available via
+                # /api/telegraf/{host} for any panel that needs history.
+                d["telegraf"] = {
+                    m: samples[-1].fields
+                    for m, samples in snap.items()
+                    if samples
+                }
+            nodes_payload[k] = d
         return {
             "id": self.id,
             "name": self.name,
             "summary": asdict(self.cache.summary) if self.cache.summary else None,
-            "nodes": {k: asdict(v) for k, v in self.cache.nodes.items()},
+            "nodes": nodes_payload,
             "vms": {k: asdict(v) for k, v in self.cache.vms.items()},
             "storages": {k: asdict(v) for k, v in self.cache.storages.items()},
             "ceph": asdict(self.cache.ceph) if self.cache.ceph else None,
