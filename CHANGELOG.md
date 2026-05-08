@@ -8,6 +8,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.9] — 2026-05-09
+
+### Added
+
+- **Per-VM backup history** — VM context menu → 「備份歷史 / Backup history」 opens a drawer that scans every backup-capable storage on the cluster and lists every `vzdump-*-{vmid}-*` file: timestamp, age (colour-coded fresh/aging/stale), storage, node, size, protected/verified flags, notes. Stats strip up top: count, total size, newest backup with age pill. New endpoint `GET /api/clusters/{cid}/vms/{vmid}/backups` (30 s cache).
+- **Cluster syslog modal** — `/tasks` page toolbar now has 「叢集日誌」 button that opens a modal showing the last 500 lines of `/cluster/log` (PVE web UI's "Cluster log" panel equivalent). Auto-refresh every 5 s, filter by free text on msg / node / user / tag, colour-coded by syslog priority. New endpoint `GET /api/clusters/{cid}/log`.
+
+### Internal
+
+- New module `server/vm_backups.py`. Filename match uses `-{vmid}-` so a vmid 12 query doesn't false-match vmid 1234.
+- `pve_client.get_cluster_log()` added; `pve_tasks.cluster_log_handler` route added next to the task routes since they share the same operational use case (timeline view).
+- New components `BackupHistoryModal.tsx`, `ClusterLogModal.tsx`.
+
+---
+
 ## [0.3.8] — 2026-05-09
 
 ### Added

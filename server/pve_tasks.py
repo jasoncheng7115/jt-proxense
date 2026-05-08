@@ -153,8 +153,30 @@ async def task_status_handler(request: web.Request) -> web.Response:
     return web.json_response(st or {})
 
 
+@role_required("viewer")
+async def cluster_log_handler(request: web.Request) -> web.Response:
+    """Cluster-wide syslog tail — exposed via /api/clusters/{cid}/log.
+    Lives here next to tasks since they share the same operational use case
+    (timeline view of what's happening on the cluster)."""
+    cluster_id = request.match_info["cluster_id"]
+    try:
+        max_lines = max(1, min(int(request.query.get("max") or "200"), 1000))
+    except ValueError:
+        max_lines = 200
+    cluster = cluster_manager.get_cluster(cluster_id)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        rows = await cluster.client.get_cluster_log(max_lines=max_lines)
+    except Exception as e:
+        logger.warning("cluster log fetch failed for %s: %s", cluster_id, e)
+        rows = []
+    return web.json_response({"lines": rows or [], "count": len(rows or [])})
+
+
 ROUTES = [
     ("GET", r"/api/clusters/{cluster_id}/tasks", list_tasks_handler),
+    ("GET", r"/api/clusters/{cluster_id}/log", cluster_log_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}/log", task_log_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}/status", task_status_handler),
 ]

@@ -34,6 +34,7 @@ from . import pve_tasks
 from . import backup_jobs
 from . import node_inspect
 from . import rrd_proxy
+from . import vm_backups
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -600,6 +601,11 @@ def create_app() -> web.Application:
 
     # v0.3.8 RRD time-series proxy (node / qemu / lxc historical charts)
     for method, path, handler in rrd_proxy.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.9 per-VM backup history (vzdump aggregator across backup-capable storages)
+    for method, path, handler in vm_backups.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

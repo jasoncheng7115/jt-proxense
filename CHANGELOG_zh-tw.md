@@ -8,6 +8,21 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.9] — 2026-05-09
+
+### 新增
+
+- **每 VM 備份歷史** — VM 右鍵選單新增「備份歷史」開抽屜：掃描叢集裡每個可備份的儲存，列出所有 `vzdump-*-{vmid}-*` 檔：時間、距離（依老舊程度上色 fresh/aging/stale）、儲存、節點、大小、保護/驗證標記、備註。上方統計：備份數、總容量、最新一次（含時間距 pill）。新 endpoint `GET /api/clusters/{cid}/vms/{vmid}/backups`（30 秒快取）。
+- **叢集系統日誌 modal** — `/tasks` 頁工具列新「叢集日誌」按鈕，點開 modal 顯示 `/cluster/log` 最後 500 行（等同 PVE web UI 「Cluster log」面板）。每 5 秒自動更新，可按訊息 / 節點 / 使用者 / tag 篩選，依 syslog priority 上色。新 endpoint `GET /api/clusters/{cid}/log`。
+
+### 內部
+
+- 新模組 `server/vm_backups.py`。檔名比對用 `-{vmid}-`，避免 vmid 12 誤中 vmid 1234。
+- `pve_client.get_cluster_log()` 新增；`pve_tasks.cluster_log_handler` route 加在 task 旁邊（同樣是時間軸用例）。
+- 新元件 `BackupHistoryModal.tsx`、`ClusterLogModal.tsx`。
+
+---
+
 ## [0.3.8] — 2026-05-09
 
 ### 新增

@@ -282,6 +282,15 @@ class PVEClient:
             params={"timeframe": timeframe, "cf": cf},
         )
 
+    async def get_cluster_log(self, max_lines: int = 200) -> list:
+        """Cluster-wide syslog tail (the 'Cluster log' panel in PVE web UI).
+
+        Each entry: {n, t, pri, time, node, user, msg}. Useful for ops
+        timeline triage — who logged in, services restarted, etc."""
+        return await self._request(
+            "GET", "/cluster/log", params={"max": max_lines}
+        )
+
     # ----- VM lifecycle (v0.3+ writes; require write-scoped PVE token) -----
 
     async def vm_start(self, node: str, vmid: int) -> str:
