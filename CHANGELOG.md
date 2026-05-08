@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.17] — 2026-05-09
+
+### Fixed
+
+- **Host shell entry hidden for non-admin** — the 「主機 Shell」 row in the cluster-core node context menu is now visible only when `auth.user.role_global === 'admin'`. Previously the row showed for everyone but the prepare endpoint would 403 the click. The fix is consistent with how the VM context menu hides write actions per role.
+
+---
+
 ## [0.3.16] — 2026-05-09
 
 ### Added
