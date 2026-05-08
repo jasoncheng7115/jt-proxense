@@ -38,6 +38,8 @@ from urllib.parse import quote as _urlquote
 
 import aiohttp
 
+from .pve_throttle import throttle
+
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,13 @@ async def capture_lxc_text_png(
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=pve_ssl),
         ) as session:
-            async with session.post(proxy_url, headers=headers_post, data={}) as r:
+            # The termproxy POST goes through pve_throttle so a wave of
+            # CT thumbnails doesn't exceed the per-host pveproxy budget.
+            # The long-lived WS upgrade below stays unthrottled — holding
+            # a slot for the 2s capture would queue every other PVE call.
+            async with throttle.acquire(pve_host), session.post(
+                proxy_url, headers=headers_post, data={},
+            ) as r:
                 if r.status != 200:
                     body = await r.text()
                     raise RuntimeError(f"termproxy HTTP {r.status}: {body[:200]}")

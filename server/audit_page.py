@@ -192,23 +192,30 @@ _TEMPLATE = """<!DOCTYPE html>
         button:hover { background: rgba(0,240,255,.18); }
         button.primary:hover { box-shadow: 0 0 22px rgba(0,240,255,.5); }
 
+        /* Table style aligned with the matrix view's vm-table — same
+           Orbitron header, same letter-spacing, same secondary-text
+           colour, no rounded surround. Keeps the look consistent across
+           the React frontend and the server-rendered admin pages. */
         table {
             width: 100%; border-collapse: collapse;
-            background: var(--bg-elev); border: 1px solid var(--border);
-            border-radius: 10px; overflow: hidden;
             font-family: 'Share Tech Mono', monospace; font-size: 13px;
         }
-        thead {
-            background: var(--bg-elev-2);
-            font-family: Orbitron, sans-serif;
-            font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-            color: var(--cyan);
+        thead { position: sticky; top: 0; z-index: 10; background: var(--bg); }
+        th {
+            padding: 10px 14px; text-align: left;
+            font-family: Orbitron, sans-serif; font-weight: 600;
+            font-size: 14px; letter-spacing: .05em; text-transform: uppercase;
+            color: var(--text-dim);
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
         }
-        th, td {
-            padding: 8px 12px; text-align: left;
-            border-bottom: 1px solid rgba(0,240,255,.06);
+        td {
+            padding: 6px 14px;
+            border-bottom: 1px solid rgba(0,240,255,.08);
+            vertical-align: middle;
         }
-        tbody tr:hover { background: rgba(0,240,255,.04); }
+        tbody tr { transition: background .14s; }
+        tbody tr:hover { background: rgba(0,240,255,.05); }
         td.ts { color: var(--text-dim); white-space: nowrap; }
         td.user { color: var(--text); font-weight: 500; }
         td.action { color: var(--magenta); }

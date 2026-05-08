@@ -124,6 +124,16 @@ def delete_user(username: str) -> bool:
         return cur.rowcount > 0
 
 
+def set_enabled(username: str, enabled: bool) -> bool:
+    """Enable / disable a user account. Returns True if found."""
+    with db.connect_sync() as c:
+        cur = c.execute(
+            "UPDATE users SET enabled=? WHERE username=?",
+            (1 if enabled else 0, username),
+        )
+        return cur.rowcount > 0
+
+
 def get_user_by_username(username: str) -> Optional[dict]:
     with db.connect_sync() as c:
         row = c.execute(
@@ -300,6 +310,23 @@ async def login(username: str, password: str, *, source_ip: str, user_agent: str
         if user and not user["enabled"]:
             record_failed_login(source_ip, username)
             return None
+    elif backend == "ldap":
+        from . import auth_ldap
+        ok, group_dns = auth_ldap.verify(username, password)
+        if not ok:
+            record_failed_login(source_ip, username)
+            return None
+        user_id = auth_ldap.ensure_local_row(username)
+        user = get_user_by_id(user_id)
+        if user and not user["enabled"]:
+            record_failed_login(source_ip, username)
+            return None
+        # Auto-map AD/LDAP groups → roles per config.auth.ldap.group_role_map
+        try:
+            auth_ldap.apply_group_roles(username, group_dns)
+        except Exception as e:
+            import logging as _l
+            _l.getLogger(__name__).warning("ldap role-grant failed for %s: %s", username, e)
     else:
         # local backend
         if not user or not user["enabled"] \

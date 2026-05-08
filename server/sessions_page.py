@@ -107,9 +107,12 @@ _TEMPLATE = """<!DOCTYPE html>
         button.primary{color:#001018;background:linear-gradient(135deg,var(--cyan),#00b8d4);border:none;box-shadow:0 0 12px rgba(0,240,255,.35)}
         button.danger{color:#1a0006;background:linear-gradient(135deg,var(--red),#c41a3a);border:none;box-shadow:0 0 10px rgba(255,56,96,.4)}
         button.danger:hover{box-shadow:0 0 18px rgba(255,56,96,.55)}
-        table{width:100%;border-collapse:collapse;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;overflow:hidden;font-family:'Share Tech Mono',monospace;font-size:14px}
-        thead{background:var(--bg-elev-2);font-family:Orbitron,sans-serif;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan)}
-        th,td{padding:8px 12px;text-align:left;border-bottom:1px solid rgba(0,240,255,.06)}
+        /* Aligned with the matrix view's vm-table style — same Orbitron
+           header, 14px / 0.05em letter-spacing / text-dim colour. */
+        table{width:100%;border-collapse:collapse;font-family:'Share Tech Mono',monospace;font-size:13px}
+        thead{position:sticky;top:0;z-index:10;background:var(--bg)}
+        th{padding:10px 14px;text-align:left;font-family:Orbitron,sans-serif;font-weight:600;font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);border-bottom:1px solid var(--border);white-space:nowrap}
+        td{padding:6px 14px;border-bottom:1px solid rgba(0,240,255,.08);vertical-align:middle}
         tbody tr{transition:background .12s} tbody tr:hover{background:rgba(0,240,255,.04)}
         td.user{color:var(--text);font-weight:500} td.dim{color:var(--text-dim)}
         td.preview{color:var(--magenta);font-size:13px}

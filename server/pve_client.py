@@ -555,6 +555,35 @@ class PVEClient:
             "DELETE", f"/nodes/{node}/storage/{storage}/content/{volume}",
         )
 
+    async def download_url_to_storage(self, node: str, storage: str, *,
+                                      url: str, filename: str, content: str,
+                                      checksum: str | None = None,
+                                      checksum_algorithm: str | None = None,
+                                      verify_certificates: bool = True) -> str:
+        """Tell PVE to download a file from `url` into `storage` with the
+        given `filename`. Returns task UPID — caller can poll
+        `/nodes/{node}/tasks/{upid}/status` for progress.
+
+        PVE 8+ exposes `/nodes/{node}/storage/{storage}/download-url`. Only
+        the file-level storage drivers accept this; backend will 400 for
+        block-level. We pass through verify_certificates to let operators
+        opt out for self-signed mirrors (used carefully, audit-logged)."""
+        data: dict = {
+            "url":      url,
+            "filename": filename,
+            "content":  content,
+        }
+        if checksum:
+            data["checksum"] = checksum
+        if checksum_algorithm:
+            data["checksum-algorithm"] = checksum_algorithm
+        if not verify_certificates:
+            data["verify-certificates"] = 0
+        return await self._request(
+            "POST", f"/nodes/{node}/storage/{storage}/download-url",
+            data=data,
+        )
+
     async def restore_backup(self, node: str, *, vmid: int, storage: str,
                              archive: str, vm_type: str = "qemu",
                              force: bool = False, **kwargs) -> str:

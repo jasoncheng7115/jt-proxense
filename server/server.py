@@ -27,6 +27,8 @@ from . import vm_control
 from . import pdm_resources
 from . import pdm_backups
 from . import storage_content
+from . import storage_download
+from . import user_admin
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -468,7 +470,14 @@ def create_app() -> web.Application:
         request_id_middleware,
         make_auth_middleware(auth_enabled),
     ]
-    app = web.Application(middlewares=middlewares)
+    # client_max_size = 16 GiB so large ISO uploads (debian-DVD, Windows
+    # ISOs, etc.) reach the storage upload handler. The handler streams
+    # the file part to PVE without buffering, so the size limit doesn't
+    # cost RAM. aiohttp's default of 1MB would silently 413 every ISO.
+    app = web.Application(
+        middlewares=middlewares,
+        client_max_size=16 * 1024 * 1024 * 1024,
+    )
 
     # Setup CORS
     cors = aiohttp_cors.setup(app, defaults={
@@ -546,6 +555,20 @@ def create_app() -> web.Application:
 
     # v0.3.x storage content (list / delete; upload + download in later phases)
     for method, path, handler in storage_content.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x storage file download (SSH-streamed; needs ssh_user / key
+    # deployed to PVE nodes). Optional — fails cleanly if asyncssh isn't
+    # installed.
+    for method, path, handler in storage_download.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.x admin user management (admin-only) — companion to the
+    # bin/jt-proxense user CLI; lets web admins manage users + roles
+    # + reset 2FA without SSH access to the host.
+    for method, path, handler in user_admin.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

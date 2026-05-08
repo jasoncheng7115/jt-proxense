@@ -8,6 +8,34 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.4] — 2026-05-08
+
+### Added
+
+- **Storage from-URL download** — `POST /api/clusters/.../download-url` wraps PVE's `download-url` endpoint. UI in StorageDetail with URL + filename + optional checksum + TLS-verify toggle. operator+ role.
+- **Storage upload** — multipart streaming proxy from browser to PVE. Frontend modal with drag-drop, progress bar, content-type validation. App's `client_max_size` bumped to 16 GiB so multi-GB ISOs work; the handler streams without buffering. operator+ role.
+- **Storage SSH download** — PVE has no native file-download API, so `GET .../storage/.../download/{volid}` opens an `asyncssh` connection to the storage's owning node, resolves the on-disk path via `pvesm path`, and streams the file back via `cat`. New per-cluster config fields: `ssh_user` (default `root`) and `ssh_port` (default `22`). Operator must deploy the jt-proxense host's public key into each PVE node's `authorized_keys`.
+- **Bulk operation UI** — matrix table view now has a multi-select checkbox column. When ≥1 row is checked, a sticky cyber-toolbar appears with start / shutdown / reboot / hard-stop. Mixed VM/CT selection is OK (the existing `vm_bulk_handler` auto-detects). Per-cluster fan-out + per-cluster result summary.
+- **User management page** at `/users` (admin-only) — list / create / disable-enable / delete local users; reset password (forces change on next login); clear 2FA; per-user role grants with cluster + VM-pattern triples. Companion API at `/api/admin/users/...`.
+- **AD / LDAP authentication backend** — set `auth.backend: ldap` and configure `auth.ldap.{server, bind_dn|user_dn_template, group_role_map, ...}` to delegate password checks to AD/LDAP. Group → role auto-grant on each login. Sentinel `*LDAP*` password hash on the local row keeps local-backend logins from ever matching. CLI back door always uses local backend so operator can recover when AD is unreachable.
+- **Matrix sub-path routing** — `/matrix/grid` / `/matrix/table` / `/matrix/thumb` now write back to URL on view-mode switch and resolve from URL on initial load. Same pattern for `/storage/tanks` / `/storage/treemap`.
+
+### Changed
+
+- **InfluxDB receiver: v2-only.** (Already shipped in 0.3.3; rolled forward into main with this release.)
+- **Table headers across all pages** aligned to the matrix `vm-table` style — Orbitron 14px, 0.05em letter-spacing, secondary-text color, sticky thead, no rounded surround. Server-rendered `/audit` and `/sessions` pages updated too.
+- **Storage detail tab labels brightness** — was `text-secondary` (too dim per user feedback), now `text-primary` with `primary` cyan on hover.
+- **Radar context-menu "Show details"** no longer redirects to `/matrix`. Highlights the corresponding radar dot inline (calls `handleAnomalyClick`).
+- **`pve_throttle` extended to `lxc_thumb.py`** — the termproxy POST in the LXC thumbnail path now goes through the per-host concurrency pool, preventing thumbnail waves from starving other PVE calls.
+- **`useDialogs` migration is complete.** No native `alert/confirm/prompt` remain anywhere in `src/client/`.
+
+### Fixed
+
+- **`.btn-icon` class collision** — App.tsx already used the name for header icon-only buttons; the matrix toolbar's redefinition was shrinking the global pause / lang / user / settings buttons. Renamed inner class to `.tb-ico`.
+- **Console-disabled stale state** — verified the path: client doesn't gate `no_stored_password` client-side anymore; `/prepare` returns 412, the dialog surfaces it. Stale localStorage no longer matters.
+
+---
+
 ## [0.3.3] — 2026-05-08
 
 ### Changed

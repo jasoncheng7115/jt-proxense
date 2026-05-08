@@ -48,6 +48,11 @@ class ClusterConfig:
     enabled: bool = True
     poll_interval: float = 2.0  # seconds
     static_refresh_interval: float = 60.0  # seconds for VM/storage list refresh
+    # SSH access for file-level operations PVE doesn't expose via API
+    # (currently: storage download). Key auth only — operator must deploy
+    # the jt-proxense host's public key to each PVE node's authorized_keys.
+    ssh_user: str = "root"
+    ssh_port: int = 22
 
 
 @dataclass
@@ -126,13 +131,17 @@ class AuthConfig:
     """v0.2+ authentication configuration. Disabled by default for v0.1
     backward compatibility — operator opts in by setting enabled: true."""
     enabled: bool = False
-    backend: str = "local"           # 'local' or 'pam' (v0.2.x)
+    backend: str = "local"           # 'local' | 'pam' | 'ldap'
     db_path: str = "/var/lib/jt-proxense/jt-proxense.db"
     # When set, used to sign session cookies. If empty, server generates a
     # random one at first start and writes it back here.
     session_secret: str = ""
     # Audit log forwarding (optional)
     forward: AuditForwardConfig = field(default_factory=AuditForwardConfig)
+    # LDAP / Active Directory backend config. Only consulted when
+    # backend == 'ldap'. Schema documented in server/auth_ldap.py.
+    # Stored as a dict so users can extend without touching the dataclass.
+    ldap: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -197,6 +206,8 @@ class Config:
                 enabled=c.get("enabled", True),
                 poll_interval=c.get("poll_interval", 2.0),
                 static_refresh_interval=c.get("static_refresh_interval", 60.0),
+                ssh_user=c.get("ssh_user", "root"),
+                ssh_port=int(c.get("ssh_port", 22)),
             )
             clusters.append(cluster)
 

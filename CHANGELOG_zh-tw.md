@@ -8,6 +8,34 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.4] — 2026-05-08
+
+### 新增
+
+- **儲存從網址下載** — `POST /api/clusters/.../download-url` 包 PVE 的 `download-url` 端點。StorageDetail 介面新增 modal，可填 URL、檔名、選填 checksum、TLS 驗證開關。operator+ 權限。
+- **儲存上傳** — 瀏覽器到 PVE 的 multipart 串流代理。前端 modal 含拖拉、進度條、內容類型驗證。App 的 `client_max_size` 提到 16 GiB，handler 直接串流不落地，多 GB 的 ISO 沒問題。operator+ 權限。
+- **儲存 SSH 下載** — PVE 沒有原生檔案下載 API，`GET .../storage/.../download/{volid}` 用 `asyncssh` 連到該儲存所在節點、`pvesm path` 解析路徑、`cat` 串流回 client。每個 cluster 新增 `ssh_user`（預設 `root`）/ `ssh_port`（預設 `22`）設定。Operator 需要先把 jt-proxense host 的公鑰部署到每台 PVE node 的 `authorized_keys`。
+- **批次操作 UI** — 矩陣表格新增多選欄位。勾選 ≥1 列時，sticky cyber 工具列出現可批次：開機 / 關機 / 重啟 / 強制停止。混選 VM/CT OK（既有 `vm_bulk_handler` 會自動辨識）。Per-cluster 分發 + per-cluster 結果摘要。
+- **使用者管理頁** `/users`（admin only）— 列出 / 建立 / 啟停 / 刪除本機使用者；重設密碼（強制下次登入變更）；清除 2FA；per-user 角色授權（cluster + VM-pattern 三元組）。對應 API 在 `/api/admin/users/...`。
+- **AD / LDAP 認證後端** — 設 `auth.backend: ldap` + `auth.ldap.{server, bind_dn|user_dn_template, group_role_map, ...}` 即可委派密碼驗證給 AD/LDAP。每次登入會依據群組成員自動授權角色。本地表的 `*LDAP*` sentinel 密碼雜湊確保 local 後端永遠不會配對成功。CLI 後門永遠走 local 後端，AD 連不上時 operator 可救援。
+- **矩陣子路徑路由** — `/matrix/grid` / `/matrix/table` / `/matrix/thumb` 切檢視會寫回 URL、初始載入會從 URL 解析。`/storage/tanks` / `/storage/treemap` 同樣支援。
+
+### 變更
+
+- **InfluxDB 接收器：僅支援 v2。**（已在 0.3.3 出貨，本版同時 fast-forward 到 main。）
+- **所有頁面表格表頭對齊矩陣 `vm-table` 樣式** — Orbitron 14px、0.05em letter-spacing、secondary 字色、sticky thead、無圓角外框。Server-rendered 的 `/audit` 與 `/sessions` 也同步調整。
+- **儲存詳細頁籤亮度** — 原 `text-secondary` 太暗（依使用者回報），現在改 `text-primary`，hover 變 cyan `primary`。
+- **雷達 context-menu「檢視細節」不再導去 `/matrix`** — 改為高亮對應雷達點（呼叫 `handleAnomalyClick`）。
+- **`pve_throttle` 套到 `lxc_thumb.py`** — LXC 縮圖路徑的 termproxy POST 現在走 per-host 並發池，避免縮圖一次大量 fetch 餓死其他 PVE 呼叫。
+- **`useDialogs` 遷移收尾。** `src/client/` 內已無任何 native `alert/confirm/prompt`。
+
+### 修正
+
+- **`.btn-icon` class 撞名** — App.tsx 已用該名字當 header 純 icon 按鈕；矩陣工具列重複定義會把全域 pause / lang / user / settings 按鈕變成迷你版。改名為 `.tb-ico`。
+- **Console-disabled 狀態 stale** — 已驗證路徑：client 不再在 `no_stored_password` 階段做客端阻擋；`/prepare` 回 412 由 dialog 顯示，stale localStorage 不再造成假象。
+
+---
+
 ## [0.3.3] — 2026-05-08
 
 ### 變更
