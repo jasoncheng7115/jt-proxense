@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.10] — 2026-05-09
+
+### Added
+
+- **NodeDetailPanel badges**: subscription state (Active / status / None), pending apt updates count (with severity colour), earliest cert expiry (days remaining; flips to red after expiry / orange < 30d). Each fetched on-demand from the v0.3.8 endpoints when the panel opens, so cluster-wide polling stays unchanged.
+
+---
+
 ## [0.3.9] — 2026-05-09
 
 ### Added
