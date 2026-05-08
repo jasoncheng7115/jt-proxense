@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.14] — 2026-05-09
+
+### Added
+
+- **Apt updates manager modal** — the "updates pending" badge in NodeDetailPanel is now clickable; opens a modal listing every pending package on the node (Package / OldVersion / NewVersion / Section), with admin actions to trigger `apt update` (refresh the index) and `apt dist-upgrade` (apply pending). Both wrap the existing `pdm_cluster` endpoints and surface the resulting PVE task UPID. Operators with admin role get the action buttons; lower roles see read-only with a banner. Confirmation dialog (destructive) on dist-upgrade.
+
+### Internal
+
+- New component `src/client/components/AptUpdatesModal.tsx`. No new server routes — reuses the v0.3.x `pdm_cluster.apt_*` handlers.
+
+---
+
 ## [0.3.13] — 2026-05-09
 
 ### Added

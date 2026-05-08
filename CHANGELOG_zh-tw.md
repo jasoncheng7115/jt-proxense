@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.14] — 2026-05-09
+
+### 新增
+
+- **APT 更新管理 modal** — NodeDetailPanel 的「待更新套件」badge 現在可以點，開 modal 列出該節點所有待更新套件（套件名 / 舊版 / 新版 / 分類）。Admin 角色看到 `apt update`（刷索引）和 `apt dist-upgrade`（升級全部）兩個按鈕，包現有的 `pdm_cluster` endpoint 並回傳 PVE task UPID。其他角色顯示唯讀狀態 + 提示。dist-upgrade 有破壞性確認對話框。
+
+### 內部
+
+- 新元件 `src/client/components/AptUpdatesModal.tsx`，不新增 server route — 沿用 v0.3.x 的 `pdm_cluster.apt_*` handler。
+
+---
+
 ## [0.3.13] — 2026-05-09
 
 ### 新增
