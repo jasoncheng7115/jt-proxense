@@ -29,6 +29,7 @@ Constraints:
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import shutil
@@ -39,6 +40,12 @@ from aiohttp import web
 
 from . import audit
 from .middleware import role_required
+
+try:
+    from PIL import Image, ImageOps  # type: ignore
+    _PIL_OK = True
+except Exception:  # pragma: no cover
+    _PIL_OK = False
 
 
 logger = logging.getLogger(__name__)
@@ -137,16 +144,62 @@ async def ocr_handler(request: web.Request) -> web.Response:
     src_ip = request.get("client_ip", "unknown")
     rid = request.get("request_id", "")
 
+    # ---- Preprocessing ---------------------------------------------------
+    # tesseract is finicky with small regions. Two standard tricks help a
+    # LOT for terminal/console screenshots:
+    #   1. Upscale ~3x with LANCZOS (sharp resampling) so glyphs span the
+    #      ~30+ px tesseract trains best at.
+    #   2. Detect light-on-dark text (mean brightness < 128) and invert,
+    #      because tesseract assumes dark text on a light background.
+    # Combined with `--psm 6` (uniform block) and `--oem 1` (LSTM only),
+    # quality goes from "T7C ee Sear" → "Ubuntu 20.04.6 LTS mail1 tty1".
+    proc_body = body
+    pre_info = ""
+    if _PIL_OK:
+        try:
+            im = Image.open(io.BytesIO(body))
+            im = im.convert("L")  # grayscale
+            mean = sum(im.getdata()) / max(1, im.width * im.height)
+            inverted = False
+            if mean < 128:
+                im = ImageOps.invert(im)
+                inverted = True
+            # Upscale FIRST, before autocontrast/binarization. LANCZOS on
+            # a 14-px-tall console glyph synthesises smooth antialiasing
+            # that tesseract's LSTM head likes; doing it after binarization
+            # would just blow up jagged 1-bit pixels and lose detail.
+            target = 4
+            new_w, new_h = im.width * target, im.height * target
+            if new_w * new_h > 16_000_000:  # ~16 megapixels post-upscale
+                target = max(1, int((16_000_000 / (im.width * im.height)) ** 0.5))
+                new_w, new_h = im.width * target, im.height * target
+            if target > 1:
+                im = im.resize((new_w, new_h), Image.LANCZOS)
+            # Autocontrast after upscale lifts subtle glyph features the
+            # smoothing introduced. Skip the hard threshold — Tesseract 4
+            # runs Otsu binarisation internally and does better with the
+            # gray ramp than with a pre-flattened 1-bit image (the fixed
+            # threshold was eating `i` dots and `1` serifs).
+            im = ImageOps.autocontrast(im, cutoff=1)
+            buf = io.BytesIO()
+            im.save(buf, format="PNG", optimize=False)
+            proc_body = buf.getvalue()
+            pre_info = f"x{target} inv={inverted} otsu"
+        except Exception as e:  # pragma: no cover
+            logger.warning("ocr preprocessing failed, using raw image: %s", e)
+
     text = ""
     err: str = ""
     with tempfile.NamedTemporaryFile(
         suffix=".png", delete=False, prefix="jt_ocr_"
     ) as f:
         tmp = f.name
-        f.write(body)
+        f.write(proc_body)
     try:
         proc = await asyncio.create_subprocess_exec(
-            "tesseract", tmp, "stdout", "-l", lang,
+            "tesseract", tmp, "stdout",
+            "-l", lang, "--psm", "6", "--oem", "1",
+            "-c", "preserve_interword_spaces=1",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -172,10 +225,11 @@ async def ocr_handler(request: web.Request) -> web.Response:
 
     await audit.write(
         user=user, source_ip=src_ip, action="ocr.console",
-        target=f"bytes={len(body)} lang={lang}",
+        target=f"bytes={len(body)} lang={lang} pre={pre_info}",
         result=("ok" if not err else f"error: {err}"),
         request_id=rid,
-        params={"lang": lang, "bytes": len(body), "chars": len(text)},
+        params={"lang": lang, "bytes": len(body), "chars": len(text),
+                "pre": pre_info},
     )
 
     if err:

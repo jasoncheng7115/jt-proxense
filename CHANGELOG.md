@@ -8,6 +8,35 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.6] — 2026-05-08
+
+### Added
+
+- **PVE task / VM operation history viewer** (`/tasks`) — new top-level page that pulls real PVE-side tasks (qmstart / qmshutdown / qmsnapshot / qmrestore / vzdump / qmigrate / vncproxy / etc.) from `/cluster/tasks` and shows them in the matrix-style table. Filter by cluster, type, status (running / ok / error), VMID, user. Click a row → drawer with full task log streamed from `/nodes/{node}/tasks/{upid}/log`; auto-refreshes every 2.5 s while a task is running. VM context menu now has **「任務紀錄」** which deep-links into `/tasks?vmid=…&cluster=…`. Distinct from `/audit`: that one logs *what JT-PROXENSE did*; this one shows *what's actually happening on PVE*, including actions taken via PVE web UI / pvesh / API outside our tool.
+- **Console paste-as-keystrokes** — new toolbar button「貼上」on the noVNC console: opens a dialog, you paste / type ASCII text, it replays as keystrokes through `RFB.sendKey()`. Three speed tiers (5 / 15 / 40 ms inter-char delay), explicit ASCII-only warning (CJK / emoji can't be expressed as X11 keysyms over RFB). `Ctrl/⌘+Enter` sends, Esc closes.
+- **OCR language picker** in the console toolbar — choose between 中+英 / English / 繁中 / 简+英 / 简中 / 日本語 (whatever the host's `tesseract --list-langs` advertises); persisted to `localStorage['ocr_lang']`. Defaults to `chi_tra+eng` for Taiwan operators with mixed CJK/English screens.
+- **OCR overlay hint** — when the drag-rect mode is active, an orange hint floats at center for ~3 s reminding the operator to avoid bar charts / progress bars.
+- **OCR bar-noise filter** — server-side preprocessing now uses 4× LANCZOS upscale before grayscale + autocontrast (was 3× after binarization), drops the hard 140 threshold (Tesseract 4's internal Otsu does better on a gray ramp than on a 1-bit image), adds `--psm 6 --oem 1 -c preserve_interword_spaces=1`. On the client side, the OCR result is now line-filtered: any line with ≥75 % vertical-stroke chars (`|`, `I`, `H`, `U`, `戰`, etc., with at least 10 non-whitespace chars) is dropped as bar-chart noise; toast tells the operator how many lines were filtered.
+
+### Changed
+
+- **Window-blur counts as "not visible"** — App + ParticleBackground now also pause on `window.blur` (not just `document.visibilityState === 'hidden'`). On macOS Chrome the visibility state stays `visible` while the browser is merely behind another app, so the previous code kept burning CPU/GPU when the operator was clearly elsewhere. Particle count cut from 40 → 18, fps cap from 30 → 20 (slow-drift dust reads identical perceptually).
+- **Console toolbar buttons** got inline icons (CTRL-ALT-DEL / Reconnect / Fullscreen / Paste / OCR / Send keys ▾) and the OCR drag overlay now covers the full viewport (mouse can drift past canvas edges and the rect snaps to canvas bounds; previously dragging off-canvas froze the rect).
+- **StorageDetail action column** widened from 60 px → 96 px with `white-space: nowrap` so download + delete icons stay on one row instead of stacking.
+- **UserAdmin contrast** — subtitle counter, "新增本機帳號" label, and last-login muted text bumped from `--text-muted` → `--text-secondary` for legibility on the deep-blue background.
+
+### Fixed
+
+- **Console JS not running** — `'\r'` / `'\n'` / `'\t'` inside `server/console_page.py:_TEMPLATE` (a Python `"""..."""` block) were being interpreted as actual CR/LF/Tab in the rendered HTML, breaking the JS string literals and silently failing the script load — page sat stuck on "正在開啟到 PVE 的連線通道…" with no error in the server logs. Always double-escape inside the template; CLAUDE.md updated with this as a recurring trap.
+- **OCR overlay positional offset** when canvas was padded / centered inside `#screen` — the rect was drawn relative to the screen container but coords were computed canvas-relative. Now the overlay is positioned exactly over the canvas (and clamps drag coords to the canvas's CSS box).
+
+### Internal
+
+- New module `server/pve_tasks.py` with 5-second per-cluster cache to absorb panel re-renders without spamming pveproxy. New view `src/client/views/PveTasks.tsx` styled to match the existing matrix vm-table.
+- CLAUDE.md "Recurring mistakes" gained rule #4: escape sequences inside Python string templates that emit JS.
+
+---
+
 ## [0.3.5] — 2026-05-08
 
 ### Added

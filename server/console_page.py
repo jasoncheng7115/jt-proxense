@@ -46,6 +46,20 @@ _I18N: dict[str, dict[str, str]] = {
         "ocr_no_text":         "No text recognised",
         "ocr_failed":          "OCR failed: ",
         "ocr_lang":            "OCR language",
+        "ocr_overlay_hint":    "Drag to select. Avoid bar charts / progress bars — only plain text lines OCR cleanly.",
+        "ocr_bars_warn":       "Looks like a progress / bar-chart region — result is unreliable. Try a text-only selection.",
+        "ocr_bars_filtered":   "Filtered {n} bar-chart line(s)",
+        "btn_paste":           "Paste",
+        "btn_paste_title":     "Type text into the guest as keystrokes",
+        "paste_title":         "Paste as keystrokes",
+        "paste_hint":          "ASCII only (letters / digits / symbols). CJK / emoji can't be sent through the VNC keyboard channel.",
+        "paste_send":          "Send",
+        "paste_cancel":        "Cancel",
+        "paste_clipboard":     "From clipboard",
+        "paste_speed":         "Typing speed",
+        "paste_done":          "Sent {n} chars",
+        "paste_skipped":       "{n} non-ASCII chars skipped",
+        "paste_empty":         "Nothing to send",
         "overlay_lead":        "// initialising",
         "overlay_msg":         "opening WebSocket bridge to PVE…",
         "err_init":            "noVNC init failed: ",
@@ -74,6 +88,20 @@ _I18N: dict[str, dict[str, str]] = {
         "ocr_no_text":         "未辨識到文字",
         "ocr_failed":          "OCR 失敗：",
         "ocr_lang":            "OCR 語言",
+        "ocr_overlay_hint":    "拉出矩形選取範圍。請避開進度條 / bar chart — 只圈純文字行 OCR 才會準。",
+        "ocr_bars_warn":       "看起來圈到進度條區，結果可能不可靠 — 建議只圈純文字行重試。",
+        "ocr_bars_filtered":   "已過濾 {n} 行疑似進度條",
+        "btn_paste":           "貼上",
+        "btn_paste_title":     "把文字以鍵盤打字的方式送進 Guest",
+        "paste_title":         "貼上 → 模擬鍵盤輸入",
+        "paste_hint":          "僅支援 ASCII（英文字母 / 數字 / 符號）。VNC 鍵盤通道無法直接送中文 / Emoji。",
+        "paste_send":          "送出",
+        "paste_cancel":        "取消",
+        "paste_clipboard":     "從剪貼簿讀取",
+        "paste_speed":         "打字速度",
+        "paste_done":          "已送出 {n} 個字元",
+        "paste_skipped":       "略過 {n} 個非 ASCII 字元",
+        "paste_empty":         "沒有要送出的內容",
         "overlay_lead":        "// 初始化中",
         "overlay_msg":         "正在開啟到 PVE 的連線通道…",
         "err_init":            "noVNC 初始化失敗：",
@@ -153,6 +181,7 @@ _TEMPLATE = """<!DOCTYPE html>
         .pill.error      { color: var(--red); }
         .pill.closed     { color: var(--text-muted); }
         button {
+            display: inline-flex; align-items: center; gap: 6px;
             padding: 6px 12px;
             font-family: Orbitron, sans-serif;
             font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
@@ -164,6 +193,92 @@ _TEMPLATE = """<!DOCTYPE html>
         }
         button:hover:not(:disabled) { background: rgba(0,240,255,.18); }
         button:disabled { opacity: .4; cursor: not-allowed; }
+        select#ocr-lang {
+            padding: 6px 8px;
+            font-family: Orbitron, sans-serif;
+            font-size: 10px; letter-spacing: .06em;
+            color: var(--cyan);
+            background: rgba(0,240,255,.05);
+            border: 1px solid var(--cyan-soft); border-radius: 4px;
+            cursor: pointer;
+        }
+        select#ocr-lang:disabled { opacity: .4; cursor: not-allowed; }
+        select#ocr-lang option { background: #050810; color: var(--cyan); }
+        /* Paste-as-keystrokes modal — same cyberpunk vocabulary as the
+           dialogs in the SPA (cyan rim, mono body font). */
+        .paste-modal {
+            position: fixed; inset: 0;
+            background: rgba(2,4,10,0.72);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000;
+        }
+        .paste-modal.hidden { display: none; }
+        .paste-card {
+            width: min(560px, 92vw);
+            background: linear-gradient(180deg, #0d1320, #050810);
+            border: 1px solid var(--cyan);
+            border-radius: 6px;
+            box-shadow: 0 0 32px rgba(0,240,255,0.25);
+            padding: 16px 18px;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .paste-head {
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid var(--cyan-soft);
+            padding-bottom: 8px;
+        }
+        .paste-title {
+            font-family: Orbitron, sans-serif; color: var(--cyan);
+            letter-spacing: .14em; text-transform: uppercase; font-size: 14px;
+        }
+        .paste-close {
+            background: transparent; border: none; color: var(--text-dim);
+            font-size: 22px; line-height: 1; cursor: pointer; padding: 0 6px;
+        }
+        .paste-close:hover { color: var(--cyan); }
+        .paste-hint {
+            font-size: 12px; color: var(--orange);
+            background: rgba(255,138,60,0.08);
+            border-left: 2px solid var(--orange);
+            padding: 6px 10px; border-radius: 2px;
+        }
+        .paste-text {
+            min-height: 140px;
+            background: rgba(0,240,255,0.04);
+            border: 1px solid var(--cyan-soft); border-radius: 3px;
+            color: var(--text); font-family: 'Share Tech Mono', monospace;
+            font-size: 13px; padding: 8px 10px; resize: vertical;
+            outline: none;
+        }
+        .paste-text:focus { border-color: var(--cyan); }
+        .paste-row { display: flex; align-items: center; gap: 10px; }
+        .paste-speed-label {
+            font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--text-dim); font-family: Orbitron, sans-serif;
+        }
+        #paste-speed {
+            padding: 4px 8px;
+            background: rgba(0,240,255,.05); color: var(--cyan);
+            border: 1px solid var(--cyan-soft); border-radius: 3px;
+            font-family: 'Share Tech Mono', monospace; font-size: 12px;
+        }
+        #paste-speed option { background: #050810; color: var(--cyan); }
+        .paste-actions { display: flex; gap: 8px; align-items: center; }
+        .paste-btn {
+            padding: 6px 14px; font-family: Orbitron, sans-serif;
+            font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+            border-radius: 3px; cursor: pointer; transition: all .12s;
+        }
+        .paste-btn.primary {
+            color: var(--cyan); background: rgba(0,240,255,.12);
+            border: 1px solid var(--cyan);
+        }
+        .paste-btn.primary:hover { background: rgba(0,240,255,.22); }
+        .paste-btn.ghost {
+            color: var(--text-dim); background: transparent;
+            border: 1px solid var(--cyan-soft);
+        }
+        .paste-btn.ghost:hover { color: var(--cyan); border-color: var(--cyan); }
         .dropdown { position: relative; }
         .dropdown-menu {
             position: absolute; top: calc(100% + 4px); right: 0;
@@ -208,7 +323,7 @@ _TEMPLATE = """<!DOCTYPE html>
         /* OCR overlay — draggable rect on top of the noVNC canvas. */
         #ocr.active { background: rgba(0,240,255,.25); border-color: var(--cyan); color: var(--cyan); }
         .ocr-overlay {
-            position: absolute; inset: 0;
+            position: fixed;
             cursor: crosshair;
             background: rgba(0,0,0,0.18);
             z-index: 50;
@@ -221,6 +336,27 @@ _TEMPLATE = """<!DOCTYPE html>
             display: none;
             pointer-events: none;
         }
+        .ocr-overlay-hint {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px 18px;
+            background: rgba(13,19,32,0.92);
+            border: 1px solid var(--orange);
+            border-left-width: 3px;
+            border-radius: 4px;
+            color: var(--orange);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 12px;
+            max-width: 480px; text-align: center;
+            box-shadow: 0 0 24px rgba(255,138,60,0.32);
+            pointer-events: none;
+            opacity: 0;
+            animation: ocrHintIn .25s ease-out forwards,
+                       ocrHintOut .4s ease-in 2.6s forwards;
+        }
+        @keyframes ocrHintIn  { to { opacity: 1; } }
+        @keyframes ocrHintOut { to { opacity: 0; transform: translate(-50%, calc(-50% - 8px)); } }
         .ocr-toast {
             position: fixed; bottom: 20px; left: 50%;
             transform: translateX(-50%);
@@ -252,7 +388,11 @@ _TEMPLATE = """<!DOCTYPE html>
         <div class="right">
             <span id="status" class="pill connecting">{{T_STATUS_CONNECTING}}</span>
             <div class="dropdown" id="keys-dropdown">
-                <button id="keys-btn" disabled>{{T_BTN_SEND_KEYS}} ▾</button>
+                <button id="keys-btn" disabled>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M6 10h0M10 10h0M14 10h0M18 10h0M6 14h0M10 14h0M14 14h0M18 14h0M7 18h10"/></svg>
+                    <span>{{T_BTN_SEND_KEYS}}</span>
+                    <span style="opacity:.6">▾</span>
+                </button>
                 <div class="dropdown-menu" id="keys-menu" hidden>
                     <button data-key="tab">Tab</button>
                     <button data-key="esc">Esc</button>
@@ -275,10 +415,34 @@ _TEMPLATE = """<!DOCTYPE html>
                     <button data-key="caf12">Ctrl-Alt-F12</button>
                 </div>
             </div>
-            <button id="cad" disabled title="{{T_BTN_CAD_TITLE}}">{{T_BTN_CAD}}</button>
-            <button id="reconnect" disabled>{{T_BTN_RECONNECT}}</button>
-            <button id="full" disabled>{{T_BTN_FULLSCREEN}}</button>
-            <button id="ocr" disabled title="{{T_BTN_OCR_TITLE}}">{{T_BTN_OCR}}</button>
+            <button id="cad" disabled title="{{T_BTN_CAD_TITLE}}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                <span>{{T_BTN_CAD}}</span>
+            </button>
+            <button id="reconnect" disabled>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <span>{{T_BTN_RECONNECT}}</span>
+            </button>
+            <button id="full" disabled>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+                <span>{{T_BTN_FULLSCREEN}}</span>
+            </button>
+            <button id="paste" disabled title="{{T_BTN_PASTE_TITLE}}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+                <span>{{T_BTN_PASTE}}</span>
+            </button>
+            <button id="ocr" disabled title="{{T_BTN_OCR_TITLE}}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10M7 8h6M7 16h8"/></svg>
+                <span>{{T_BTN_OCR}}</span>
+            </button>
+            <select id="ocr-lang" disabled title="{{T_OCR_LANG}}">
+                <option value="chi_tra+eng">中+英</option>
+                <option value="eng">English</option>
+                <option value="chi_tra">繁中</option>
+                <option value="chi_sim+eng">简+英</option>
+                <option value="chi_sim">简中</option>
+                <option value="jpn">日本語</option>
+            </select>
         </div>
     </div>
     <div id="screen">
@@ -287,6 +451,31 @@ _TEMPLATE = """<!DOCTYPE html>
                 <span class="lead">{{T_OVERLAY_LEAD}}</span>
                 <span id="overlay-msg">{{T_OVERLAY_MSG}}</span>
             </div>
+        </div>
+    </div>
+</div>
+<!-- Paste modal — backdrop click closes; submit types text into the guest -->
+<div id="paste-modal" class="paste-modal hidden" role="dialog" aria-modal="true">
+    <div class="paste-card">
+        <div class="paste-head">
+            <span class="paste-title">{{T_PASTE_TITLE}}</span>
+            <button class="paste-close" data-paste-cancel aria-label="close">×</button>
+        </div>
+        <div class="paste-hint">{{T_PASTE_HINT}}</div>
+        <textarea id="paste-text" class="paste-text" autocomplete="off" spellcheck="false" autocapitalize="off"></textarea>
+        <div class="paste-row">
+            <label class="paste-speed-label">{{T_PASTE_SPEED}}</label>
+            <select id="paste-speed">
+                <option value="5">⚡⚡⚡</option>
+                <option value="15" selected>⚡⚡</option>
+                <option value="40">⚡</option>
+            </select>
+        </div>
+        <div class="paste-actions">
+            <button data-paste-clipboard class="paste-btn ghost">{{T_PASTE_CLIPBOARD}}</button>
+            <span style="flex:1"></span>
+            <button data-paste-cancel class="paste-btn ghost">{{T_PASTE_CANCEL}}</button>
+            <button id="paste-send" class="paste-btn primary">{{T_PASTE_SEND}}</button>
         </div>
     </div>
 </div>
@@ -418,6 +607,10 @@ async function connect() {
         if (kb) kb.disabled = false;
         const ocrBtn = document.getElementById('ocr');
         if (ocrBtn) ocrBtn.disabled = false;
+        const ocrLangEl = document.getElementById('ocr-lang');
+        if (ocrLangEl) ocrLangEl.disabled = false;
+        const pasteBtnEl = document.getElementById('paste');
+        if (pasteBtnEl) pasteBtnEl.disabled = false;
         // Re-apply scaleViewport after connect: noVNC only has the remote
         // dimensions once the framebuffer init message arrives, so the value
         // we set in the constructor is sometimes a no-op for the first paint.
@@ -434,6 +627,10 @@ async function connect() {
         if (kb) kb.disabled = true;
         const ocrBtn = document.getElementById('ocr');
         if (ocrBtn) ocrBtn.disabled = true;
+        const ocrLangEl = document.getElementById('ocr-lang');
+        if (ocrLangEl) ocrLangEl.disabled = true;
+        const pasteBtnEl = document.getElementById('paste');
+        if (pasteBtnEl) pasteBtnEl.disabled = true;
         if (ev.detail && ev.detail.clean) {
             setStatus('closed', I18N.msg_closed_clean);
         } else {
@@ -547,6 +744,17 @@ connect();
 // region out of the canvas, POST it to /api/ocr, copy the result to
 // the clipboard. Server-side tesseract handles language packs (chi_tra,
 // jpn, etc. install via `apt`).
+// Toast — top-level so both OCR and paste-as-keystrokes can use it.
+let toastEl = null;
+const showToast = (msg, kind) => {
+    if (toastEl) toastEl.remove();
+    toastEl = document.createElement('div');
+    toastEl.className = 'ocr-toast ' + (kind || '');
+    toastEl.textContent = msg;
+    document.body.appendChild(toastEl);
+    setTimeout(() => { if (toastEl) toastEl.remove(); }, 2400);
+};
+
 const ocrBtn = document.getElementById('ocr');
 if (ocrBtn) {
     let ocrActive = false;
@@ -554,16 +762,6 @@ if (ocrBtn) {
     let dragRect = null;
     let overlayEl = null;
     let rectEl = null;
-    let toastEl = null;
-
-    const showToast = (msg, kind) => {
-        if (toastEl) toastEl.remove();
-        toastEl = document.createElement('div');
-        toastEl.className = 'ocr-toast ' + (kind || '');
-        toastEl.textContent = msg;
-        document.body.appendChild(toastEl);
-        setTimeout(() => { if (toastEl) toastEl.remove(); }, 2400);
-    };
 
     const startOcr = () => {
         if (!rfb) return;
@@ -580,48 +778,75 @@ if (ocrBtn) {
         rectEl = document.createElement('div');
         rectEl.className = 'ocr-rect';
         overlayEl.appendChild(rectEl);
-        screenEl.appendChild(overlayEl);
+        // Cover the entire viewport so the mouse can drift past the canvas
+        // edges without losing events. The visual rect (and the eventual
+        // crop coords) get clamped to the canvas's bounding box, so dragging
+        // off-canvas just snaps the rect to the canvas edge.
+        overlayEl.style.left   = '0';
+        overlayEl.style.top    = '0';
+        overlayEl.style.width  = '100vw';
+        overlayEl.style.height = '100vh';
+        document.body.appendChild(overlayEl);
+        // Floating hint — auto-fades after ~3s. Reminds operators that
+        // ANSI bar charts / progress meters won't OCR cleanly so they
+        // don't blame the engine when htop output comes back as gibberish.
+        const hintEl = document.createElement('div');
+        hintEl.className = 'ocr-overlay-hint';
+        hintEl.textContent = I18N.ocr_overlay_hint;
+        overlayEl.appendChild(hintEl);
+
+        // Clamp viewport coords to the canvas's CSS box.
+        const clampToCanvas = (vx, vy) => {
+            const r = canvas.getBoundingClientRect();
+            return {
+                x: Math.max(r.left, Math.min(r.right,  vx)),
+                y: Math.max(r.top,  Math.min(r.bottom, vy)),
+            };
+        };
+        // Render a rect spanning two viewport-coord points, in viewport coords.
+        const renderRect = (a, b) => {
+            const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+            rectEl.style.left   = x + 'px';
+            rectEl.style.top    = y + 'px';
+            rectEl.style.width  = Math.abs(a.x - b.x) + 'px';
+            rectEl.style.height = Math.abs(a.y - b.y) + 'px';
+            rectEl.style.display = 'block';
+        };
 
         overlayEl.addEventListener('mousedown', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            dragStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-            dragRect = { x: dragStart.x, y: dragStart.y, w: 0, h: 0 };
-            rectEl.style.left = dragRect.x + 'px';
-            rectEl.style.top  = dragRect.y + 'px';
-            rectEl.style.width = '0'; rectEl.style.height = '0';
-            rectEl.style.display = 'block';
+            const p = clampToCanvas(e.clientX, e.clientY);
+            // Store viewport-coord anchor so out-of-canvas drift is
+            // handled cleanly by clamping the live point on each move.
+            dragStart = { vx: p.x, vy: p.y };
+            dragRect  = { vx0: p.x, vy0: p.y, vx1: p.x, vy1: p.y };
+            renderRect({ x: p.x, y: p.y }, { x: p.x, y: p.y });
         });
         overlayEl.addEventListener('mousemove', (e) => {
             if (!dragStart) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            dragRect.x = Math.min(dragStart.x, x);
-            dragRect.y = Math.min(dragStart.y, y);
-            dragRect.w = Math.abs(x - dragStart.x);
-            dragRect.h = Math.abs(y - dragStart.y);
-            rectEl.style.left = dragRect.x + 'px';
-            rectEl.style.top  = dragRect.y + 'px';
-            rectEl.style.width = dragRect.w + 'px';
-            rectEl.style.height = dragRect.h + 'px';
+            const p = clampToCanvas(e.clientX, e.clientY);
+            dragRect.vx1 = p.x;
+            dragRect.vy1 = p.y;
+            renderRect({ x: dragStart.vx, y: dragStart.vy }, { x: p.x, y: p.y });
         });
         overlayEl.addEventListener('mouseup', async () => {
-            const start = dragStart;
             const dr = dragRect;
             dragStart = null;
             dragRect = null;
             stopOcr();
-            if (!start || !dr || dr.w < 8 || dr.h < 8) return;
-            // Crop the canvas region. The display canvas may be CSS-scaled
-            // to fit the screen container; map back to canvas coordinates
-            // via the scale factor.
+            if (!dr) return;
+            // Convert viewport coords → canvas-local CSS coords → backing-store.
             const cssRect = canvas.getBoundingClientRect();
+            const cssX = Math.min(dr.vx0, dr.vx1) - cssRect.left;
+            const cssY = Math.min(dr.vy0, dr.vy1) - cssRect.top;
+            const cssW = Math.abs(dr.vx1 - dr.vx0);
+            const cssH = Math.abs(dr.vy1 - dr.vy0);
+            if (cssW < 8 || cssH < 8) return;
             const sx = canvas.width  / cssRect.width;
             const sy = canvas.height / cssRect.height;
-            const cx = Math.round(dr.x * sx);
-            const cy = Math.round(dr.y * sy);
-            const cw = Math.round(dr.w * sx);
-            const ch = Math.round(dr.h * sy);
+            const cx = Math.round(cssX * sx);
+            const cy = Math.round(cssY * sy);
+            const cw = Math.round(cssW * sx);
+            const ch = Math.round(cssH * sy);
             if (cw < 4 || ch < 4) return;
             const out = document.createElement('canvas');
             out.width = cw; out.height = ch;
@@ -630,7 +855,10 @@ if (ocrBtn) {
             // Pick OCR language. Default chi_tra+eng works for the common
             // Taiwan workload; English-only users fall back automatically
             // if chi_tra isn't installed via the server's lang whitelist.
-            const lang = (localStorage.getItem('ocr_lang') || 'chi_tra+eng');
+            const langEl = document.getElementById('ocr-lang');
+            const lang = (langEl && langEl.value)
+                || localStorage.getItem('ocr_lang')
+                || 'chi_tra+eng';
             try {
                 const blob = await new Promise((res) => out.toBlob(res, 'image/png'));
                 if (!blob) throw new Error('toBlob failed');
@@ -643,21 +871,56 @@ if (ocrBtn) {
                 if (!r.ok) {
                     throw new Error(data.detail || data.error || ('HTTP ' + r.status));
                 }
-                const text = (data.text || '').trim();
+                let text = (data.text || '').trim();
                 if (!text) {
                     showToast(I18N.ocr_no_text, 'warn');
                     return;
                 }
+                // Per-line bar-char heuristic. ANSI bar charts / progress
+                // meters come back as long unbroken runs of vertical-stroke
+                // glyphs ('|', 'I', 'H', 'U', 'l', 'P', 'E', 'T', plus CJK
+                // glyphs with strong vertical strokes like 戰 / 闠). When a
+                // line is ≥75% such chars (with ≥10 non-space chars total)
+                // it's almost certainly a graphic region — drop it so the
+                // remaining lines (real text like "Load average: ...") can
+                // still be copied cleanly.
+                const barChars = '|IlHUTPELⅠ丨戰闠鬪闘鬨鬬';
+                const lines = text.split('\\n');
+                const kept = [];
+                let droppedLines = 0;
+                for (const line of lines) {
+                    let bar = 0, total = 0;
+                    for (const ch of line) {
+                        if (/\s/.test(ch)) continue;
+                        total++;
+                        if (barChars.includes(ch)) bar++;
+                    }
+                    if (total >= 10 && bar / total >= 0.75) {
+                        droppedLines++;
+                    } else {
+                        kept.push(line);
+                    }
+                }
+                text = kept.join('\\n').trim();
+                if (!text) {
+                    // Everything was bar-noise — nothing useful to copy.
+                    showToast(I18N.ocr_bars_warn, 'warn');
+                    return;
+                }
+                let okMsg = I18N.ocr_copied + ' (' + text.length + ' chars)';
+                if (droppedLines > 0) {
+                    okMsg += ' · ' + I18N.ocr_bars_filtered.replace('{n}', droppedLines);
+                }
                 try {
                     await navigator.clipboard.writeText(text);
-                    showToast(I18N.ocr_copied + ' (' + text.length + ' chars)', 'ok');
+                    showToast(okMsg, droppedLines > 0 ? 'warn' : 'ok');
                 } catch (clipErr) {
                     // Clipboard API can be blocked; fall back to a textarea trick.
                     const ta = document.createElement('textarea');
                     ta.value = text;
                     document.body.appendChild(ta);
                     ta.select();
-                    try { document.execCommand('copy'); showToast(I18N.ocr_copied, 'ok'); }
+                    try { document.execCommand('copy'); showToast(okMsg, droppedLines > 0 ? 'warn' : 'ok'); }
                     catch { showToast(I18N.ocr_failed + clipErr, 'err'); }
                     finally { ta.remove(); }
                 }
@@ -678,12 +941,144 @@ if (ocrBtn) {
     const stopOcr = () => {
         ocrActive = false;
         ocrBtn.classList.remove('active');
-        if (overlayEl) { overlayEl.remove(); overlayEl = null; rectEl = null; }
+        if (overlayEl) {
+            if (overlayEl._cleanup) overlayEl._cleanup();
+            overlayEl.remove();
+            overlayEl = null;
+            rectEl = null;
+        }
         dragStart = null; dragRect = null;
     };
 
     ocrBtn.addEventListener('click', () => {
         if (ocrActive) stopOcr(); else startOcr();
+    });
+
+    // Restore + persist language selection. Defaults to chi_tra+eng so
+    // mixed Chinese/English/digit content (the common operator workload)
+    // works out of the box.
+    const langSel = document.getElementById('ocr-lang');
+    if (langSel) {
+        const saved = localStorage.getItem('ocr_lang') || 'chi_tra+eng';
+        const opts = Array.from(langSel.options).map((o) => o.value);
+        langSel.value = opts.indexOf(saved) >= 0 ? saved : 'chi_tra+eng';
+        langSel.addEventListener('change', () => {
+            localStorage.setItem('ocr_lang', langSel.value);
+        });
+    }
+}
+
+// ── Paste-as-keystrokes ───────────────────────────────────────────────
+//
+// Sends typed text to the guest by replaying each character as a
+// keypress through noVNC's RFB.sendKey(). Works for ASCII printable
+// (0x20–0x7E) + CR/LF/Tab; CJK / emoji can't be expressed as X11
+// keysyms over the RFB keyboard channel, so they're filtered out and
+// the user is told how many were skipped.
+const pasteBtn = document.getElementById('paste');
+const pasteModal = document.getElementById('paste-modal');
+const pasteText = document.getElementById('paste-text');
+const pasteSpeed = document.getElementById('paste-speed');
+const pasteSendBtn = document.getElementById('paste-send');
+let pasting = false;
+
+const openPasteModal = () => {
+    if (!rfb) return;
+    pasteText.value = '';
+    pasteModal.classList.remove('hidden');
+    setTimeout(() => pasteText.focus(), 30);
+};
+const closePasteModal = () => {
+    pasteModal.classList.add('hidden');
+};
+
+const sendKeystrokes = async (text) => {
+    if (!rfb || !text || pasting) return;
+    pasting = true;
+    pasteSendBtn.disabled = true;
+    const delay = parseInt(pasteSpeed.value, 10) || 15;
+    let sent = 0, skipped = 0;
+    try {
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            const cp = text.charCodeAt(i);
+            // Surrogate-pair codepoint (emoji etc.) → can't send.
+            if (cp >= 0xD800 && cp <= 0xDFFF) {
+                skipped++;
+                if (cp >= 0xD800 && cp <= 0xDBFF) i++;  // skip the low surrogate too
+                continue;
+            }
+            let keysym = null;
+            if (ch === '\\r') {
+                continue;  // CRLF → handled when we hit \\n
+            } else if (ch === '\\n') {
+                keysym = 0xff0d;  // Return
+            } else if (ch === '\\t') {
+                keysym = 0xff09;  // Tab
+            } else if (cp >= 0x20 && cp <= 0x7e) {
+                keysym = cp;       // ASCII printable maps 1:1 to X11 keysyms
+            } else {
+                skipped++;
+                continue;
+            }
+            try {
+                rfb.sendKey(keysym, null, true);
+                rfb.sendKey(keysym, null, false);
+                sent++;
+            } catch (_) { skipped++; }
+            // Small inter-character delay so guest's input layer keeps up.
+            // Without this, fast typing (esp. into shells with readline)
+            // sometimes drops or merges keys.
+            if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+        }
+        let msg = I18N.paste_done.replace('{n}', sent);
+        let kind = 'ok';
+        if (skipped > 0) {
+            msg += ' · ' + I18N.paste_skipped.replace('{n}', skipped);
+            kind = 'warn';
+        }
+        showToast(msg, kind);
+    } finally {
+        pasting = false;
+        pasteSendBtn.disabled = false;
+    }
+};
+
+if (pasteBtn) {
+    pasteBtn.addEventListener('click', openPasteModal);
+}
+if (pasteModal) {
+    pasteModal.addEventListener('click', (e) => {
+        if (e.target === pasteModal) closePasteModal();
+    });
+    pasteModal.querySelectorAll('[data-paste-cancel]').forEach((el) => {
+        el.addEventListener('click', closePasteModal);
+    });
+    const fromClip = pasteModal.querySelector('[data-paste-clipboard]');
+    if (fromClip) {
+        fromClip.addEventListener('click', async () => {
+            try {
+                const t = await navigator.clipboard.readText();
+                pasteText.value = t || '';
+            } catch (e) {
+                showToast(I18N.ocr_failed + (e && e.message || e), 'err');
+            }
+        });
+    }
+    pasteSendBtn.addEventListener('click', async () => {
+        const t = pasteText.value;
+        if (!t) { showToast(I18N.paste_empty, 'warn'); return; }
+        closePasteModal();
+        await sendKeystrokes(t);
+    });
+    // Ctrl/⌘+Enter inside textarea = send.
+    pasteText.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            pasteSendBtn.click();
+        } else if (e.key === 'Escape') {
+            closePasteModal();
+        }
     });
 }
 </script>
@@ -736,7 +1131,19 @@ async def console_page_handler(request: web.Request) -> web.Response:
             .replace("{{T_OCR_RUNNING}}", s["ocr_running"])
             .replace("{{T_OCR_COPIED}}", s["ocr_copied"])
             .replace("{{T_OCR_NO_TEXT}}", s["ocr_no_text"])
-            .replace("{{T_OCR_FAILED}}", s["ocr_failed"]))
+            .replace("{{T_OCR_FAILED}}", s["ocr_failed"])
+            .replace("{{T_OCR_LANG}}", s["ocr_lang"])
+            .replace("{{T_BTN_PASTE}}", s["btn_paste"])
+            .replace("{{T_BTN_PASTE_TITLE}}", s["btn_paste_title"])
+            .replace("{{T_PASTE_TITLE}}", s["paste_title"])
+            .replace("{{T_PASTE_HINT}}", s["paste_hint"])
+            .replace("{{T_PASTE_SEND}}", s["paste_send"])
+            .replace("{{T_PASTE_CANCEL}}", s["paste_cancel"])
+            .replace("{{T_PASTE_CLIPBOARD}}", s["paste_clipboard"])
+            .replace("{{T_PASTE_SPEED}}", s["paste_speed"])
+            .replace("{{T_OCR_OVERLAY_HINT}}", s["ocr_overlay_hint"])
+            .replace("{{T_OCR_BARS_WARN}}", s["ocr_bars_warn"])
+            .replace("{{T_OCR_BARS_FILTERED}}", s["ocr_bars_filtered"]))
 
     return web.Response(
         text=html,

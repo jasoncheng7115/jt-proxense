@@ -8,6 +8,35 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.6] — 2026-05-08
+
+### 新增
+
+- **PVE 任務 / VM 操作紀錄查看頁**（`/tasks`）— 新的頂層頁面，從 PVE `/cluster/tasks` 拉真實的 PVE 端任務（qmstart / qmshutdown / qmsnapshot / qmrestore / vzdump / qmigrate / vncproxy 等），用 matrix 風格的表格顯示。可依叢集、類型、狀態（進行中 / 成功 / 錯誤）、VMID、使用者篩選。點擊列開啟側邊抽屜顯示完整任務日誌（從 `/nodes/{node}/tasks/{upid}/log` 串），任務進行中時每 2.5 秒自動更新。VM 右鍵選單新增 **「任務紀錄」** 直接帶 `/tasks?vmid=…&cluster=…` 跳轉。與 `/audit` 區別：audit 紀錄 *JT-PROXENSE 自己做了什麼*，這個顯示 *PVE 端真實發生了什麼*，包含其他人經由 PVE web UI / pvesh / API 進行的動作。
+- **主控台貼上 → 模擬鍵盤輸入** — noVNC 主控台 toolbar 新「貼上」按鈕：開啟對話框，貼/輸入 ASCII 文字後，透過 `RFB.sendKey()` 重放成鍵盤事件。三檔速度（5 / 15 / 40 ms 字元間延遲），明確標註僅支援 ASCII（CJK / Emoji 無法表達為 RFB 鍵盤通道的 X11 keysym）。`Ctrl/⌘+Enter` 送出、Esc 關閉。
+- **OCR 語言選單**位於主控台 toolbar：中+英 / English / 繁中 / 简+英 / 简中 / 日本語（依 host 的 `tesseract --list-langs` 動態提供），存於 `localStorage['ocr_lang']`。預設 `chi_tra+eng` 給台灣常見的中英混雜畫面。
+- **OCR overlay 浮動提示** — 拖拉模式啟動時，畫面正中浮一個橘色提示「請避開進度條」約 3 秒後淡出。
+- **OCR bar 雜訊過濾** — server 端前處理改成先 4× LANCZOS 放大再灰階+autocontrast（原為 3× 於 binarization 後），拿掉硬 threshold 140（Tesseract 4 內部的 Otsu 二值化在灰階上比 1-bit 圖更準），加上 `--psm 6 --oem 1 -c preserve_interword_spaces=1`。client 端則做逐行過濾：任何一行中垂直筆劃字元（`|`, `I`, `H`, `U`, `戰` 等）佔非空白字元 ≥75%（且字元數 ≥10）的整行被視為 bar-chart 雜訊丟棄；toast 黃色顯示「已過濾 N 行疑似進度條」。
+
+### 變更
+
+- **window blur 也算「不可見」** — App 與 ParticleBackground 現在也會在 `window.blur` 時暫停（不只 `document.visibilityState === 'hidden'`）。macOS Chrome 把瀏覽器丟到背景但未最小化時，visibility 仍是 `visible`，原本程式持續燒 CPU/GPU。粒子數從 40 → 18 顆，fps 從 30 → 20（慢漂粒子視覺差異無感）。
+- **主控台 toolbar 按鈕全部加 inline icon**（CTRL-ALT-DEL / 重新連線 / 全螢幕 / 貼上 / OCR / 傳送按鍵 ▾），OCR 拖拉 overlay 改成覆蓋整個 viewport（滑鼠跑出 canvas 也收得到事件，rect 視覺自動 clamp 到 canvas 邊界；原本拖出去就卡住）。
+- **StorageDetail 動作欄寬度** 從 60 px → 96 px 並加 `white-space: nowrap`，下載 + 刪除兩個 icon 不再換行。
+- **UserAdmin 對比修復** — 副標題、"新增本機帳號" 標籤、上次登入欄等字色從 `--text-muted` → `--text-secondary`，深色底比較看得清。
+
+### 修復
+
+- **主控台 JS 未執行** — `server/console_page.py:_TEMPLATE`（Python `"""..."""` 區塊）裡的 `'\r'` / `'\n'` / `'\t'` 被 Python 解釋成實際 CR/LF/Tab 寫到輸出 HTML，造成 JS 字串字面值斷裂、整個 module 沒跑、頁面卡在「正在開啟到 PVE 的連線通道…」server 沒任何錯誤訊息。要 double-escape；CLAUDE.md 已加為新的 recurring trap。
+- **OCR overlay 位置偏移** — canvas 在 `#screen` 容器內被 padding/置中時，原本 rect 用 canvas 相對座標但 overlay 位置是螢幕容器相對。改成 overlay 直接 `position: fixed` 蓋在 canvas bounding rect 上，drag clamp 到 canvas 邊界。
+
+### 內部
+
+- 新增 `server/pve_tasks.py` 模組，每叢集 5 秒快取避免 panel re-render 把 pveproxy 打爛。新增 `src/client/views/PveTasks.tsx` view，沿用 matrix vm-table 的視覺。
+- CLAUDE.md「Recurring mistakes」加第 4 條：JS 寫進 Python 字串模板時 escape sequence 要 double-escape。
+
+---
+
 ## [0.3.5] — 2026-05-08
 
 ### 新增
