@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.11] — 2026-05-09
+
+### Added
+
+- **PVE host shell** — admin can now click 「主機 Shell」 on the cluster-core node context menu and get a full xterm.js terminal running directly on the PVE node host (equivalent of clicking "Shell" on a node in the PVE web UI). Goes through the same auth dance as the LXC console (`stored` / `prompt` modes), wraps PVE's host-level termproxy. Admin only — operators with shell access on a host effectively own the cluster, so we don't expose this to lower roles. Audited (`console.host.prepare`, `console.host.open`).
+
+### Internal
+
+- New module `server/host_shell.py` mirrors the patterns in `console_proxy.py` but for the no-vmid host case (`/nodes/{node}/termproxy` + `/nodes/{node}/vncwebsocket`). Reuses `console_sessions.mint_console_token(... vmid=0, kind='host_term')`. Throttled handshake like the other ws bridges.
+
+---
+
 ## [0.3.10] — 2026-05-09
 
 ### Added

@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.11] — 2026-05-09
+
+### 新增
+
+- **PVE 主機 Shell** — admin 可在 cluster-core 節點右鍵選單點「主機 Shell」直接開啟 xterm.js 終端到 PVE 節點主機（等同於 PVE web UI 的 Shell 按鈕）。沿用 LXC console 同款認證（`stored` / `prompt` 兩種模式），底下包 PVE 主機層級的 termproxy。僅限 admin — operator 拿到主機 shell 等同於拿到整個叢集，不開放給其他角色。Audited（`console.host.prepare` / `console.host.open`）。
+
+### 內部
+
+- 新模組 `server/host_shell.py`，沿用 `console_proxy.py` 的結構但走無 vmid 的主機路徑（`/nodes/{node}/termproxy` + `/nodes/{node}/vncwebsocket`）。複用 `console_sessions.mint_console_token(vmid=0, kind='host_term')`。WebSocket 握手同樣經 pve_throttle。
+
+---
+
 ## [0.3.10] — 2026-05-09
 
 ### 新增
