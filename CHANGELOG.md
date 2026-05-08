@@ -8,6 +8,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.16] — 2026-05-09
+
+### Added
+
+- **Resource pools browser** — cluster-core view (when a single cluster is selected) gets a 「資源池 / Pools」 button that opens a modal listing every PVE pool, expandable per-row to show member VMs / CTs / storages with their type, id, name, node, and status. Read-only viewer; create/delete already exists in `pve_client` for future iterations. New endpoints `GET /api/clusters/{cid}/pools` and `.../pools/{poolid}` (30 s cache).
+
+### Internal
+
+- New module `server/pools_view.py`. New component `src/client/components/PoolsModal.tsx`.
+- `pve_client.get_pool()` added.
+
+---
+
 ## [0.3.15] — 2026-05-09
 
 ### Added

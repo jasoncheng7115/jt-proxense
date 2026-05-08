@@ -494,6 +494,10 @@ class PVEClient:
         """All resource pools in the cluster."""
         return await self._request("GET", "/pools")
 
+    async def get_pool(self, poolid: str) -> dict:
+        """Pool details including member VMs / storages."""
+        return await self._request("GET", f"/pools/{poolid}")
+
     async def create_pool(self, poolid: str, comment: str = "") -> None:
         await self._request("POST", "/pools", data={"poolid": poolid, "comment": comment})
 

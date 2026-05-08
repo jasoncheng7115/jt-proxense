@@ -38,6 +38,7 @@ from . import vm_backups
 from . import host_shell
 from . import vm_config as vm_config_mod
 from . import ha_view
+from . import pools_view
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -624,6 +625,11 @@ def create_app() -> web.Application:
 
     # v0.3.15 HA + replication read-only viewers
     for method, path, handler in ha_view.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.16 Pools browser (read-only)
+    for method, path, handler in pools_view.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

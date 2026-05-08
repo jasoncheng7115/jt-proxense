@@ -8,6 +8,19 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.16] — 2026-05-09
+
+### 新增
+
+- **資源池瀏覽器** — 節點頁（選單只選擇單一叢集時）右上會出現「資源池」按鈕，開啟 modal 列出 PVE 所有 pool，每筆可展開看成員（VM / CT / 儲存）的類型、id、名稱、節點、狀態。唯讀檢視；建立 / 刪除 已經在 `pve_client` 內，留給之後迭代。新 endpoint `GET /api/clusters/{cid}/pools` 及 `.../pools/{poolid}`（30 秒快取）。
+
+### 內部
+
+- 新模組 `server/pools_view.py`、新元件 `src/client/components/PoolsModal.tsx`。
+- `pve_client.get_pool()` 新增。
+
+---
+
 ## [0.3.15] — 2026-05-09
 
 ### 新增
