@@ -8,6 +8,19 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.19] — 2026-05-09
+
+### 新增
+
+- **每叢集 OPS 備註** — admin 可編輯、viewer+ 可看的自由格式備註。常見用途：「PROD 叢集 — 上班時間不可重啟 host-101」「host-104 還在用舊 SSD，EOQ3 前要遷」。從 cluster-core 操作列（單一叢集模式）進入。SQLite 儲存，16 KB 上限。新 endpoint `GET/PUT /api/clusters/{cid}/notes`（viewer / admin），有 audit。
+
+### 內部
+
+- Migration `006_cluster_notes.sql` 新增 `cluster_notes` table。
+- 新模組 `server/cluster_notes.py`、新元件 `src/client/components/ClusterNotesModal.tsx`。
+
+---
+
 ## [0.3.18] — 2026-05-09
 
 ### 新增

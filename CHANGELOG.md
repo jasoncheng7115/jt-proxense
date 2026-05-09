@@ -8,6 +8,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.19] — 2026-05-09
+
+### Added
+
+- **Per-cluster ops notes** — admin-editable, viewer-readable free-form text per cluster. Use cases: "PROD cluster — never reboot host-101 during business hours" / "host-104 still on legacy SSDs, plan migration before EOQ3". Reachable from the cluster-core ops bar (single-cluster mode). Stored in SQLite, 16 KB cap. New endpoints `GET/PUT /api/clusters/{cid}/notes` (viewer / admin), audited.
+
+### Internal
+
+- Migration `006_cluster_notes.sql` adds `cluster_notes` table.
+- New module `server/cluster_notes.py`. New component `src/client/components/ClusterNotesModal.tsx`.
+
+---
+
 ## [0.3.18] — 2026-05-09
 
 ### Added
