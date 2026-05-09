@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.20] — 2026-05-09
+
+### Added
+
+- **Storage RRD chart** — RRDChartModal now supports a `kind="storage"` mode rendering Used % and Used / Total bytes lines from PVE's `/nodes/{node}/storage/{name}/rrddata`. Reachable from Storage view → right-click a tank → 「效能圖表 / Performance charts」. New endpoint `GET /api/clusters/{cid}/nodes/{node}/storage/{storage}/rrddata`.
+
+### Internal
+
+- `pve_client.get_storage_rrddata()` added; `rrd_proxy.storage_rrd_handler` route added.
+
+---
+
 ## [0.3.19] — 2026-05-09
 
 ### Added

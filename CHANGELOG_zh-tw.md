@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.20] — 2026-05-09
+
+### 新增
+
+- **儲存效能圖表** — RRDChartModal 新增 `kind="storage"` 模式，讀 PVE `/nodes/{node}/storage/{name}/rrddata` 畫使用率（%）與已用 / 總量（bytes）。從儲存頁右鍵「效能圖表」進入。新 endpoint `GET /api/clusters/{cid}/nodes/{node}/storage/{storage}/rrddata`。
+
+### 內部
+
+- `pve_client.get_storage_rrddata()` 新增；`rrd_proxy.storage_rrd_handler` route 新增。
+
+---
+
 ## [0.3.19] — 2026-05-09
 
 ### 新增

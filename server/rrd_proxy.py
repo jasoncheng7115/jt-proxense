@@ -106,8 +106,25 @@ async def lxc_rrd_handler(request: web.Request) -> web.Response:
     return web.json_response({"timeframe": tf, "samples": data})
 
 
+@role_required("viewer")
+async def storage_rrd_handler(request: web.Request) -> web.Response:
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    storage = request.match_info["storage"]
+    tf = _validate_timeframe(request.query.get("timeframe", "hour"))
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    data = await _fetch(
+        ("storage", cid, node, storage, tf),
+        lambda: cluster.client.get_storage_rrddata(node, storage, timeframe=tf),
+    )
+    return web.json_response({"timeframe": tf, "samples": data})
+
+
 ROUTES = [
-    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/rrddata",                node_rrd_handler),
-    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/qemu/{vmid}/rrddata",    qemu_rrd_handler),
-    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/lxc/{vmid}/rrddata",     lxc_rrd_handler),
+    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/rrddata",                  node_rrd_handler),
+    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/qemu/{vmid}/rrddata",      qemu_rrd_handler),
+    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/lxc/{vmid}/rrddata",       lxc_rrd_handler),
+    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/storage/{storage}/rrddata", storage_rrd_handler),
 ]

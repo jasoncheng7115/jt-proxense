@@ -286,6 +286,17 @@ class PVEClient:
             params={"timeframe": timeframe, "cf": cf},
         )
 
+    async def get_storage_rrddata(
+        self, node: str, storage: str,
+        timeframe: str = "hour", cf: str = "AVERAGE",
+    ) -> list:
+        """Get storage usage RRD data — used / total bytes over time."""
+        return await self._request(
+            "GET",
+            f"/nodes/{node}/storage/{storage}/rrddata",
+            params={"timeframe": timeframe, "cf": cf},
+        )
+
     async def get_cluster_log(self, max_lines: int = 200) -> list:
         """Cluster-wide syslog tail (the 'Cluster log' panel in PVE web UI).
 
