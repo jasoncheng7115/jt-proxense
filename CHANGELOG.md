@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.24] — 2026-05-09
+
+### Added
+
+- **Bulk tag operations** — matrix table bulk-toolbar (visible after multi-selecting VMs/CTs) gains a new 「批次設定標籤 / Set tags」 button. Modal supports three modes: **Add** (merge into each VM's existing list), **Remove** (strip these tags), **Replace** (overwrite). Suggestion strip pulls peer VM tags from the same cluster(s). Fans out one PUT per selected VM in parallel; result strip shows ok / fail counts and first 5 errors.
+
+### Internal
+
+- New component `src/client/components/BulkTagModal.tsx`. Reuses the existing per-VM tag PUT (`pdm_resources.tags_set_handler`); no new server route.
+
+---
+
 ## [0.3.23] — 2026-05-09
 
 ### Internal
