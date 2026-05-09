@@ -159,7 +159,19 @@ class PVEClient:
             health.error_message = str(e)
             health.last_check = time.time()
 
-            logger.warning(
+            # Some 500s are *expected* states, not failures: a node without
+            # ceph installed will always 500 on /ceph/status. Log those at
+            # debug level so the journal isn't drowned. Heuristic on the
+            # error message — `pve_client.get_ceph_status` already wraps
+            # the failure but only after we've logged here.
+            err_str = str(e)
+            benign = (
+                "ceph-mon" in err_str
+                or "pveceph configuration not initialized" in err_str
+                or "ceph not installed" in err_str.lower()
+            )
+            log_fn = logger.debug if benign else logger.warning
+            log_fn(
                 f"PVE request failed for {node_key}: {e} "
                 f"(failures: {health.consecutive_failures})"
             )

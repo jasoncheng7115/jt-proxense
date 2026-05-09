@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.28] — 2026-05-09
+
+### Fixed
+
+- **Suppress noisy "PVE request failed" warnings on ceph-less nodes** — every poll cycle was logging a WARNING for each node that doesn't run ceph (`/ceph/status` 500s with "ceph-mon binary not installed" or "pveceph configuration not initialized"). These are *expected* states, not failures. Heuristic on the error message downgrades these to debug level; real errors still surface as warnings. Drops journal volume by 60–80 % on mixed-cluster setups.
+
+---
+
 ## [0.3.27] — 2026-05-09
 
 ### Added

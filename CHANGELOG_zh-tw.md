@@ -8,6 +8,14 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.28] — 2026-05-09
+
+### 修復
+
+- **沒裝 ceph 的節點不再每輪輪詢都吐 "PVE request failed" 警告** — 每次輪詢都會對沒跑 ceph 的節點打 `/ceph/status`，固定 500 帶 "ceph-mon binary not installed" 或 "pveceph configuration not initialized"。這些是*預期*狀態而非失敗。比對錯誤訊息把這類降為 debug，真正的錯誤仍維持 warning。混合叢集環境 journal 量大概可以少 60–80%。
+
+---
+
 ## [0.3.27] — 2026-05-09
 
 ### 新增
