@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.22] — 2026-05-09
+
+### Added
+
+- **VM/CT tag editor** — VM context menu → 「編輯標籤 / Edit tags」 opens a chip-style editor: type to add, Backspace to remove, Enter / comma / semicolon to commit. Suggestion strip shows tags already used by peer VMs in the same cluster (one click adds). Operator+ can edit; viewer is read-only with a banner. Wraps the existing `PUT /api/clusters/{cid}/vms/{vmid}/tags` (operator-scoped, audited).
+
+### Internal
+
+- New component `src/client/components/TagEditorModal.tsx`. Validates tag names against `[A-Za-z0-9_\-.]+` to match PVE's accepted character set.
+
+---
+
 ## [0.3.21] — 2026-05-09
 
 ### Added

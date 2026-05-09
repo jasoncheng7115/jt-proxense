@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.22] — 2026-05-09
+
+### 新增
+
+- **VM/CT 標籤編輯器** — VM 右鍵選單新增「編輯標籤」開啟 chip 風格編輯器：打字加入、Backspace 刪除、Enter / 逗號 / 分號送出。下方建議區顯示同叢集其他 VM 用過的標籤（按一下加入）。Operator+ 可編輯，viewer 唯讀並提示。包既有 `PUT /api/clusters/{cid}/vms/{vmid}/tags`（operator 層級、有 audit）。
+
+### 內部
+
+- 新元件 `src/client/components/TagEditorModal.tsx`。標籤名以 `[A-Za-z0-9_\-.]+` 驗證，對齊 PVE 的字元限制。
+
+---
+
 ## [0.3.21] — 2026-05-09
 
 ### 新增
