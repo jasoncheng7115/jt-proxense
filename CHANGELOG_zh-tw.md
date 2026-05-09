@@ -8,6 +8,14 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.33] — 2026-05-09
+
+### 修復
+
+- **`npm run build` 完成後自動 vendor xterm.js / xterm.css / xterm-addon-fit.js** 到 `dist/assets/xterm/`。vite 還是會清掉資料夾，但複製步驟現在直接寫在 build script 裡，不再靠每次 build 後人工記憶（v0.3.28 / v0.3.32 兩次同步都忘了，導致 github mirror 短暫缺 xterm vendor 檔）。CLAUDE.md 對應更新。
+
+---
+
 ## [0.3.32] — 2026-05-09
 
 ### 新增

@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.33] — 2026-05-09
+
+### Fixed
+
+- **`npm run build` now auto-vendors xterm.js / xterm.css / xterm-addon-fit.js** into `dist/assets/xterm/` as a post-step. vite still wipes the directory; the copy step now lives in the build script itself instead of relying on operator memory after every build (which the v0.3.28 / v0.3.32 syncs both forgot, briefly publishing a github mirror missing the xterm vendor files). CLAUDE.md updated.
+
+---
+
 ## [0.3.32] — 2026-05-09
 
 ### Added
