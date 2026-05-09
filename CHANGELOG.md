@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.34] — 2026-05-09
+
+### Added
+
+- **Notification rules CRUD** — channels (v0.3.27) didn't fire anything until rules pointed events at them. Settings → Notifications modal gains a second section: add a rule (name + action_pattern + min_severity + cluster filter + channel), toggle enable, delete. Rules wrap the existing `notifications_handlers.py` admin endpoints, so this is just the UI gap that closed.
+
+---
+
 ## [0.3.33] — 2026-05-09
 
 ### Fixed
