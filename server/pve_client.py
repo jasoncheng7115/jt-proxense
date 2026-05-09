@@ -326,6 +326,13 @@ class PVEClient:
         corosync, etc. Returns {name, desc, state, active-state}."""
         return await self._request("GET", f"/nodes/{node}/services")
 
+    async def node_service_action(self, node: str, service: str, action: str) -> str:
+        """POST /nodes/{node}/services/{name}/{start|stop|restart|reload}.
+        Returns the PVE task UPID. Caller must have validated `action`."""
+        return await self._request(
+            "POST", f"/nodes/{node}/services/{service}/{action}"
+        )
+
     # ----- VM lifecycle (v0.3+ writes; require write-scoped PVE token) -----
 
     async def vm_start(self, node: str, vmid: int) -> str:

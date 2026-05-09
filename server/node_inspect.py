@@ -79,6 +79,63 @@ async def subscription_handler(request: web.Request) -> web.Response:
     return web.json_response({"subscription": data if isinstance(data, dict) else {}})
 
 
+_SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
+
+
+async def _do_service_action(request: web.Request, action: str) -> web.Response:
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    name = request.match_info["service"]
+    if action not in _SERVICE_ACTIONS:
+        return web.json_response({"error": "bad_action"}, status=400)
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    user = (request.get("user") or {}).get("username", "anonymous")
+    ip   = request.get("client_ip", "unknown")
+    rid  = request.get("request_id", "")
+    target = f"{cid}/{node}/{name}"
+    try:
+        from . import audit as audit_mod
+        upid = await cluster.client.node_service_action(node, name, action)
+        await audit_mod.write(
+            user=user, source_ip=ip, action=f"node.service.{action}",
+            target=target, cluster_id=cid, result="ok", request_id=rid,
+            params={"service": name},
+        )
+        return web.json_response({"ok": True, "upid": upid})
+    except Exception as e:
+        from . import audit as audit_mod
+        await audit_mod.write(
+            user=user, source_ip=ip, action=f"node.service.{action}",
+            target=target, cluster_id=cid,
+            result=audit_mod.result_error(e), request_id=rid,
+            params={"service": name},
+        )
+        return web.json_response({"error": "pve_request_failed",
+                                  "detail": str(e)}, status=502)
+
+
+@role_required("admin")
+async def service_start_handler(request: web.Request) -> web.Response:
+    return await _do_service_action(request, "start")
+
+
+@role_required("admin")
+async def service_stop_handler(request: web.Request) -> web.Response:
+    return await _do_service_action(request, "stop")
+
+
+@role_required("admin")
+async def service_restart_handler(request: web.Request) -> web.Response:
+    return await _do_service_action(request, "restart")
+
+
+@role_required("admin")
+async def service_reload_handler(request: web.Request) -> web.Response:
+    return await _do_service_action(request, "reload")
+
+
 @role_required("viewer")
 async def services_handler(request: web.Request) -> web.Response:
     """List PVE services on a node (pveproxy / pvedaemon / corosync / …).
@@ -124,4 +181,8 @@ ROUTES = [
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/subscription",  subscription_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/services",      services_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/syslog",        syslog_handler),
+    ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/services/{service}/start",   service_start_handler),
+    ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/services/{service}/stop",    service_stop_handler),
+    ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/services/{service}/restart", service_restart_handler),
+    ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/services/{service}/reload",  service_reload_handler),
 ]

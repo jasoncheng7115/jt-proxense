@@ -8,6 +8,19 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.25] — 2026-05-09
+
+### 新增
+
+- **服務啟動 / 停止 / 重啟 / 重載** — admin 現在可從 NodeServicesModal 操作 PVE 主機服務。每筆服務有 4 個動作按鈕（啟動 / 重啟 / 重載 / 停止）。關鍵服務動作（pveproxy / pvedaemon / pvestatd / corosync / pve-cluster / pve-firewall / pve-lxc-syscalld）以及任何 `stop` 動作都需破壞性確認對話框。回傳 PVE task UPID 可在 `/tasks` 追蹤。新 endpoint `POST /api/clusters/{cid}/nodes/{node}/services/{name}/{start|stop|restart|reload}`（admin-scoped、有 audit）。
+
+### 內部
+
+- `pve_client.node_service_action()` 新增；`node_inspect` 加上四個 POST handler（共用 `_do_service_action` helper）。
+- NodeServicesModal 新增動作欄（僅 admin 顯示）；每個進行中動作有獨立 spinner。
+
+---
+
 ## [0.3.24] — 2026-05-09
 
 ### 新增

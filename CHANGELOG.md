@@ -8,6 +8,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.25] — 2026-05-09
+
+### Added
+
+- **Service start / stop / restart / reload** — admin can now drive PVE host services from the NodeServicesModal. Each row gets four action buttons (start / restart / reload / stop). Critical-service actions (pveproxy / pvedaemon / pvestatd / corosync / pve-cluster / pve-firewall / pve-lxc-syscalld) and any `stop` get a destructive confirmation. Returns the PVE task UPID so admin can track on `/tasks`. New endpoints `POST /api/clusters/{cid}/nodes/{node}/services/{name}/{start|stop|restart|reload}` (admin-scoped, audited).
+
+### Internal
+
+- `pve_client.node_service_action()` added; `node_inspect` gains four POST handlers (with shared `_do_service_action` helper).
+- NodeServicesModal extended with action column (admin only); spinner per in-flight action.
+
+---
+
 ## [0.3.24] — 2026-05-09
 
 ### Added
