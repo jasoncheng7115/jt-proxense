@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.23] — 2026-05-09
+
+### Internal
+
+- **CLAUDE.md updated** — Layout section gains a "Server modules" breakdown grouping every `server/*.py` by responsibility (core / consoles / read-only viewers / mutation / server-rendered pages). Pending TODO refreshed: read-only viewer gaps closed in the v0.3.18→v0.3.22 sprint, remaining items reframed as mutation-UI work (HA/FW write, VM creation wizard, hardware editor, notifications channel CRUD, bulk tag, services start/stop). Closes the doc drift caused by 15+ minor versions in this session.
+
+---
+
 ## [0.3.22] — 2026-05-09
 
 ### Added

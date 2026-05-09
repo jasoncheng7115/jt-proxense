@@ -8,6 +8,14 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.23] — 2026-05-09
+
+### 內部
+
+- **CLAUDE.md 更新** — Layout 區塊加上「Server modules」分類，把每個 `server/*.py` 依責任歸類（核心 / consoles / 唯讀檢視 / mutation / server-rendered pages）。Pending TODO 大改：v0.3.18→v0.3.22 已把唯讀檢視缺口都關掉，剩下的重新整理為 mutation UI 工作（HA / FW 寫入、VM 建立精靈、硬體編輯器、通知 channel CRUD、bulk tag、services start/stop）。修正一晚 15+ 個 minor 版本之後的 doc drift。
+
+---
+
 ## [0.3.22] — 2026-05-09
 
 ### 新增
