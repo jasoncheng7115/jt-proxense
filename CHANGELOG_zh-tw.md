@@ -8,6 +8,23 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.18] — 2026-05-09
+
+### 新增
+
+- **HA / 複寫 / 防火牆 三個唯讀檢視 modal** — 從 cluster-core header（單一叢集模式）按鈕進入：
+  - **HA 狀態 modal** — 即時 quorum / master / 各節點 LRM 狀態條 + HA 資源表（sid / 狀態 / 預期狀態 / 節點 / max_relocate / max_restart）+ HA 群組清單。Quorum 用綠/紅燈標示，狀態 pill 依 started / stopped / error / fence 上色。
+  - **複寫作業 modal** — 列出每個 `pvesr` job：id / 目標節點 / 排程 / 最後同步 / 耗時 / 失敗次數 / 狀態。勾「僅顯示錯誤」過濾出 fail_count > 0 或 error 非空的 job。
+  - **防火牆規則 modal**（cluster 層級用 cluster-core 按鈕進入；VM 層級用右鍵選單）— pos / 方向 / 動作 / 協定 / 來源 / 目的 / 埠 / 介面 / 啟用 / 備註。動作上色：ACCEPT 綠 / REJECT 橘 / DROP 紅。
+- **健康監測卡片可點擊跳轉** — 點 HA 警示卡片現在開 HAStatusModal 並指定該叢集（之前是跳到 cluster-core 但沒 HA 細節）；複寫警示也一樣 → ReplicationModal。
+
+### 內部
+
+- 新元件：`HAStatusModal.tsx`、`ReplicationModal.tsx`、`FirewallModal.tsx`（透過 `scope` prop 同時支援 cluster + VM 層級）。
+- 三者全部沿用既有 endpoint（`pdm_cluster.fw_*_list_handler`、`ha_view`、`pve_client.list_replication_jobs`），不新增 server route。
+
+---
+
 ## [0.3.17] — 2026-05-09
 
 ### 修復

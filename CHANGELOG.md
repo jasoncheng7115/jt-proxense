@@ -8,6 +8,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.18] — 2026-05-09
+
+### Added
+
+- **HA / Replication / Firewall viewers** — three new read-only modals reachable from cluster-core's header (single-cluster mode):
+  - **HA status** modal — live quorum / master / per-node LRM strip + HA resources table (sid / state / request_state / node / max_relocate / max_restart) + HA groups list. Quorum lit green/red, state pills colour-coded (started/stopped/error/fence).
+  - **Replication jobs** modal — every `pvesr` job with id / target / schedule / last sync / duration / fail count / state. Toggle "errors only" to filter to jobs with non-zero `fail_count` or non-empty `error`.
+  - **Firewall rules** modal (works for cluster scope from cluster-core button AND VM scope from VM context menu) — pos / direction / action / proto / source / dest / port / iface / enable / comment, action colour-coded ACCEPT (green) / REJECT (orange) / DROP (red).
+- **Health monitor click-throughs** — clicking an HA finding card now opens the HA status modal pre-filtered to that cluster (instead of jumping to cluster-core which doesn't show HA detail). Same for replication errors → ReplicationModal.
+
+### Internal
+
+- New components: `HAStatusModal.tsx`, `ReplicationModal.tsx`, `FirewallModal.tsx` (one component handles both cluster + VM scope via a `scope` prop).
+- All three reuse existing endpoints (`pdm_cluster.fw_*_list_handler`, `ha_view`, `pve_client.list_replication_jobs`); no new server routes.
+
+---
+
 ## [0.3.17] — 2026-05-09
 
 ### Fixed
