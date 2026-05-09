@@ -333,6 +333,20 @@ class PVEClient:
             "GET", f"/nodes/{node}/syslog", params=params
         )
 
+    async def list_users(self) -> list:
+        """`/access/users` — list PVE users."""
+        try:
+            return await self._request("GET", "/access/users", params={"enabled": 1})
+        except Exception:
+            return []
+
+    async def list_user_tokens(self, userid: str) -> list:
+        """`/access/users/{userid}/token` — list API tokens for a user."""
+        try:
+            return await self._request("GET", f"/access/users/{userid}/token")
+        except Exception:
+            return []
+
     async def get_node_services(self, node: str) -> list:
         """`/nodes/{node}/services` — pveproxy, pvedaemon, pvestatd,
         corosync, etc. Returns {name, desc, state, active-state}."""

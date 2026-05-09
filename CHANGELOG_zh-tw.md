@@ -8,6 +8,20 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.30] — 2026-05-09
+
+### 新增
+
+- **PVE API token 清單** (admin) — cluster-core 操作列加上 "API tokens" 按鈕，開啟 modal 列出整個叢集的 API token：使用者、token ID、privsep 旗標、到期日（過期紅色、剩 < 30 天橘色）、備註。可文字過濾。唯讀 — token 密碼建立後 PVE 不再回傳，輪替動作 UX 太敏感保留在 PVE web UI。
+
+### 內部
+
+- 新模組 `server/api_tokens.py` — 對每個使用者並行 fan-out `list_user_tokens()`。30 秒快取。
+- `pve_client.list_users()` / `list_user_tokens()` 新增。
+- 新元件 `src/client/components/APITokensModal.tsx`。
+
+---
+
 ## [0.3.29] — 2026-05-09
 
 ### 新增

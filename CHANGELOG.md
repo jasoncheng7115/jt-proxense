@@ -8,6 +8,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.30] — 2026-05-09
+
+### Added
+
+- **PVE API tokens listing** (admin) — cluster-core ops bar gains an "API tokens" button that opens a modal listing every API token on the cluster: user, token ID, privsep flag, expiry (with red highlight when expired, orange when <30 days remain), comment. Free-text filter. Read-only — token secrets are not returned by PVE after creation, and rotation has destructive UX so it stays in PVE web UI.
+
+### Internal
+
+- New module `server/api_tokens.py` — fans out one `list_user_tokens()` call per discovered user, parallel-gathered. 30 s cache.
+- `pve_client.list_users()` and `list_user_tokens()` added.
+- New component `src/client/components/APITokensModal.tsx`.
+
+---
+
 ## [0.3.29] — 2026-05-09
 
 ### Added

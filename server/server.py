@@ -40,6 +40,7 @@ from . import vm_config as vm_config_mod
 from . import ha_view
 from . import pools_view
 from . import cluster_notes
+from . import api_tokens
 from . import pdm_cluster
 from . import pdm_remote_migrate
 from . import pdm_vm_ext
@@ -636,6 +637,11 @@ def create_app() -> web.Application:
 
     # v0.3.19 Per-cluster ops notes
     for method, path, handler in cluster_notes.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.3.30 PVE API tokens listing (admin)
+    for method, path, handler in api_tokens.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
