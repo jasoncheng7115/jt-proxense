@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.26] — 2026-05-09
+
+### Added
+
+- **Browser tab title shows pending alerts** — `document.title` is now prefixed with `(N🔴+M🟠)` when any node is offline, storage ≥95%/85%, ceph HEALTH_ERR/WARN, or sustained CPU/memory >92%. Lets operators eyeball the tab from across a multi-tab browser without having to switch in. Computed entirely from the WS-broadcast cluster data (no extra API hits).
+
+---
+
 ## [0.3.25] — 2026-05-09
 
 ### Added

@@ -8,6 +8,14 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.26] — 2026-05-09
+
+### 新增
+
+- **瀏覽器分頁標題顯示警示計數** — `document.title` 現在會在有節點離線、儲存 ≥95%/85%、Ceph HEALTH_ERR/WARN、CPU/記憶體 >92% 等情況時加上 `(N🔴+M🟠)` 前綴，operator 開多個分頁時不需切到 jt-proxense 也看得到狀況。完全從 WS broadcast 的 cluster 資料即時計算（不打 API）。
+
+---
+
 ## [0.3.25] — 2026-05-09
 
 ### 新增
