@@ -79,8 +79,49 @@ async def subscription_handler(request: web.Request) -> web.Response:
     return web.json_response({"subscription": data if isinstance(data, dict) else {}})
 
 
+@role_required("viewer")
+async def services_handler(request: web.Request) -> web.Response:
+    """List PVE services on a node (pveproxy / pvedaemon / corosync / …).
+    No cache — operators want fresh state when staring at this view."""
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        rows = await cluster.client.get_node_services(node)
+    except Exception as e:
+        logger.warning("services list failed for %s/%s: %s", cid, node, e)
+        return web.json_response({"services": [], "error": str(e)})
+    return web.json_response({"services": rows or []})
+
+
+@role_required("viewer")
+async def syslog_handler(request: web.Request) -> web.Response:
+    """Per-node syslog tail. Backed by PVE's `/nodes/{node}/syslog`.
+    Lines are returned as [{n, t}] where t is the raw line."""
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    try:
+        lines = max(1, min(int(request.query.get("lines") or "500"), 5000))
+    except ValueError:
+        lines = 500
+    service = (request.query.get("service") or "").strip()
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        rows = await cluster.client.get_node_syslog(node, lines=lines, service=service)
+    except Exception as e:
+        logger.warning("syslog fetch failed for %s/%s: %s", cid, node, e)
+        return web.json_response({"lines": [], "error": str(e)})
+    return web.json_response({"lines": rows or [], "count": len(rows or [])})
+
+
 ROUTES = [
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/certificates",  certificates_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/updates",       updates_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/subscription",  subscription_handler),
+    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/services",      services_handler),
+    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/syslog",        syslog_handler),
 ]

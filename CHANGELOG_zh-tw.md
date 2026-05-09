@@ -8,6 +8,21 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.21] — 2026-05-09
+
+### 新增
+
+- **節點服務查看** — 節點右鍵選單新增「服務」，列出該節點上所有 PVE 主機服務（pveproxy / pvedaemon / pvestatd / corosync / pve-cluster …）以及狀態 badge（active / failed / inactive）。目前唯讀。
+- **節點系統日誌查看** — 節點右鍵選單新增「系統日誌」，開啟 modal 顯示 `/nodes/{node}/syslog` 最後 1000 行。每 5 秒自動更新，可填 unit 篩選（如 `pveproxy`）以及自由文字搜尋。
+
+### 內部
+
+- `pve_client.get_node_services()` / `get_node_syslog()` 新增。
+- `node_inspect` 加上 `services_handler` / `syslog_handler` 路由。
+- 新元件 `NodeServicesModal.tsx`、`NodeSyslogModal.tsx`。
+
+---
+
 ## [0.3.20] — 2026-05-09
 
 ### 新增

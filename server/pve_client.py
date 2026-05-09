@@ -306,6 +306,26 @@ class PVEClient:
             "GET", "/cluster/log", params={"max": max_lines}
         )
 
+    async def get_node_syslog(self, node: str, *, since: int = 0,
+                              until: int = 0, lines: int = 500,
+                              service: str = "") -> list:
+        """`/nodes/{node}/syslog` — host journalctl tail. Each entry has
+        {n, t} where t is the line text. PVE strips it of any time
+        prefix the operator may want to add a unit filter via `service`."""
+        params: dict = {}
+        if since:   params["since"] = since
+        if until:   params["until"] = until
+        if lines:   params["limit"] = lines
+        if service: params["service"] = service
+        return await self._request(
+            "GET", f"/nodes/{node}/syslog", params=params
+        )
+
+    async def get_node_services(self, node: str) -> list:
+        """`/nodes/{node}/services` — pveproxy, pvedaemon, pvestatd,
+        corosync, etc. Returns {name, desc, state, active-state}."""
+        return await self._request("GET", f"/nodes/{node}/services")
+
     # ----- VM lifecycle (v0.3+ writes; require write-scoped PVE token) -----
 
     async def vm_start(self, node: str, vmid: int) -> str:

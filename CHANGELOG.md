@@ -8,6 +8,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.21] — 2026-05-09
+
+### Added
+
+- **Per-node services viewer** — node context menu → 「服務 / Services」 lists every PVE host service on the node (pveproxy / pvedaemon / pvestatd / corosync / pve-cluster …) with state badges (active / failed / inactive). Read-only for now.
+- **Per-node syslog viewer** — node context menu → 「系統日誌 / Syslog」 opens a modal showing the last 1000 lines from `/nodes/{node}/syslog`. Auto-refresh every 5 s, optional unit filter (e.g. `pveproxy`), free-text search.
+
+### Internal
+
+- `pve_client.get_node_services()` and `get_node_syslog()` added.
+- `node_inspect` gains `services_handler` and `syslog_handler` routes.
+- New components `NodeServicesModal.tsx` and `NodeSyslogModal.tsx`.
+
+---
+
 ## [0.3.20] — 2026-05-09
 
 ### Added
