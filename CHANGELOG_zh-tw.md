@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.27] — 2026-05-09
+
+### 新增
+
+- **通知通道 UI** — 設定 → 警示頁加上「管理通道」按鈕，開啟 CRUD modal：可新增 webhook（Slack / Discord / Mattermost / 一般）或 email 通道，個別啟停、刪除。包既有 `notifications_handlers.py` 的 admin endpoint。關閉之前只能用 API 或 shell 建通道的可見性缺口。
+
+### 內部
+
+- 新元件 `src/client/components/NotificationsModal.tsx`，不新增 server route。
+
+---
+
 ## [0.3.26] — 2026-05-09
 
 ### 新增

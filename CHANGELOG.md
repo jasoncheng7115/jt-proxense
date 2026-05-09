@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.27] — 2026-05-09
+
+### Added
+
+- **Notification channels UI** — Settings → Alerts now has a "Manage channels" button opening a CRUD modal: add webhook (Slack / Discord / Mattermost / generic) or email channel, toggle enable per-channel, delete. Wraps the existing `notifications_handlers.py` admin endpoints. Closes the visibility gap where channels could only be created via API or shell.
+
+### Internal
+
+- New component `src/client/components/NotificationsModal.tsx`. No new server route.
+
+---
+
 ## [0.3.26] — 2026-05-09
 
 ### Added
