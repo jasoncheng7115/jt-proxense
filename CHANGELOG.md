@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.31] — 2026-05-09
+
+### Added
+
+- **NodeServicesModal "Logs" link per service** — admins clicking the new Logs button next to a service row open NodeSyslogModal pre-filtered to that systemd unit (e.g. clicking 「日誌」 next to `pveproxy` opens the syslog viewer with `unit=pveproxy` already applied). Saves operators from copy-pasting unit names into the syslog filter.
+
+### Internal
+
+- `NodeSyslogModal` accepts an `initialService` prop; `NodeServicesModal` accepts an `onShowLogs(service)` callback. ClusterCore wires them so the same syslog modal is reused for both per-service drilldown and full host syslog.
+
+---
+
 ## [0.3.30] — 2026-05-09
 
 ### Added

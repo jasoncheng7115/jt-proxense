@@ -8,6 +8,18 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.3.31] — 2026-05-09
+
+### 新增
+
+- **NodeServicesModal 每行多了「日誌」按鈕** — admin 點服務旁的「日誌」開 NodeSyslogModal 並預先 filter 該 unit（例如點 `pveproxy` 旁的「日誌」開 syslog viewer 自動 `unit=pveproxy`）。免去 operator 手抄 unit 名稱貼到 syslog 過濾的步驟。
+
+### 內部
+
+- `NodeSyslogModal` 新增 `initialService` prop；`NodeServicesModal` 新增 `onShowLogs(service)` 回呼。ClusterCore 串接，per-service 細節跟整機 syslog 共用同一個 modal。
+
+---
+
 ## [0.3.30] — 2026-05-09
 
 ### 新增
