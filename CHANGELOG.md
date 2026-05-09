@@ -8,6 +8,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.29] — 2026-05-09
+
+### Added
+
+- **Command palette quick-nav actions** — type "health" / "tasks" / "backup" / "matrix" / "節點" / "備份" etc. into ⌘K and the matching nav target appears at the top of the result list (boosted +30 over entity matches). Operators no longer need to remember the keyboard shortcut letter for a view they visit rarely.
+
+### Internal
+
+- New `'action'` hit kind in `CommandPalette.tsx` with chevron icon; bilingual aliases per nav entry.
+
+---
+
 ## [0.3.28] — 2026-05-09
 
 ### Fixed
