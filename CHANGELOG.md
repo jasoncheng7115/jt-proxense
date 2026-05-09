@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.32] — 2026-05-09
+
+### Added
+
+- **`/audit` "errors only" filter** — checkbox in the audit filter bar limits the rendered rows to `result starting with "error"` or `result == "denied"`. Client-side filter on the rows already returned, so it composes with every other filter (user / action / cluster / since / until / limit) without re-querying.
+
+---
+
 ## [0.3.31] — 2026-05-09
 
 ### Added

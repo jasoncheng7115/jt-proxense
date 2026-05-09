@@ -27,6 +27,7 @@ _I18N: dict[str, dict[str, str]] = {
         "f_since":        "Since (UTC)",
         "f_until":        "Until (UTC)",
         "f_limit":        "Limit",
+        "f_errors_only":  "errors only",
         "btn_refresh":    "Refresh »",
         "btn_auto_off":   "Auto: off",
         "btn_auto_on":    "Auto: 5s",
@@ -66,6 +67,7 @@ _I18N: dict[str, dict[str, str]] = {
         "f_since":        "起始時間 (UTC)",
         "f_until":        "結束時間 (UTC)",
         "f_limit":        "筆數上限",
+        "f_errors_only":  "僅顯示錯誤",
         "btn_refresh":    "重新整理 »",
         "btn_auto_off":   "自動：關",
         "btn_auto_on":    "自動：5 秒",
@@ -204,6 +206,8 @@ _TEMPLATE = """<!DOCTYPE html>
             border-color: var(--cyan); box-shadow: 0 0 0 3px var(--cyan-soft);
         }
         .filters .actions { display: flex; align-items: flex-end; gap: 8px; margin-left: auto; }
+        .filters label.check { flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; padding-bottom: 7px; cursor: pointer; }
+        .filters label.check input { accent-color: var(--cyan); }
         button {
             padding: 7px 14px;
             font-family: Orbitron, sans-serif; font-weight: 600;
@@ -323,6 +327,7 @@ _TEMPLATE = """<!DOCTYPE html>
                 <option>500</option>
             </select>
         </label>
+        <label class="check"><input type="checkbox" id="fErrorsOnly"> {{T_F_ERRORS_ONLY}}</label>
         <div class="actions">
             <button id="refresh" class="primary">{{T_BTN_REFRESH}}</button>
             <button id="auto">{{T_BTN_AUTO_OFF}}</button>
@@ -402,7 +407,12 @@ async function fetchAndRender() {
         if (!r.ok) { errBox.innerHTML = '<div class="err">HTTP ' + r.status + '</div>'; return; }
         const data = await r.json();
         const tbody = document.getElementById('rows');
-        lastRows = data.rows || [];
+        const onlyErr = document.getElementById('fErrorsOnly').checked;
+        lastRows = (data.rows || []).filter((row) => {
+            if (!onlyErr) return true;
+            const r = (row.result || '').toString();
+            return r.startsWith('error') || r === 'denied';
+        });
         if (lastRows.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="empty">' + escapeHtml(I18N.empty_filtered) + '</td></tr>';
         } else {
@@ -457,6 +467,7 @@ async function loadMe() {
 }
 
 document.getElementById('refresh').addEventListener('click', () => { offset = 0; fetchAndRender(); });
+document.getElementById('fErrorsOnly').addEventListener('change', () => fetchAndRender());
 document.getElementById('prev').addEventListener('click', () => {
     offset = Math.max(0, offset - limit); fetchAndRender();
 });
@@ -527,6 +538,7 @@ async def audit_page_handler(request: web.Request) -> web.Response:
             .replace("{{T_F_SINCE}}", s["f_since"])
             .replace("{{T_F_UNTIL}}", s["f_until"])
             .replace("{{T_F_LIMIT}}", s["f_limit"])
+            .replace("{{T_F_ERRORS_ONLY}}", s["f_errors_only"])
             .replace("{{T_BTN_REFRESH}}", s["btn_refresh"])
             .replace("{{T_BTN_AUTO_OFF}}", s["btn_auto_off"])
             .replace("{{T_BTN_CSV}}", s["btn_csv"])
