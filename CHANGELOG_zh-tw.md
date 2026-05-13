@@ -8,6 +8,141 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.5.0] — 2026-05-13
+
+UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、跨頁面樣式一致性
+全面整理，並導入 Playwright 視覺驗證流程。
+
+### 新增
+
+- **矩陣熱度檢視**：第四種檢視模式（`/matrix/heatmap`），每個 VM 一橫列、
+  30 個依 CPU 負載著色的小方格（idle → 綠 → 黃 → 橙 → 紅）。WS tick
+  累積環狀緩衝，鍵以 `叢集/節點/vmid`；**首次進入時用當下值預填全部
+  buckets**，避免要等 2.5 分鐘才能看到完整資料。橫列加微弱條紋與 hover
+  反白，底部附色階圖例。靠最右側的第四顆 view-toggle 按鈕切換；位置存
+  localStorage 與 URL sub-path（`/matrix/heatmap`）。
+- **效能圖 hover 十字線 + 提示卡**：`RRDChartModal` 滑鼠停在圖上會出現
+  垂直引導線 + 每條 series 一個小點，搭配青邊提示卡顯示時間戳記與各
+  series 的格式化數值。提示卡到中線右側會自動翻到左側顯示，不會被裁切。
+- **時間範圍切換動畫**：在 1h / 24h / 7d / 30d / 1y 之間切換時，四張
+  圖卡會做 0.32s 帶位移的淡入動畫（透過 `key={tf}` 重新掛載 + CSS
+  keyframe），不再是硬切。
+### 變更
+
+- **品牌 Logo 換新**：移除原本的寬幅 PNG 文字標，改為 SVG 圖示（六角形
+  感測器標靶）＋ CSS 文字標（Rajdhani 字型）成對結構。圖示從 16px
+  favicon 縮放到 36px 側欄圖示都清晰；側欄收合到 64px 時，文字標會
+  淡出折疊，不再溢出。Favicon 同步更新。
+- **概觀儀表板改版**：新增六顆 hero stat tiles（線上節點 · 運作中虛擬機
+  · 運作中容器 · 叢集負載 · 進行中告警 · 運行時間），擺在原有的儀表
+  上方；底部新增四面板區（節點 CPU 條 · 儲存容量 · 進行中工作 · 告警）。
+  Tiles 與底部區塊跟頁面其他段落共用 1400px max-width，在寬螢幕也對齊。
+- **跨頁面樣式一致性整理**：所有 view 改用標準 panel-card 容器樣式
+  （135° 漸層背景、primary-dim 框線、`neon-breathe` 動畫、頂端強光條
+  與動態 scan-line、Orbitron 大寫字頭青色發光）。受影響：`ClusterCore`
+  節點卡與節點詳細彈窗、`HoloMatrix` 縮圖卡、`HealthMonitor` 告警卡
+  （保留事故等級色左側 3px 軌道為刻意例外）、`CephConstellation`
+  OSD 矩陣與 I/O 波形面板，以及 `/tasks` 與 `/backups` 的表格區
+  （新加上 `.panel-card` 外殼）。`.panel-card` 等 utility class 加進
+  `styles.css` 給後續沿用。
+- **原生 `<select>` 全部換成 CyberSelect**：`/tasks` 篩選列（叢集 /
+  類型 / 狀態 / 使用者）與 `/backups`（叢集 / 狀態）。SPA 不再有
+  瀏覽器原生下拉外觀的元件。
+- **對話框按鈕加 leading SVG icons**：VMCloneModal / VMMigrateModal /
+  VMDeleteModal（取消 × / 複製 / 遷移箭頭 / 垃圾桶）以及 VMConfigModal
+  （編輯鉛筆 / 取消 × / 套用打勾），按鈕本身改用 inline-flex 對齊。
+- **VMConfigModal 字體與排版**：欄位標題改為 11px Orbitron 大寫＋
+  `.08em` letter-spacing，inputs 12→13px、加大 padding 與 focus 光暈；
+  表格 header 10→11px 青色、cell 12→13px；section title 青色＋發光
+  並加粗下緣線。Grid 間距加大讓欄位舒展。
+- **側欄 wordmark 改用 Rajdhani** 字型（Orbitron 太寬會被截斷），現在
+  「JT-PROXENSE」可以乾淨地放進 230px 側欄。
+
+### 修正
+
+- **矩陣表格檢視全黑畫面** — `TagSelectorBar` 因為某些 VM 的 `tags`
+  欄位回傳的是陣列而不是分號字串，`o.split is not a function` 在 React
+  渲染時直接炸掉整個 table view。現在依輸入型態先 flat-map 成 string[]
+  再 split。
+- **遷移對話框目標節點下拉空白** — 獨立節點型叢集（單節點）現在顯示
+  停用的 placeholder 「— 此叢集沒有其他節點可遷移 —」，不再讓操作者
+  以為對話框壞了。
+- **VM/CT 右鍵選單在視窗邊緣被裁切** — 開啟後實際量測 menu 的 bounding
+  rect，靠右靠下都會自動翻轉位置，無論項目多少都會留在視窗內。
+- **OSD apply-vs-commit scatter 的 tooltip 被裁切**（圖卡右側/底部）
+  — 量測後翻到相反方向顯示。
+- **重疊在同一座標的 OSD 點看不到** —（例：15 顆 OSD 都在 apply=1ms,
+  commit=1ms 渲染成一顆）— 同座標的點現在會被分組，半徑依數量遞增，
+  提示卡會列出每一顆 OSD ID 與所在 host。
+
+### 安全性
+
+- **移除文件與腳本中寫死的 admin 密碼**：CLAUDE.md 與 `bin/jt-proxense`
+  不再建議 `TestPass123!`；需要 admin 認證的腳本改從環境變數
+  `JT_ADMIN_PASS` 讀取，沒設就拒跑。CLAUDE.md 補上「不要自動 reset
+  admin 密碼」明確規則，避免文件預設值與實際營運密碼撞號鎖死帳號。
+
+---
+
+## [0.4.0] — 2026-05-09
+
+里程碑版本：一次清掉全部 TODO 並完成 OWASP Top 10 全面安全檢核。
+
+### 新增
+
+- **PVE API token 建立 / 撤銷**（admin）。v0.3.30 的列表 UI 加上「+ 建立」
+  表單（privsep / 到期 / 備註）與每列「撤銷」按鈕。新建 token 的 secret
+  以單次顯示面板呈現，內含複製按鈕與「PVE 不會再回傳此密碼」警告。
+  Server 端以 `userid` / `tokenid` 嚴格 regex 驗證輸入，每次建立/刪除
+  都寫稽核。
+- **VM 硬體編輯器**（operator+）。VMConfigModal 可編輯純量欄位（核心數
+  / 記憶體 / 開機順序 / agent / 標籤 / 描述 / 每張網卡 bridge+vlan+
+  firewall）並支援磁碟擴容（僅接受 `+N GB`，server 拒絕絕對大小避免
+  靜默縮容）。套用前顯示 diff modal，明確列出將變更的欄位。
+- **VM / CT 建立精靈**（operator+）。叢集核心操作列新增「+ 新建」按鈕，
+  五步驟對話框：類型（QEMU/LXC）→ OS 映像 → 硬體 → 網路 → 檢視。所有
+  欄位以 allow-list regex 在前後端雙重驗證；最終送出時稽核僅紀錄非機密
+  欄位的 hash（密碼 / SSH 公鑰永遠不進稽核紀錄）。
+- **防火牆寫入 UI**（admin）。FirewallModal 加入「+ 新增規則」inline
+  表單（叢集與 VM 兩種範圍）與每列刪除按鈕。Server 端嚴格驗證 source /
+  dest / proto / dport / sport / comment。
+- **HA 寫入 UI**（admin）。HAStatusModal 新增「+ 新增資源」（sid / 群組
+  / 狀態 / 備註）與每列刪除。Server 端強制 sid 必須是 `vm:<id>` 或
+  `ct:<id>`。
+- **ESXi 一等叢集（v0.4 唯讀預覽）**。新 `server/clusters/` 子模組，
+  抽象 `ClusterAdapter` 介面，`ESXiAdapter` 透過 vSphere REST API
+  運作。config.yaml 每個叢集多了 `type: esxi`；ClusterManager 與 PVE
+  叢集並列輪詢，快照合併進 `/api/clusters`。可變更操作為 v0.5 範圍。
+
+### 安全（OWASP Top 10 檢核）
+
+- **A02 / A07** Influx receiver 的 token 比對改為時間恆定
+  （`hmac.compare_digest`）；同來源 IP 連續 auth 失敗會在 WARN 等級
+  曝光。
+- **A05** Influx receiver 啟動時若綁在非 loopback 介面又沒設定 token，
+  會印出 SECURITY 警告。
+- **A05** session cookie 在 HTTPS（含 `X-Forwarded-Proto`）下自動
+  加 `Secure` 旗標。
+- **A05** HSTS（`max-age=31536000; includeSubDomains`）只在 HTTPS
+  請求下發出。
+- **A03 / A05** vm_config PUT 與 vm_create POST 都加上 16 KiB 與
+  ≤32 欄位的硬上限；可編輯欄位採 reject-by-default 的 allow-list。
+- **A10 / A09** storage download-url 限定 http(s)，檔名拒絕 `..`/`/`/
+  NUL/>255；URL 內嵌 credentials 在進稽核 hash 前先剝除。
+- **A03** pdm_cluster 防火牆 + HA 寫入欄位皆以嚴格 regex allow-list
+  在送 PVE 前驗證。
+
+### 內部
+
+- 新增 `server/vm_create.py`（精靈後端）。
+- 新增 `server/clusters/{__init__,base,esxi}.py` 多 hypervisor 抽象
+  scaffolding。
+- `pve_client` 補上 create_user_token / delete_user_token /
+  vm_resize_disk / ct_resize_disk / ct_update_config /
+  list_node_storages / cluster_next_vmid / create_qemu / create_lxc。
+
+---
+
 ## [0.3.34] — 2026-05-09
 
 ### 新增

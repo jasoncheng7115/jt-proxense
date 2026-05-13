@@ -130,8 +130,12 @@ async def snapshots_list_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "vm_not_found"}, status=404)
     deny = _check_role(request, cluster_id, vm, "viewer")
     if deny: return deny
+    is_lxc = vm["type"] == "lxc"
     try:
-        snaps = await cluster.client.vm_list_snapshots(vm["node"], vmid)
+        if is_lxc:
+            snaps = await cluster.client.ct_list_snapshots(vm["node"], vmid)
+        else:
+            snaps = await cluster.client.vm_list_snapshots(vm["node"], vmid)
     except Exception as e:
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
     return web.json_response({"snapshots": snaps})
@@ -160,20 +164,29 @@ async def snapshot_create_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "missing_snapname"}, status=400)
 
     user, ip, rid = _audit_actor(request)
+    is_lxc = vm["type"] == "lxc"
     try:
-        upid = await cluster.client.vm_take_snapshot(
-            vm["node"], vmid, snapname,
-            description=body.get("description", ""),
-            vmstate=bool(body.get("vmstate", False)),
-        )
+        if is_lxc:
+            upid = await cluster.client.ct_take_snapshot(
+                vm["node"], vmid, snapname,
+                description=body.get("description", ""),
+            )
+        else:
+            upid = await cluster.client.vm_take_snapshot(
+                vm["node"], vmid, snapname,
+                description=body.get("description", ""),
+                vmstate=bool(body.get("vmstate", False)),
+            )
     except Exception as e:
-        await audit.write(user=user, source_ip=ip, action="vm.snapshot.create",
-                          target=f"{cluster_id}/{vm['node']}/vm/{vmid}/{snapname}",
+        await audit.write(user=user, source_ip=ip,
+                          action=f"{'ct' if is_lxc else 'vm'}.snapshot.create",
+                          target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid, params=body)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.snapshot.create",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid}/{snapname}",
+    await audit.write(user=user, source_ip=ip,
+                      action=f"{'ct' if is_lxc else 'vm'}.snapshot.create",
+                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
                       cluster_id=cluster_id, result="ok", request_id=rid, params=body)
     return web.json_response({"ok": True, "upid": upid})
 
@@ -194,16 +207,22 @@ async def snapshot_delete_handler(request: web.Request) -> web.Response:
     if deny: return deny
 
     user, ip, rid = _audit_actor(request)
+    is_lxc = vm["type"] == "lxc"
     try:
-        upid = await cluster.client.vm_delete_snapshot(vm["node"], vmid, snapname)
+        if is_lxc:
+            upid = await cluster.client.ct_delete_snapshot(vm["node"], vmid, snapname)
+        else:
+            upid = await cluster.client.vm_delete_snapshot(vm["node"], vmid, snapname)
     except Exception as e:
-        await audit.write(user=user, source_ip=ip, action="vm.snapshot.delete",
-                          target=f"{cluster_id}/{vm['node']}/vm/{vmid}/{snapname}",
+        await audit.write(user=user, source_ip=ip,
+                          action=f"{'ct' if is_lxc else 'vm'}.snapshot.delete",
+                          target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.snapshot.delete",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid}/{snapname}",
+    await audit.write(user=user, source_ip=ip,
+                      action=f"{'ct' if is_lxc else 'vm'}.snapshot.delete",
+                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
                       cluster_id=cluster_id, result="ok", request_id=rid)
     return web.json_response({"ok": True, "upid": upid})
 
@@ -224,16 +243,22 @@ async def snapshot_rollback_handler(request: web.Request) -> web.Response:
     if deny: return deny
 
     user, ip, rid = _audit_actor(request)
+    is_lxc = vm["type"] == "lxc"
     try:
-        upid = await cluster.client.vm_rollback_snapshot(vm["node"], vmid, snapname)
+        if is_lxc:
+            upid = await cluster.client.ct_rollback_snapshot(vm["node"], vmid, snapname)
+        else:
+            upid = await cluster.client.vm_rollback_snapshot(vm["node"], vmid, snapname)
     except Exception as e:
-        await audit.write(user=user, source_ip=ip, action="vm.snapshot.rollback",
-                          target=f"{cluster_id}/{vm['node']}/vm/{vmid}/{snapname}",
+        await audit.write(user=user, source_ip=ip,
+                          action=f"{'ct' if is_lxc else 'vm'}.snapshot.rollback",
+                          target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.snapshot.rollback",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid}/{snapname}",
+    await audit.write(user=user, source_ip=ip,
+                      action=f"{'ct' if is_lxc else 'vm'}.snapshot.rollback",
+                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
                       cluster_id=cluster_id, result="ok", request_id=rid)
     return web.json_response({"ok": True, "upid": upid})
 
@@ -264,23 +289,36 @@ async def clone_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "missing_newid"}, status=400)
 
     user, ip, rid = _audit_actor(request)
+    is_lxc = vm["type"] == "lxc"
     try:
-        upid = await cluster.client.vm_clone(
-            vm["node"], vmid, newid=newid,
-            name=body.get("name", ""),
-            target_node=body.get("target_node"),
-            full=bool(body.get("full", False)),
-            storage=body.get("storage"),
-            snapname=body.get("snapname"),
-        )
+        if is_lxc:
+            upid = await cluster.client.ct_clone(
+                vm["node"], vmid, newid=newid,
+                hostname=body.get("name", "") or body.get("hostname", ""),
+                target_node=body.get("target_node"),
+                full=bool(body.get("full", False)),
+                storage=body.get("storage"),
+                snapname=body.get("snapname"),
+            )
+        else:
+            upid = await cluster.client.vm_clone(
+                vm["node"], vmid, newid=newid,
+                name=body.get("name", ""),
+                target_node=body.get("target_node"),
+                full=bool(body.get("full", False)),
+                storage=body.get("storage"),
+                snapname=body.get("snapname"),
+            )
     except Exception as e:
-        await audit.write(user=user, source_ip=ip, action="vm.clone",
-                          target=f"{cluster_id}/{vm['node']}/vm/{vmid} -> {newid}",
+        await audit.write(user=user, source_ip=ip,
+                          action=f"{'ct' if is_lxc else 'vm'}.clone",
+                          target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid} -> {newid}",
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid, params=body)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.clone",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid} -> {newid}",
+    await audit.write(user=user, source_ip=ip,
+                      action=f"{'ct' if is_lxc else 'vm'}.clone",
+                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid} -> {newid}",
                       cluster_id=cluster_id, result="ok", request_id=rid, params=body)
     return web.json_response({"ok": True, "upid": upid, "newid": newid})
 
@@ -330,16 +368,21 @@ async def delete_handler(request: web.Request) -> web.Response:
 
     purge = request.query.get("purge", "0") in ("1", "true", "yes")
     user, ip, rid = _audit_actor(request)
+    is_lxc = vm["type"] == "lxc"
+    action = "ct.delete" if is_lxc else "vm.delete"
     try:
-        upid = await cluster.client.vm_delete(vm["node"], vmid, purge=purge)
+        if is_lxc:
+            upid = await cluster.client.ct_delete(vm["node"], vmid, purge=purge)
+        else:
+            upid = await cluster.client.vm_delete(vm["node"], vmid, purge=purge)
     except Exception as e:
-        await audit.write(user=user, source_ip=ip, action="vm.delete",
-                          target=f"{cluster_id}/{vm['node']}/vm/{vmid}",
+        await audit.write(user=user, source_ip=ip, action=action,
+                          target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}",
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid, params={"purge": purge})
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.delete",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid}",
+    await audit.write(user=user, source_ip=ip, action=action,
+                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}",
                       cluster_id=cluster_id, result="ok", request_id=rid,
                       params={"purge": purge})
     return web.json_response({"ok": True, "upid": upid})

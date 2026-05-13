@@ -24,9 +24,11 @@ Why our own parser instead of pip install:
 from __future__ import annotations
 
 import asyncio
+import hmac
+import ipaddress
 import logging
 import time
-from collections import deque
+from collections import deque, defaultdict
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, Optional
 
@@ -301,6 +303,13 @@ class InfluxReceiver:
             "parse_errors": 0,
             "started_at": 0.0,
         }
+        # Per-IP failed-auth window for soft brute-force detection (A07).
+        # Map ip → list[ts] within the last 60 s. Logged at WARN once a
+        # source crosses the threshold; we do NOT actively block (Telegraf
+        # mis-config could lock out a real fleet) — operators are expected
+        # to read the warning and rotate / fix.
+        self._auth_fail_log: dict[str, list[float]] = defaultdict(list)
+        self._auth_fail_warned: set[str] = set()
 
     async def start(self) -> None:
         app = web.Application(client_max_size=8 * 1024 * 1024)  # 8MB cap
@@ -319,9 +328,27 @@ class InfluxReceiver:
         self._site = web.TCPSite(self._runner, self.host, self.port)
         await self._site.start()
         self._stats["started_at"] = time.time()
-        auth = "with token auth" if self.token else "NO AUTH (LAN trust)"
-        logger.info("InfluxDB receiver up on http://%s:%d (%s)",
-                    self.host, self.port, auth)
+        if self.token:
+            logger.info("InfluxDB receiver up on http://%s:%d (with token auth)",
+                        self.host, self.port)
+        else:
+            # OWASP A05 — call out the dangerous combination of "bound to a
+            # non-loopback interface" AND "no token configured" so operators
+            # can't accidentally expose a free metrics-write endpoint.
+            try:
+                bind_loopback = ipaddress.ip_address(self.host).is_loopback
+            except ValueError:
+                bind_loopback = self.host in ("localhost", "::1")
+            if bind_loopback:
+                logger.info("InfluxDB receiver up on http://%s:%d (no auth, loopback only)",
+                            self.host, self.port)
+            else:
+                logger.warning(
+                    "SECURITY: InfluxDB receiver bound to %s:%d with NO TOKEN. "
+                    "Anyone on this network can write metrics. Set "
+                    "server.influx_token in config.yaml or bind to 127.0.0.1.",
+                    self.host, self.port,
+                )
 
     async def stop(self) -> None:
         if self._site:
@@ -342,14 +369,46 @@ class InfluxReceiver:
 
     async def _handle_write(self, request: web.Request) -> web.Response:
         # Auth: Telegraf v2 sends `Authorization: Token <token>`.
+        # OWASP A02 / A07 — string equality on secret material leaks length
+        # and content via timing. Use hmac.compare_digest for a constant-
+        # time match. The two prefixes are tried independently so an
+        # attacker can't tell which prefix was correct on partial match.
         if self.token:
             header = request.headers.get("Authorization", "")
+            expected_a = f"Token {self.token}"
+            expected_b = f"Bearer {self.token}"
             ok = (
-                header == f"Token {self.token}"
-                or header == f"Bearer {self.token}"
+                hmac.compare_digest(header, expected_a)
+                or hmac.compare_digest(header, expected_b)
             )
             if not ok:
                 self._stats["auth_fail"] += 1
+                ip = (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                      or (request.remote or "unknown"))
+                # Roll the per-IP window and warn once per minute on burst.
+                now = time.time()
+                bucket = self._auth_fail_log[ip]
+                bucket.append(now)
+                # drop entries older than 60 s
+                cutoff = now - 60.0
+                while bucket and bucket[0] < cutoff:
+                    bucket.pop(0)
+                if len(bucket) >= 5 and ip not in self._auth_fail_warned:
+                    self._auth_fail_warned.add(ip)
+                    logger.warning(
+                        "InfluxDB receiver: %d auth failures in 60s from %s — "
+                        "possible brute force or mis-configured agent",
+                        len(bucket), ip,
+                    )
+                else:
+                    logger.info(
+                        "InfluxDB receiver auth fail from %s (header_len=%d)",
+                        ip, len(header),
+                    )
+                # Periodic GC of the warned set so a fixed agent stops
+                # being treated as suspicious forever.
+                if len(self._auth_fail_warned) > 64:
+                    self._auth_fail_warned.clear()
                 return web.Response(status=401, text="unauthorized")
 
         # v2 query params: org, bucket, precision (ns | us | ms | s).

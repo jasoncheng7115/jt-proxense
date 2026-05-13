@@ -340,12 +340,299 @@ class PVEClient:
         except Exception:
             return []
 
+    async def list_users_full(self) -> list:
+        """Like list_users but includes disabled accounts; admin UI needs both."""
+        try:
+            return await self._request("GET", "/access/users")
+        except Exception:
+            return []
+
+    async def create_pve_user(self, userid: str, **fields) -> None:
+        """POST /access/users — create PVE user. `userid` is `<user>@<realm>`.
+        Optional fields: password, comment, email, firstname, lastname,
+        groups (csv), enable, expire, keys."""
+        data = dict(fields)
+        data["userid"] = userid
+        await self._request("POST", "/access/users", data=data)
+
+    async def update_pve_user(self, userid: str, **fields) -> None:
+        data = {k: v for k, v in fields.items() if v is not None}
+        await self._request("PUT", f"/access/users/{userid}", data=data)
+
+    async def delete_pve_user(self, userid: str) -> None:
+        await self._request("DELETE", f"/access/users/{userid}")
+
+    async def list_pve_groups(self) -> list:
+        try:
+            return await self._request("GET", "/access/groups")
+        except Exception:
+            return []
+
+    async def create_pve_group(self, groupid: str, comment: str = "") -> None:
+        data = {"groupid": groupid}
+        if comment: data["comment"] = comment
+        await self._request("POST", "/access/groups", data=data)
+
+    async def delete_pve_group(self, groupid: str) -> None:
+        await self._request("DELETE", f"/access/groups/{groupid}")
+
+    async def list_pve_acl(self) -> list:
+        """`/access/acl` — flat list of ACL entries (path, type, ugid, role,
+        propagate)."""
+        try:
+            return await self._request("GET", "/access/acl")
+        except Exception:
+            return []
+
+    async def update_pve_acl(self, *, path: str, roles: str,
+                             users: str | None = None,
+                             groups: str | None = None,
+                             tokens: str | None = None,
+                             propagate: bool = True,
+                             delete: bool = False) -> None:
+        """PUT /access/acl — add or remove ACL entries. `path` is the
+        permission tree node (e.g. /vms/100, /storage/local). `roles`
+        and `users|groups|tokens` are comma-separated. `delete=True`
+        removes the matching entries."""
+        data: dict = {"path": path, "roles": roles, "propagate": 1 if propagate else 0}
+        if users:  data["users"]  = users
+        if groups: data["groups"] = groups
+        if tokens: data["tokens"] = tokens
+        if delete: data["delete"] = 1
+        await self._request("PUT", "/access/acl", data=data)
+
+    async def list_pve_roles(self) -> list:
+        try:
+            return await self._request("GET", "/access/roles")
+        except Exception:
+            return []
+
+    async def list_node_disks(self, node: str) -> list:
+        """`/nodes/{node}/disks/list` — block devices on the node with size,
+        rotational, used-by, model, serial, etc."""
+        try:
+            return await self._request("GET", f"/nodes/{node}/disks/list")
+        except Exception as e:
+            logger.warning("list_node_disks %s: %s", node, e)
+            return []
+
+    async def disk_smart(self, node: str, disk: str, *, healthonly: bool = False) -> dict:
+        """`/nodes/{node}/disks/smart?disk=<dev>` — full SMART attribute dump
+        (or just health if healthonly=True). Disk path is e.g. '/dev/sda';
+        the API also accepts the basename. Returns 200 even when SMART is
+        not supported (fields are empty)."""
+        params = {"disk": disk}
+        if healthonly:
+            params["healthonly"] = 1
+        return await self._request(
+            "GET", f"/nodes/{node}/disks/smart", params=params,
+        )
+
+    async def get_hardware_pci(self, node: str) -> list:
+        try:
+            return await self._request("GET", f"/nodes/{node}/hardware/pci")
+        except Exception:
+            return []
+
+    async def get_hardware_usb(self, node: str) -> list:
+        try:
+            return await self._request("GET", f"/nodes/{node}/hardware/usb")
+        except Exception:
+            return []
+
     async def list_user_tokens(self, userid: str) -> list:
         """`/access/users/{userid}/token` — list API tokens for a user."""
         try:
             return await self._request("GET", f"/access/users/{userid}/token")
         except Exception:
             return []
+
+    async def create_user_token(
+        self, userid: str, tokenid: str,
+        *, privsep: bool = True, expire: int | None = None,
+        comment: str = "",
+    ) -> dict:
+        """POST /access/users/{userid}/token/{tokenid} — create a new API
+        token for the given user. PVE's response includes the token *secret*
+        in the `value` field — that secret is shown to the operator ONCE and
+        cannot be retrieved later. Caller is responsible for not logging it."""
+        data: dict = {"privsep": 1 if privsep else 0}
+        if expire is not None:
+            data["expire"] = int(expire)
+        if comment:
+            data["comment"] = comment
+        return await self._request(
+            "POST", f"/access/users/{userid}/token/{tokenid}", data=data,
+        )
+
+    async def delete_user_token(self, userid: str, tokenid: str) -> dict:
+        """DELETE /access/users/{userid}/token/{tokenid} — revoke an API
+        token. Irreversible; PVE returns nothing useful on success."""
+        return await self._request(
+            "DELETE", f"/access/users/{userid}/token/{tokenid}",
+        )
+
+    # ----- Firewall ipsets / aliases / security groups (cluster level) -----
+
+    async def list_fw_ipsets(self) -> list:
+        """List ipsets at cluster level. Each ipset is a named set of CIDRs
+        / IPs that firewall rules can reference as `+<name>`."""
+        try:
+            return await self._request("GET", "/cluster/firewall/ipset")
+        except Exception:
+            return []
+
+    async def create_fw_ipset(self, name: str, comment: str = "") -> None:
+        data = {"name": name}
+        if comment:
+            data["comment"] = comment
+        await self._request("POST", "/cluster/firewall/ipset", data=data)
+
+    async def delete_fw_ipset(self, name: str) -> None:
+        await self._request("DELETE", f"/cluster/firewall/ipset/{name}")
+
+    async def list_fw_ipset_members(self, name: str) -> list:
+        try:
+            return await self._request("GET", f"/cluster/firewall/ipset/{name}")
+        except Exception:
+            return []
+
+    async def add_fw_ipset_member(self, name: str, cidr: str, *,
+                                  nomatch: bool = False, comment: str = "") -> None:
+        data = {"cidr": cidr}
+        if nomatch: data["nomatch"] = 1
+        if comment: data["comment"] = comment
+        await self._request("POST", f"/cluster/firewall/ipset/{name}", data=data)
+
+    async def delete_fw_ipset_member(self, name: str, cidr: str) -> None:
+        # PVE's ipset member endpoint URL-encodes cidr in the path.
+        from urllib.parse import quote
+        await self._request(
+            "DELETE", f"/cluster/firewall/ipset/{name}/{quote(cidr, safe='')}",
+        )
+
+    async def list_fw_aliases(self) -> list:
+        try:
+            return await self._request("GET", "/cluster/firewall/aliases")
+        except Exception:
+            return []
+
+    async def create_fw_alias(self, name: str, cidr: str, comment: str = "") -> None:
+        data = {"name": name, "cidr": cidr}
+        if comment: data["comment"] = comment
+        await self._request("POST", "/cluster/firewall/aliases", data=data)
+
+    async def delete_fw_alias(self, name: str) -> None:
+        await self._request("DELETE", f"/cluster/firewall/aliases/{name}")
+
+    async def list_fw_groups(self) -> list:
+        try:
+            return await self._request("GET", "/cluster/firewall/groups")
+        except Exception:
+            return []
+
+    async def create_fw_group(self, group: str, comment: str = "") -> None:
+        data = {"group": group}
+        if comment: data["comment"] = comment
+        await self._request("POST", "/cluster/firewall/groups", data=data)
+
+    async def delete_fw_group(self, group: str) -> None:
+        await self._request("DELETE", f"/cluster/firewall/groups/{group}")
+
+    async def get_vm_fw_options(self, node: str, vmid: int, vm_type: str = "qemu") -> dict:
+        """GET /nodes/{n}/{qemu|lxc}/{vmid}/firewall/options — per-VM
+        firewall master switch + policy flags (enable, log_level_in/out,
+        policy_in, policy_out, dhcp, ipfilter, macfilter, etc.)."""
+        kind = "lxc" if vm_type == "lxc" else "qemu"
+        try:
+            return await self._request(
+                "GET", f"/nodes/{node}/{kind}/{vmid}/firewall/options",
+            )
+        except Exception:
+            return {}
+
+    async def update_vm_fw_options(self, node: str, vmid: int, vm_type: str, **fields) -> None:
+        """PUT /nodes/{n}/{qemu|lxc}/{vmid}/firewall/options — toggle
+        per-VM firewall master switch + policies. Caller passes
+        validated fields."""
+        kind = "lxc" if vm_type == "lxc" else "qemu"
+        data = {k: v for k, v in fields.items() if v is not None}
+        await self._request(
+            "PUT", f"/nodes/{node}/{kind}/{vmid}/firewall/options", data=data,
+        )
+
+    # ----- SDN zones / vnets / subnets (cluster level) -----
+
+    async def list_sdn_zones(self) -> list:
+        try:
+            return await self._request("GET", "/cluster/sdn/zones")
+        except Exception:
+            return []
+
+    async def create_sdn_zone(self, zone: str, ztype: str, **fields) -> None:
+        """Create a SDN zone. `ztype` ∈ {simple, vlan, qinq, vxlan, evpn}.
+        Type-specific fields (bridge, tag, peers, controller, etc.) are
+        passed via **fields after the caller has validated them."""
+        data = {"zone": zone, "type": ztype}
+        for k, v in fields.items():
+            if v is not None and v != "":
+                data[k] = v
+        await self._request("POST", "/cluster/sdn/zones", data=data)
+
+    async def update_sdn_zone(self, zone: str, **fields) -> None:
+        data = {k: v for k, v in fields.items() if v is not None and v != ""}
+        await self._request("PUT", f"/cluster/sdn/zones/{zone}", data=data)
+
+    async def delete_sdn_zone(self, zone: str) -> None:
+        await self._request("DELETE", f"/cluster/sdn/zones/{zone}")
+
+    async def create_sdn_vnet(self, vnet: str, zone: str, *, tag: int | None = None,
+                              alias: str | None = None) -> None:
+        data: dict = {"vnet": vnet, "zone": zone}
+        if tag is not None: data["tag"] = tag
+        if alias: data["alias"] = alias
+        await self._request("POST", "/cluster/sdn/vnets", data=data)
+
+    async def delete_sdn_vnet(self, vnet: str) -> None:
+        await self._request("DELETE", f"/cluster/sdn/vnets/{vnet}")
+
+    async def create_sdn_subnet(self, vnet: str, subnet: str,
+                                gateway: str | None = None,
+                                snat: bool = False) -> None:
+        data: dict = {"subnet": subnet, "type": "subnet"}
+        if gateway: data["gateway"] = gateway
+        if snat: data["snat"] = 1
+        await self._request("POST", f"/cluster/sdn/vnets/{vnet}/subnets", data=data)
+
+    async def delete_sdn_subnet(self, vnet: str, subnet: str) -> None:
+        # PVE expects the subnet CIDR URL-encoded.
+        from urllib.parse import quote
+        await self._request(
+            "DELETE",
+            f"/cluster/sdn/vnets/{vnet}/subnets/{quote(subnet, safe='')}",
+        )
+
+    async def set_subscription(self, node: str, key: str) -> None:
+        """PUT /nodes/{node}/subscription with key=<PVE-...> — register
+        a subscription. Empty key clears (PVE accepts DELETE for that
+        too, but PUT with `key=` is also supported). Returns nothing
+        useful; caller refetches GET to confirm."""
+        await self._request(
+            "PUT", f"/nodes/{node}/subscription",
+            data={"key": key},
+        )
+
+    async def delete_subscription(self, node: str) -> None:
+        await self._request("DELETE", f"/nodes/{node}/subscription")
+
+    async def recheck_subscription(self, node: str, force: bool = False) -> None:
+        """POST /nodes/{node}/subscription — re-check the existing key
+        against the upstream Proxmox license server. Useful after a
+        renewal that wasn't auto-detected."""
+        data = {"force": 1} if force else {}
+        await self._request(
+            "POST", f"/nodes/{node}/subscription", data=data,
+        )
 
     async def get_node_services(self, node: str) -> list:
         """`/nodes/{node}/services` — pveproxy, pvedaemon, pvestatd,
@@ -487,11 +774,124 @@ class PVEClient:
             "DELETE", f"/nodes/{node}/qemu/{vmid}", params=params,
         )
 
+    async def ct_delete(self, node: str, vmid: int, *, purge: bool = False,
+                        force: bool = False) -> str:
+        """DELETE /nodes/{node}/lxc/{vmid} — destroy a container. PVE accepts
+        `purge` (also remove backups/replication) and `force` (continue even
+        if some unmounts fail)."""
+        params: dict = {}
+        if purge: params["purge"] = 1
+        if force: params["force"] = 1
+        return await self._request(
+            "DELETE", f"/nodes/{node}/lxc/{vmid}", params=params,
+        )
+
+    async def ct_clone(self, node: str, vmid: int, *,
+                       newid: int, hostname: str = "",
+                       target_node: str | None = None,
+                       full: bool = False, storage: str | None = None,
+                       snapname: str | None = None) -> str:
+        data: dict = {"newid": newid, "full": 1 if full else 0}
+        if hostname: data["hostname"] = hostname
+        if target_node: data["target"] = target_node
+        if storage: data["storage"] = storage
+        if snapname: data["snapname"] = snapname
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc/{vmid}/clone", data=data,
+        )
+
+    async def ct_list_snapshots(self, node: str, vmid: int) -> list:
+        return await self._request("GET", f"/nodes/{node}/lxc/{vmid}/snapshot")
+
+    async def ct_take_snapshot(self, node: str, vmid: int, snapname: str,
+                               description: str = "") -> str:
+        data = {"snapname": snapname, "description": description}
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc/{vmid}/snapshot", data=data,
+        )
+
+    async def ct_delete_snapshot(self, node: str, vmid: int, snapname: str) -> str:
+        return await self._request(
+            "DELETE", f"/nodes/{node}/lxc/{vmid}/snapshot/{snapname}",
+        )
+
+    async def ct_rollback_snapshot(self, node: str, vmid: int, snapname: str) -> str:
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc/{vmid}/snapshot/{snapname}/rollback",
+        )
+
     async def vm_update_config(self, node: str, vmid: int, **fields) -> dict:
         """Update VM config. PVE returns {} on async update (uses background
         task) or directly applies for simple fields."""
         return await self._request(
             "PUT", f"/nodes/{node}/qemu/{vmid}/config", data=fields,
+        )
+
+    async def vm_unlock(self, node: str, vmid: int) -> dict:
+        """Clear a stuck `lock=` field from a VM config. Equivalent to
+        `qm unlock <vmid>` on the node — PVE accepts `delete=lock` via
+        the config PUT endpoint."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/qemu/{vmid}/config",
+            data={"delete": "lock"},
+        )
+
+    async def ct_unlock(self, node: str, vmid: int) -> dict:
+        """`pct unlock <vmid>` equivalent."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/lxc/{vmid}/config",
+            data={"delete": "lock"},
+        )
+
+    async def ct_update_config(self, node: str, vmid: int, **fields) -> dict:
+        """Update LXC container config. Same shape as vm_update_config but
+        the schema differs (e.g. `cores` → `cpulimit`/`cores`, `memory` is
+        in MiB, `nameserver` instead of `searchdomain`)."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/lxc/{vmid}/config", data=fields,
+        )
+
+    async def vm_resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str:
+        """Grow a VM disk. `size` MUST be like "+10G" (incremental) per PVE
+        contract — absolute sizes are accepted but only-grow is enforced
+        client-side. Returns the task UPID."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/qemu/{vmid}/resize",
+            data={"disk": disk, "size": size},
+        )
+
+    async def vm_move_disk(self, node: str, vmid: int, disk: str,
+                           storage: str, *, delete: bool = False,
+                           format: str | None = None,
+                           bwlimit: int | None = None) -> str:
+        """POST /nodes/{node}/qemu/{vmid}/move_disk — relocate a VM disk to
+        another storage. Returns task UPID. `delete=True` removes source
+        after copy completes (move semantics); False is "copy + leave"."""
+        data: dict = {"disk": disk, "storage": storage}
+        if delete: data["delete"] = 1
+        if format: data["format"] = format
+        if bwlimit: data["bwlimit"] = bwlimit
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu/{vmid}/move_disk", data=data,
+        )
+
+    async def ct_move_volume(self, node: str, vmid: int, volume: str,
+                             storage: str, *, delete: bool = False,
+                             bwlimit: int | None = None) -> str:
+        """POST /nodes/{node}/lxc/{vmid}/move_volume — LXC equivalent of
+        vm_move_disk. `volume` is the slot key (rootfs, mp0, mp1, ...)."""
+        data: dict = {"volume": volume, "storage": storage}
+        if delete: data["delete"] = 1
+        if bwlimit: data["bwlimit"] = bwlimit
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc/{vmid}/move_volume", data=data,
+        )
+
+    async def ct_resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str:
+        """Grow an LXC mount-point or rootfs. Same constraints as VM."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/lxc/{vmid}/resize",
+            data={"disk": disk, "size": size},
         )
 
     # --- noVNC / console ---
@@ -518,6 +918,13 @@ class PVEClient:
         """Poll the status of a long-running task by its UPID."""
         return await self._request(
             "GET", f"/nodes/{node}/tasks/{upid}/status",
+        )
+
+    async def stop_task(self, node: str, upid: str) -> dict:
+        """DELETE /nodes/{node}/tasks/{upid} — kills a running task. Idempotent
+        on already-finished tasks (PVE returns 200 with no error)."""
+        return await self._request(
+            "DELETE", f"/nodes/{node}/tasks/{upid}",
         )
 
     # ----- LXC container lifecycle (v0.3+ writes; mirror of vm_*) -----
@@ -620,6 +1027,13 @@ class PVEClient:
     async def delete_backup_job(self, job_id: str) -> None:
         await self._request("DELETE", f"/cluster/backup/{job_id}")
 
+    async def update_backup_job(self, job_id: str, **fields) -> None:
+        """PUT /cluster/backup/{job_id} — update an existing schedule. Pass
+        only the fields you want to change. PVE rejects unknown keys per
+        version, so the caller is responsible for shape."""
+        data = {k: v for k, v in fields.items() if v is not None}
+        await self._request("PUT", f"/cluster/backup/{job_id}", data=data)
+
     async def trigger_backup(self, node: str, *, vmid: int | str,
                              storage: str, mode: str = "snapshot",
                              compress: str = "zstd", **kwargs) -> str:
@@ -637,6 +1051,94 @@ class PVEClient:
         return await self._request(
             "GET", f"/nodes/{node}/storage/{storage}/content",
             params={"content": content},
+        )
+
+    async def get_storage_content(self, node: str, storage: str, volume: str) -> dict:
+        """GET /nodes/{node}/storage/{storage}/content/{volid} — full metadata
+        for one volume. Effective shallow integrity check: if PVE can read
+        the metadata, the file at least exists and is readable.
+
+        For PBS-backed volumes, PVE forwards to pbs-client and verifies the
+        snapshot index, which doubles as a moderate-depth integrity check."""
+        from urllib.parse import quote
+        return await self._request(
+            "GET",
+            f"/nodes/{node}/storage/{storage}/content/{quote(volume, safe='')}",
+        )
+
+    async def file_restore_list(self, node: str, storage: str, volume: str) -> list:
+        """POST /nodes/{node}/storage/{storage}/file-restore/list — lists
+        the contents of a PBS backup archive. Walks the chunk store, so
+        this is a stronger integrity check than `get_storage_content` for
+        PBS volumes. Fails with 400/501 on non-PBS storages."""
+        return await self._request(
+            "GET", f"/nodes/{node}/storage/{storage}/file-restore/list",
+            params={"volume": volume, "filepath": "/"},
+        )
+
+    async def list_node_storages(self, node: str,
+                                 content: str | None = None) -> list:
+        """List storages mounted on a node, optionally filtered by content
+        type (e.g. 'iso', 'vztmpl', 'images', 'rootdir')."""
+        params: dict = {}
+        if content:
+            params["content"] = content
+        return await self._request(
+            "GET", f"/nodes/{node}/storage", params=params,
+        )
+
+    async def cluster_next_vmid(self) -> int:
+        """`/cluster/nextid` — PVE returns the next free VMID as a string."""
+        v = await self._request("GET", "/cluster/nextid")
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 100
+
+    async def create_qemu(self, node: str, vmid: int, **fields) -> str:
+        """POST /nodes/{node}/qemu — create a QEMU VM. Returns the task UPID."""
+        data = dict(fields)
+        data["vmid"] = vmid
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu", data=data,
+        )
+
+    async def restore_qemu(self, node: str, vmid: int, archive: str, *,
+                           force: bool = False,
+                           storage: str | None = None,
+                           bwlimit: int | None = None) -> str:
+        """Restore a QEMU VM from a vzdump archive. Same endpoint as create_qemu
+        but with `archive=<volid|path>`. `force=1` overwrites an existing VM
+        with the same vmid (destructive — caller must have confirmed)."""
+        data: dict = {"vmid": vmid, "archive": archive}
+        if force: data["force"] = 1
+        if storage: data["storage"] = storage
+        if bwlimit: data["bwlimit"] = bwlimit
+        return await self._request(
+            "POST", f"/nodes/{node}/qemu", data=data,
+        )
+
+    async def restore_lxc(self, node: str, vmid: int, archive: str, *,
+                          force: bool = False,
+                          storage: str | None = None,
+                          bwlimit: int | None = None) -> str:
+        """Restore an LXC container from a vzdump archive. PVE uses the same
+        create endpoint with `ostemplate=<archive>` + `restore=1`."""
+        data: dict = {"vmid": vmid, "ostemplate": archive, "restore": 1}
+        if force: data["force"] = 1
+        if storage: data["storage"] = storage
+        if bwlimit: data["bwlimit"] = bwlimit
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc", data=data,
+        )
+
+    async def create_lxc(self, node: str, vmid: int, **fields) -> str:
+        """POST /nodes/{node}/lxc — create an LXC container. Returns the task UPID.
+        Caller MUST include `ostemplate` and either `password` or `ssh-public-keys`."""
+        data = dict(fields)
+        data["vmid"] = vmid
+        return await self._request(
+            "POST", f"/nodes/{node}/lxc", data=data,
         )
 
     async def delete_storage_content(self, node: str, storage: str,
@@ -820,6 +1322,21 @@ class PVEClient:
     async def list_replication_jobs(self) -> list:
         return await self._request("GET", "/cluster/replication")
 
+    async def replication_run_now(self, node: str, job_id: str) -> str:
+        """POST /nodes/{node}/replication/{job_id}/schedule_now — fire a
+        replication job immediately, outside the normal schedule. Returns
+        task UPID."""
+        return await self._request(
+            "POST", f"/nodes/{node}/replication/{job_id}/schedule_now",
+        )
+
+    async def replication_set_disable(self, job_id: str, disabled: bool) -> None:
+        """PUT /cluster/replication/{job_id} disable=1|0."""
+        await self._request(
+            "PUT", f"/cluster/replication/{job_id}",
+            data={"disable": 1 if disabled else 0},
+        )
+
     async def create_replication_job(self, *, id: str, target: str, schedule: str,
                                      rate: int | None = None, comment: str = "") -> None:
         data = {"id": id, "target": target, "schedule": schedule, "type": "local"}
@@ -882,6 +1399,31 @@ class PVEClient:
         # always refresh comfortably before PVE rejects.
         return {"ticket": ticket, "csrf": csrf, "expires_at": int(_time.time()) + 110 * 60}
 
+    async def create_node_network(self, node: str, iface: str, **fields) -> None:
+        """POST /nodes/{node}/network — create a network interface (bridge,
+        bond, vlan, OVS, etc.). Caller passes type-specific fields. Changes
+        are applied to pending config; the operator must call
+        `apply_node_network` to commit them to /etc/network/interfaces."""
+        data = dict(fields)
+        data["iface"] = iface
+        await self._request("POST", f"/nodes/{node}/network", data=data)
+
+    async def update_node_network(self, node: str, iface: str, **fields) -> None:
+        data = {k: v for k, v in fields.items() if v is not None}
+        await self._request("PUT", f"/nodes/{node}/network/{iface}", data=data)
+
+    async def delete_node_network(self, node: str, iface: str) -> None:
+        await self._request("DELETE", f"/nodes/{node}/network/{iface}")
+
+    async def apply_node_network(self, node: str) -> str:
+        """PUT /nodes/{node}/network — applies pending changes (writes
+        /etc/network/interfaces and reloads). Returns the task UPID."""
+        return await self._request("PUT", f"/nodes/{node}/network")
+
+    async def revert_node_network(self, node: str) -> None:
+        """DELETE /nodes/{node}/network — drops pending changes."""
+        await self._request("DELETE", f"/nodes/{node}/network")
+
     async def get_node_network(self, node: str, iface_type: str | None = None) -> list:
         """Get network interface list on a node.
 
@@ -902,6 +1444,31 @@ class PVEClient:
         """Get all storage configurations (includes allowed nodes)"""
         return await self._request("GET", "/storage")
 
+    async def get_storage_config_one(self, storage: str) -> dict:
+        """GET /storage/{storage} — full config for one storage."""
+        return await self._request("GET", f"/storage/{storage}")
+
+    async def create_storage(self, **fields) -> dict:
+        """POST /storage — create cluster storage. Required: storage (id),
+        type. Type-specific fields are passed via **fields. Caller is
+        responsible for validating shape; PVE rejects unknown fields per
+        type with 400."""
+        return await self._request("POST", "/storage", data=fields)
+
+    async def update_storage(self, storage: str, **fields) -> dict:
+        """PUT /storage/{storage} — update existing storage. Type cannot
+        change; only the per-type editable fields (content, nodes, shared,
+        disable, etc.). Pass `delete=key1,key2` to clear specific fields."""
+        data = {k: v for k, v in fields.items() if v is not None}
+        return await self._request("PUT", f"/storage/{storage}", data=data)
+
+    async def delete_storage(self, storage: str) -> None:
+        """DELETE /storage/{storage} — remove the storage entry from the
+        cluster config. Does NOT touch on-disk data; for backed-by-disk
+        storages (LVM, ZFS pool) operator must clean up the underlying
+        block device separately."""
+        await self._request("DELETE", f"/storage/{storage}")
+
     # Ceph APIs
 
     async def get_ceph_status(self, node: str) -> dict:
@@ -918,12 +1485,119 @@ class PVEClient:
         except Exception:
             return []
 
+    async def ceph_osd_in(self, node: str, osdid: int) -> dict:
+        """Mark OSD `in` (POST /nodes/{n}/ceph/osd/{id}/in)."""
+        return await self._request("POST", f"/nodes/{node}/ceph/osd/{osdid}/in")
+
+    async def ceph_osd_out(self, node: str, osdid: int) -> dict:
+        """Mark OSD `out` (POST /nodes/{n}/ceph/osd/{id}/out)."""
+        return await self._request("POST", f"/nodes/{node}/ceph/osd/{osdid}/out")
+
+    async def ceph_osd_reweight(self, node: str, osdid: int, weight: float) -> dict:
+        """Reweight OSD via PUT /nodes/{n}/ceph/osd/{id}. PVE accepts the
+        scrub-temp weight directly here; range 0.0..1.0."""
+        return await self._request(
+            "PUT", f"/nodes/{node}/ceph/osd/{osdid}",
+            data={"weight": float(weight)},
+        )
+
+    async def ceph_get_flags(self) -> dict:
+        """Cluster-wide ceph flags (noout, nobackfill, etc.) via the new
+        endpoint /cluster/ceph/flags. Returns {flags: [...]} or similar."""
+        try:
+            return await self._request("GET", "/cluster/ceph/flags")
+        except Exception:
+            return {}
+
+    async def ceph_set_flag(self, flag: str) -> dict:
+        """PUT /cluster/ceph/flags/{flag}?value=1 — set a cluster ceph flag."""
+        return await self._request(
+            "PUT", f"/cluster/ceph/flags/{flag}", data={"value": 1},
+        )
+
+    async def ceph_unset_flag(self, flag: str) -> dict:
+        return await self._request(
+            "PUT", f"/cluster/ceph/flags/{flag}", data={"value": 0},
+        )
+
+    async def ceph_create_mon(self, node: str) -> str:
+        """POST /nodes/{node}/ceph/mon — create a monitor on this node.
+        Returns task UPID."""
+        return await self._request(
+            "POST", f"/nodes/{node}/ceph/mon",
+        )
+
+    async def ceph_delete_mon(self, node: str, monid: str) -> str:
+        return await self._request(
+            "DELETE", f"/nodes/{node}/ceph/mon/{monid}",
+        )
+
+    async def ceph_create_mgr(self, node: str) -> str:
+        return await self._request(
+            "POST", f"/nodes/{node}/ceph/mgr",
+        )
+
+    async def ceph_delete_mgr(self, node: str, mgrid: str) -> str:
+        return await self._request(
+            "DELETE", f"/nodes/{node}/ceph/mgr/{mgrid}",
+        )
+
+    async def ceph_list_mds(self, node: str) -> list:
+        try:
+            return await self._request("GET", f"/nodes/{node}/ceph/mds")
+        except Exception:
+            return []
+
+    async def ceph_create_mds(self, node: str, name: str = "") -> str:
+        """POST /nodes/{node}/ceph/mds/{name} — create MDS. PVE assigns
+        name=<node> if empty."""
+        target = name or node
+        return await self._request(
+            "POST", f"/nodes/{node}/ceph/mds/{target}",
+        )
+
+    async def ceph_delete_mds(self, node: str, name: str) -> str:
+        return await self._request(
+            "DELETE", f"/nodes/{node}/ceph/mds/{name}",
+        )
+
     async def get_ceph_pools(self, node: str) -> list:
         """Get Ceph pools"""
         try:
             return await self._request("GET", f"/nodes/{node}/ceph/pool")
         except Exception:
             return []
+
+    async def create_ceph_pool(self, node: str, name: str, *,
+                               pg_num: int = 128,
+                               size: int = 3,
+                               min_size: int = 2,
+                               application: str = "rbd",
+                               crush_rule: str | None = None,
+                               add_storages: bool = False) -> str:
+        """POST /nodes/{node}/ceph/pool — create a Ceph pool. Returns the
+        task UPID. Defaults match PVE web UI: 3/2 replication, pg_num 128."""
+        data: dict = {
+            "name": name, "pg_num": pg_num,
+            "size": size, "min_size": min_size,
+            "application": application,
+        }
+        if crush_rule: data["crush_rule"] = crush_rule
+        if add_storages: data["add_storages"] = 1
+        return await self._request(
+            "POST", f"/nodes/{node}/ceph/pool", data=data,
+        )
+
+    async def delete_ceph_pool(self, node: str, name: str, *,
+                               remove_storages: bool = False) -> str:
+        """DELETE /nodes/{node}/ceph/pools/{name} — destroy a Ceph pool.
+        Irreversible. `remove_storages=true` also removes any PVE storages
+        backed by this pool. Returns task UPID."""
+        params = {}
+        if remove_storages: params["remove_storages"] = 1
+        return await self._request(
+            "DELETE", f"/nodes/{node}/ceph/pools/{name}", params=params,
+        )
 
     async def get_ceph_mon(self, node: str) -> list:
         """Get Ceph monitors"""

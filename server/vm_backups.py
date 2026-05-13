@@ -11,6 +11,7 @@ Routes:
 from __future__ import annotations
 
 import logging
+import re
 import time
 import asyncio
 
@@ -109,6 +110,45 @@ async def list_vm_backups_handler(request: web.Request) -> web.Response:
     return web.json_response({"backups": backups, "count": len(backups)})
 
 
+@role_required("operator")
+async def verify_backup_handler(request: web.Request) -> web.Response:
+    """POST /api/clusters/{cid}/nodes/{node}/storage/{storage}/verify
+    body: {volume: "<volid>"}
+
+    Shallow verify: hits PVE's content metadata endpoint. For PBS storages
+    the call walks the chunk index and is a moderate integrity check; for
+    file-based storages (dir/nfs/cifs) it confirms the file is readable
+    and metadata-parseable. Returns 200 on success with the metadata; 502
+    if PVE rejects (storage corruption / file missing).
+    """
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    storage = request.match_info["storage"]
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$", storage):
+        return web.json_response({"error": "bad_storage"}, status=400)
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    volume = (body.get("volume") or "").strip()
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._/:\-]{1,512}$", volume):
+        return web.json_response({"error": "bad_volume"}, status=400)
+    try:
+        meta = await cluster.client.get_storage_content(node, storage, volume)
+    except Exception as e:
+        return web.json_response(
+            {"ok": False, "verified": False, "detail": str(e)},
+            status=502,
+        )
+    return web.json_response({
+        "ok": True, "verified": True, "metadata": meta,
+    })
+
+
 ROUTES = [
     ("GET", r"/api/clusters/{cluster_id}/vms/{vmid}/backups", list_vm_backups_handler),
+    ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/storage/{storage}/verify", verify_backup_handler),
 ]

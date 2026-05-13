@@ -43,6 +43,10 @@ class ClusterConfig:
     """Single cluster configuration"""
     id: str
     name: str = ""  # Display name override (if empty, use PVE cluster name)
+    # `pve` (default) or `esxi` (v0.4 read-only preview). Drives which
+    # adapter cluster_manager instantiates. ESXi support is read-only and
+    # uses the vSphere REST API — see server/clusters/esxi.py.
+    type: str = "pve"
     nodes: list[PVENodeConfig] = field(default_factory=list)
     auth: PVEAuthConfig = field(default_factory=PVEAuthConfig)
     enabled: bool = True

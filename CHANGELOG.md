@@ -8,6 +8,168 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] — 2026-05-13
+
+A UX polish + new feature release: brand identity refresh, a new matrix
+heatmap view, comprehensive style-consistency sweep across all views,
+and Playwright-driven visual verification harness.
+
+### Added
+
+- **Matrix heatmap view** — fourth view mode (`/matrix/heatmap`) showing
+  per-VM CPU history as a horizontal track of 30 colour-coded cells
+  (idle → green → amber → orange → red). New WS-tick ring buffer keyed
+  by `cluster/node/vmid`; pre-seeds all buckets with the current value
+  on first entry so the heatmap looks "warm" instantly instead of taking
+  ~2.5 min to fill. Zebra-striped rows + hover highlight + colour-scale
+  legend in the footer. Available via the 4th view-toggle button next
+  to grid / table / thumb; persisted to localStorage and URL sub-path.
+- **Performance chart hover crosshair + tooltip** — `RRDChartModal` now
+  renders a vertical guideline + per-series dot at the nearest sample
+  with a cyan-rimmed tooltip showing timestamp + each series' formatted
+  value. Auto-flips to the opposite side when the cursor is past the
+  chart midline so the tooltip never falls off-screen.
+- **Time-range transition animation** — switching between 1h / 24h / 7d /
+  30d / 1y in `RRDChartModal` now does a 0.32s fade-with-rise transition
+  on the four chart cards (via a `key={tf}` remount + CSS keyframe)
+  instead of a hard snap.
+### Changed
+
+- **New brand logo** — replaced the wide `JT-PROXENSE` PNG wordmark with
+  a paired SVG mark (hex sensor reticle) + CSS wordmark in Rajdhani.
+  Mark scales cleanly from 16px favicon up to 36px sidebar icon; the
+  wordmark fades out + collapses cleanly when the sidebar shrinks to
+  64px so the logo no longer overflows. Favicon updated to match.
+- **Overview dashboard redesign** — added 6 hero stat tiles (Nodes
+  Online · VMs · CTs · Cluster Load · Active Alerts · Uptime) above
+  the gauges, plus a 4-panel bottom row (Nodes CPU bars · Storage
+  capacity · Active tasks · Alerts feed). Tiles + bottom row share the
+  same 1400px max-width as the rest of the page so they align with
+  the cluster overview cards on wide displays.
+- **Comprehensive style-consistency sweep** — every view now uses the
+  canonical panel-card surface (135° gradient bg, primary-dim border,
+  `neon-breathe` animation, top accent + animated scan-line, uppercase
+  display-font headers with primary glow). Affected: `ClusterCore`
+  node-card / node-detail-panel, `HoloMatrix` vm-thumb-card,
+  `HealthMonitor` hm-card (keeps severity left rail as a deliberate
+  exception), `CephConstellation` osd-grid-panel / io-wave-panel,
+  `/tasks` + `/backups` table area (now wrapped in `.panel-card`).
+  Shared utilities `.panel-card`, `.panel-card-head`, `.panel-card-dot`,
+  `.panel-card-meta`, `.panel-card-body` added to `styles.css`.
+- **Native `<select>` → CyberSelect** in `PveTasks` (cluster / type /
+  status / user filters) and `BackupJobs` (cluster / state filters).
+  Native dropdowns no longer appear anywhere in the SPA.
+- **Dialog action buttons gain leading SVG icons** — VMCloneModal,
+  VMMigrateModal, VMDeleteModal (cancel × / copy / migrate-arrow /
+  trash) and VMConfigModal (edit pencil / cancel × / apply check),
+  with inline-flex alignment so labels and icons share the baseline.
+- **VMConfigModal type + layout** — labels bumped to 11px Orbitron
+  uppercase with `.08em` letter-spacing, inputs 12→13px with bigger
+  padding + focus glow, table headers 10→11px primary-coloured, table
+  cells 12→13px, section titles primary-coloured with cyan glow + bolder
+  bottom rule. Grid spacing increased so rows breathe.
+- **Sidebar wordmark switches to Rajdhani** so "JT-PROXENSE" no longer
+  truncates inside the 230px sidebar (Orbitron is too wide).
+
+### Fixed
+
+- **Matrix table view rendered as full-black screen** — `TagSelectorBar`
+  crashed with `o.split is not a function` because some VMs return
+  `tags` as an array instead of a `;`-string. Now flat-maps any input
+  shape (string / array / null) into a string[] before splitting.
+- **Migration dialog empty target-node dropdown** — standalone clusters
+  (single-node) now render a disabled placeholder option `— this
+  cluster has no other nodes to migrate to —` instead of an empty
+  select that misled operators into thinking the dialog was broken.
+- **VM/CT context menu clipped near viewport edge** — now measures the
+  menu's actual rendered rect after open and flips left / up so it
+  always stays inside the viewport, regardless of menu item count.
+- **OSD apply-vs-commit scatter tooltip clipped** at right / bottom of
+  the chart card — flips to the opposite side after measure.
+- **Stacked OSD scatter points were invisible** (15 OSDs all at
+  apply=1ms, commit=1ms rendered as one dot) — points with identical
+  coordinates are now grouped, sized by member count, and the tooltip
+  lists every member OSD ID + host.
+
+### Security
+
+- **Removed hardcoded admin password from documentation and scripts**.
+  CLAUDE.md and `bin/jt-proxense` no longer suggest `TestPass123!`;
+  scripts that need auth now read `JT_ADMIN_PASS` from the environment
+  and refuse to run without it. CLAUDE.md gained an explicit "do not
+  reset admin password autonomously" note after the previous default
+  caused a credential collision.
+
+---
+
+## [0.4.0] — 2026-05-09
+
+A milestone release covering the full TODO pipeline plus a cross-cutting
+OWASP Top 10 audit pass.
+
+### Added
+
+- **PVE API tokens — create / revoke** (admin). The v0.3.30 listing UI
+  gains a "+ Create" form with privsep / expiry / comment, plus a per-row
+  Revoke button. Newly minted secrets surface in a one-shot reveal panel
+  with a Copy button and an explicit warning that PVE never re-issues
+  the value. Server input validated with strict `userid` / `tokenid`
+  regexes; every create/delete is audited.
+- **VM hardware editor** (operator+). VMConfigModal becomes editable for
+  scalar fields (cores / memory / boot / agent / tags / description /
+  per-NIC bridge+vlan+firewall) plus disk grow with `+N GB` deltas only
+  (server rejects absolute sizes to avoid silent shrinks). Apply step
+  shows a diff modal naming exactly which fields will change before the
+  PUT goes out.
+- **VM / CT creation wizard** (operator+). New `+ New` button on the
+  cluster ops bar opens a five-step modal: type (QEMU/LXC) → OS image
+  → hardware → network → review. Every field flows through allow-list
+  regexes both client- and server-side; final submit is audited with a
+  non-secret param hash (passwords / SSH keys never reach the audit
+  log).
+- **Firewall write UI** (admin). FirewallModal gains an "+ Add rule"
+  inline form (cluster + VM scopes) and per-row Delete button. Server
+  now strictly validates `source` / `dest` / `proto` / `dport` / `sport`
+  / `comment` with regex allow-lists before forwarding to PVE.
+- **HA write UI** (admin). HAStatusModal gains "+ Add resource" with
+  sid / group / state / comment and per-row Delete. Server enforces
+  `sid` (`vm:<id>` or `ct:<id>`) and group regex.
+- **ESXi as first-class cluster (read-only preview, v0.4)**. New
+  `server/clusters/` subpackage with an abstract `ClusterAdapter`
+  interface and an `ESXiAdapter` that uses the vSphere REST API.
+  config.yaml gains a `type: esxi` field per cluster; ClusterManager
+  polls them alongside PVE clusters and merges snapshots into
+  `/api/clusters`. Mutating ESXi is the v0.5 scope.
+
+### Security (OWASP Top 10 audit pass)
+
+- **A02 / A07** Influx receiver token check is timing-safe
+  (`hmac.compare_digest`); auth-failure bursts log at WARN.
+- **A05** Influx receiver startup logs SECURITY WARNING when bound to
+  a non-loopback interface with no token configured.
+- **A05** Session cookies set `Secure` automatically when the request
+  arrived over HTTPS (direct or via `X-Forwarded-Proto`).
+- **A05** HSTS header (`max-age=31536000; includeSubDomains`) emitted
+  on HTTPS requests.
+- **A03 / A05** Body size (16 KiB) + field-count (≤32) caps on
+  vm_config PUT and vm_create POST; allow-lists on every editable
+  field with reject-by-default.
+- **A10 / A09** storage download-url: scheme restricted to `http(s)`,
+  filename rejected on `..` / `/` / NUL / >255 chars, embedded
+  credentials stripped before audit-log params hash.
+- **A03** pdm_cluster firewall + HA inputs validated against narrow
+  regex allow-lists before forwarding to PVE.
+
+### Internal
+
+- New `server/vm_create.py` for the wizard backend.
+- New `server/clusters/{__init__,base,esxi}.py` scaffolding.
+- `pve_client` gains create_user_token / delete_user_token /
+  vm_resize_disk / ct_resize_disk / ct_update_config /
+  list_node_storages / cluster_next_vmid / create_qemu / create_lxc.
+
+---
+
 ## [0.3.34] — 2026-05-09
 
 ### Added

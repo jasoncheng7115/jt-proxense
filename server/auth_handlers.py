@@ -89,10 +89,24 @@ async def login_handler(request: web.Request) -> web.Response:
     })
     resp.set_cookie(
         auth.SESSION_COOKIE, session.id,
-        httponly=True, secure=False, samesite="Lax",
+        httponly=True,
+        # OWASP A05 — when the SPA was served over HTTPS, set Secure so
+        # the session cookie cannot be sent over a downgraded HTTP request.
+        # Honor X-Forwarded-Proto when behind a reverse proxy (a common
+        # deployment shape — TLS terminated upstream, jt-proxense talks
+        # plain HTTP on localhost).
+        secure=_is_secure_request(request),
+        samesite="Lax",
         max_age=auth.SESSION_TTL_S, path="/",
     )
     return resp
+
+
+def _is_secure_request(request: web.Request) -> bool:
+    if request.scheme == "https":
+        return True
+    fwd = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower()
+    return fwd == "https"
 
 
 # ---------------------------------------------------------------- TOTP handlers
@@ -166,7 +180,9 @@ async def totp_login_handler(request: web.Request) -> web.Response:
     })
     resp.set_cookie(
         auth.SESSION_COOKIE, sid,
-        httponly=True, secure=False, samesite="Lax",
+        httponly=True,
+        secure=_is_secure_request(request),
+        samesite="Lax",
         max_age=auth.SESSION_TTL_S, path="/",
     )
     return resp

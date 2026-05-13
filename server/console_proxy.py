@@ -100,6 +100,12 @@ async def console_prepare_handler(request: web.Request) -> web.Response:
     node = body.get("node")
     vmid_raw = body.get("vmid")
     pw = body.get("password") or ""
+    # console_kind: "novnc" (default for QEMU) | "term" (LXC) | "serial".
+    # Caller asks for "serial" to get a QEMU serial-console termproxy
+    # session (requires the VM to have serial0 configured).
+    console_kind = (body.get("kind") or "auto").strip().lower()
+    if console_kind not in ("auto", "novnc", "term", "serial"):
+        return web.json_response({"error": "bad_kind"}, status=400)
     if not cluster_id or not node or vmid_raw is None:
         return web.json_response({"error": "missing_fields"}, status=400)
     try:
@@ -180,7 +186,16 @@ async def console_prepare_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "no_pve_node"}, status=502)
     pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
     api_path = "lxc" if vm_type == "lxc" else "qemu"
-    is_term = (vm_type == "lxc")
+    # Decide endpoint:
+    #   - LXC always termproxy
+    #   - QEMU + kind=serial → termproxy with serial=serial0
+    #   - QEMU + anything else → vncproxy (noVNC)
+    if vm_type == "lxc":
+        is_term = True
+    elif console_kind == "serial":
+        is_term = True
+    else:
+        is_term = False
     proxy_endpoint = "termproxy" if is_term else "vncproxy"
     proxy_url = (
         f"https://{pve_node_cfg.host}:{pve_node_cfg.port}"
@@ -194,8 +209,15 @@ async def console_prepare_handler(request: web.Request) -> web.Response:
             connector=aiohttp.TCPConnector(ssl=pve_ssl),
         ) as cs:
             # vncproxy needs websocket=1; termproxy doesn't take that param.
-            post_data = ({"websocket": 1, "generate-password": 0}
-                         if not is_term else {})
+            # For QEMU serial, pass `serial=serial0` so PVE attaches the
+            # termproxy to the guest's serial port instead of the spice
+            # mux (which would silently produce empty output).
+            if not is_term:
+                post_data = {"websocket": 1, "generate-password": 0}
+            elif vm_type == "qemu" and console_kind == "serial":
+                post_data = {"serial": "serial0"}
+            else:
+                post_data = {}
             async with throttle.acquire(pve_node_cfg.host), cs.post(
                 proxy_url, headers=headers, data=post_data,
             ) as r:

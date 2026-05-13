@@ -214,6 +214,30 @@ async def disable_totp_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+@role_required("admin")
+async def regen_totp_backup_codes_handler(request: web.Request) -> web.Response:
+    """POST /api/admin/users/{username}/totp/backup-codes — re-issue
+    TOTP backup codes for a user. Returns the new plaintext codes ONCE;
+    admin must hand them to the user securely."""
+    username = request.match_info["username"]
+    actor, ip, rid = _audit(request)
+    codes = totp_mod.regenerate_backup_codes(username)
+    if not codes:
+        await audit.write(
+            user=actor, source_ip=ip, action="admin.user.totp_regen_backup",
+            target=username, result="not_found_or_disabled", request_id=rid,
+        )
+        return web.json_response({"error": "not_found_or_totp_disabled"}, status=404)
+    await audit.write(
+        user=actor, source_ip=ip, action="admin.user.totp_regen_backup",
+        target=username, result="ok", request_id=rid,
+    )
+    return web.json_response({
+        "ok": True, "backup_codes": codes,
+        "warning": "Hand these to the user via a secure channel. They will not be shown again.",
+    })
+
+
 ROUTES = [
     ("GET",    "/api/admin/users",                      list_users_handler),
     ("POST",   "/api/admin/users",                      create_user_handler),
@@ -222,5 +246,6 @@ ROUTES = [
     ("POST",   "/api/admin/users/{username}/enabled",   set_enabled_handler),
     ("POST",   "/api/admin/users/{username}/roles",     grant_role_handler),
     ("DELETE", "/api/admin/users/{username}/roles",     revoke_role_handler),
-    ("POST",   "/api/admin/users/{username}/totp/disable", disable_totp_handler),
+    ("POST",   "/api/admin/users/{username}/totp/disable",       disable_totp_handler),
+    ("POST",   "/api/admin/users/{username}/totp/backup-codes",   regen_totp_backup_codes_handler),
 ]

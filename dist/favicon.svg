@@ -1,29 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <defs>
-    <linearGradient id="cyber" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#00f0ff"/>
-      <stop offset="100%" style="stop-color:#bf00ff"/>
-    </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-      <feMerge>
-        <feMergeNode in="coloredBlur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-  <g filter="url(#glow)">
-    <!-- Outer hexagon -->
-    <polygon points="50,5 90,27.5 90,72.5 50,95 10,72.5 10,27.5"
-             fill="none" stroke="url(#cyber)" stroke-width="3"/>
-    <!-- Inner circle -->
-    <circle cx="50" cy="50" r="25" fill="none" stroke="#00f0ff" stroke-width="2"/>
-    <!-- Center dot -->
-    <circle cx="50" cy="50" r="8" fill="#00f0ff"/>
-    <!-- Decorative lines -->
-    <line x1="50" y1="25" x2="50" y2="15" stroke="#00f0ff" stroke-width="2"/>
-    <line x1="50" y1="75" x2="50" y2="85" stroke="#00f0ff" stroke-width="2"/>
-    <line x1="25" y1="50" x2="15" y2="50" stroke="#00f0ff" stroke-width="2"/>
-    <line x1="75" y1="50" x2="85" y2="50" stroke="#00f0ff" stroke-width="2"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <polygon points="32,3 57,17.5 57,46.5 32,61 7,46.5 7,17.5"
+           stroke="#00f0ff" stroke-width="1.5" opacity="0.45"/>
+  <polygon points="32,10 51,21 51,43 32,54 13,43 13,21"
+           stroke="#00f0ff" stroke-width="2" opacity="0.8"/>
+  <polygon points="32,17 44,24 44,40 32,47 20,40 20,24"
+           fill="rgba(0,240,255,0.32)" stroke="#00f0ff" stroke-width="2"/>
+  <line x1="32" y1="21" x2="32" y2="43" stroke="#00f0ff" stroke-width="1.5"/>
+  <line x1="22" y1="32" x2="42" y2="32" stroke="#00f0ff" stroke-width="1.5"/>
+  <circle cx="32" cy="32" r="3.5" fill="#00f0ff"/>
+  <circle cx="32" cy="32" r="1.6" fill="#fff"/>
 </svg>

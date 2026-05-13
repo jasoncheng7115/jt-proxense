@@ -82,6 +82,48 @@ async def create_job_handler(request: web.Request) -> web.Response:
 
 
 @role_required("admin")
+async def update_job_handler(request: web.Request) -> web.Response:
+    cluster_id = request.match_info["cluster_id"]
+    job_id = request.match_info["job_id"]
+    cluster = cluster_manager.get_cluster(cluster_id)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    # Allow-list editable fields: schedule / storage / vmid / all_vms /
+    # node / mode / mailto / mailnotification / enabled / comment.
+    allowed = {"schedule", "storage", "vmid", "all", "node", "mode",
+               "mailto", "mailnotification", "enabled", "comment",
+               "prune-backups", "compress", "starttime", "dow"}
+    fields: dict = {}
+    for k, v in body.items():
+        if k in allowed and v is not None:
+            fields[k] = v
+    if not fields:
+        return web.json_response({"error": "no_changes"}, status=400)
+    user, ip, rid = _audit_actor(request)
+    try:
+        await cluster.client.update_backup_job(job_id, **fields)
+    except Exception as e:
+        await audit.write(
+            user=user, source_ip=ip, action="backup.job.update",
+            target=f"{cluster_id}/{job_id}", cluster_id=cluster_id,
+            result=audit.result_error(e), request_id=rid,
+            params={"keys": sorted(fields.keys())},
+        )
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(
+        user=user, source_ip=ip, action="backup.job.update",
+        target=f"{cluster_id}/{job_id}", cluster_id=cluster_id,
+        result="ok", request_id=rid,
+        params={"keys": sorted(fields.keys())},
+    )
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
 async def delete_job_handler(request: web.Request) -> web.Response:
     cluster_id = request.match_info["cluster_id"]
     job_id = request.match_info["job_id"]
@@ -256,6 +298,7 @@ async def restore_handler(request: web.Request) -> web.Response:
 ROUTES = [
     ("GET",    "/api/clusters/{cluster_id}/backup-jobs",                 list_jobs_handler),
     ("POST",   "/api/clusters/{cluster_id}/backup-jobs",                 create_job_handler),
+    ("PUT",    "/api/clusters/{cluster_id}/backup-jobs/{job_id}",        update_job_handler),
     ("DELETE", "/api/clusters/{cluster_id}/backup-jobs/{job_id}",        delete_job_handler),
     ("POST",   "/api/clusters/{cluster_id}/nodes/{node}/backup",         trigger_handler),
     ("GET",    "/api/clusters/{cluster_id}/nodes/{node}/storage/{storage}/backups", list_storage_handler),

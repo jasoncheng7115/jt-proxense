@@ -80,6 +80,20 @@ async def channels_delete_handler(request):
     return web.json_response({"ok": True})
 
 
+@role_required("admin")
+async def channel_test_handler(request):
+    """POST /api/notifications/channels/{name}/test — synthesise an audit-
+    row-shaped event and route it through the named channel only. Returns
+    the channel-side result so the operator can see exactly what failed."""
+    name = request.match_info["name"]
+    ok, detail = await notifications.send_test(name)
+    await _audit(request, "notification.channel.test",
+                 target=name, result="ok" if ok else f"error:{detail}")
+    if not ok:
+        return web.json_response({"ok": False, "detail": detail}, status=400)
+    return web.json_response({"ok": True})
+
+
 # ---------------------------------------------------------------- rules
 
 @role_required("admin")
@@ -145,6 +159,7 @@ ROUTES = [
     ("POST",   "/api/notifications/channels",        channels_create_handler),
     ("PUT",    "/api/notifications/channels/{name}", channels_update_handler),
     ("DELETE", "/api/notifications/channels/{name}", channels_delete_handler),
+    ("POST",   "/api/notifications/channels/{name}/test", channel_test_handler),
     ("GET",    "/api/notifications/rules",           rules_list_handler),
     ("POST",   "/api/notifications/rules",           rules_create_handler),
     ("PUT",    "/api/notifications/rules/{name}",    rules_update_handler),

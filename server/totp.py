@@ -93,6 +93,27 @@ def confirm_enrollment(username: str, code: str) -> tuple[bool, list[str]]:
         return True, codes
 
 
+def regenerate_backup_codes(username: str) -> list[str]:
+    """Wipe + re-issue backup codes for a TOTP-enabled user. Returns the
+    new plaintext codes (caller shows once, never persists). Empty list
+    if user not found or TOTP not enabled."""
+    with db.connect_sync() as c:
+        row = c.execute(
+            "SELECT id FROM users WHERE username=? COLLATE NOCASE AND totp_enabled=1",
+            (username,),
+        ).fetchone()
+        if not row:
+            return []
+        c.execute("DELETE FROM totp_backup_codes WHERE user_id=?", (row["id"],))
+        codes = [_random_backup_code() for _ in range(BACKUP_CODE_COUNT)]
+        for code_plain in codes:
+            c.execute(
+                "INSERT INTO totp_backup_codes (user_id, code_hash, created_at) VALUES (?,?,?)",
+                (row["id"], hash_password(code_plain), db.now_ms()),
+            )
+        return codes
+
+
 def disable(username: str) -> bool:
     """Operator-initiated disable (used by /api/auth/totp/disable and CLI).
 

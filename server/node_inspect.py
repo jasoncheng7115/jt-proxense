@@ -15,6 +15,7 @@ Routes:
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from aiohttp import web
@@ -77,6 +78,82 @@ async def subscription_handler(request: web.Request) -> web.Response:
     node = request.match_info["node"]
     data = await _cached_get(cid, node, "sub", f"/nodes/{node}/subscription")
     return web.json_response({"subscription": data if isinstance(data, dict) else {}})
+
+
+_KEY_RE = re.compile(r"^[A-Z0-9\-]{8,64}$")
+
+
+@role_required("admin")
+async def subscription_set_handler(request: web.Request) -> web.Response:
+    """PUT /api/clusters/{cid}/nodes/{node}/subscription
+    body: {key: "PVE-...." } — register a subscription key.
+    Empty body re-checks against upstream."""
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    key = (body.get("key") or "").strip()
+    user = (request.get("user") or {}).get("username", "anonymous")
+    src_ip = request.get("client_ip", "unknown")
+    rid = request.get("request_id", "")
+    try:
+        if key:
+            if not _KEY_RE.match(key):
+                return web.json_response({"error": "bad_key"}, status=400)
+            await cluster.client.set_subscription(node, key)
+            from . import audit
+            await audit.write(user=user, source_ip=src_ip,
+                              action="subscription.set", target=f"{cid}/{node}",
+                              cluster_id=cid, result="ok", request_id=rid,
+                              params={"key": f"{key[:6]}…"})
+        else:
+            await cluster.client.recheck_subscription(node, force=bool(body.get("force", False)))
+            from . import audit
+            await audit.write(user=user, source_ip=src_ip,
+                              action="subscription.recheck", target=f"{cid}/{node}",
+                              cluster_id=cid, result="ok", request_id=rid)
+    except Exception as e:
+        from . import audit
+        await audit.write(user=user, source_ip=src_ip,
+                          action="subscription.set", target=f"{cid}/{node}",
+                          cluster_id=cid, result=audit.result_error(e),
+                          request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    # Invalidate cache so the next GET hits PVE.
+    _cache.pop((cid, node, "sub"), None)
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def subscription_delete_handler(request: web.Request) -> web.Response:
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    user = (request.get("user") or {}).get("username", "anonymous")
+    src_ip = request.get("client_ip", "unknown")
+    rid = request.get("request_id", "")
+    try:
+        await cluster.client.delete_subscription(node)
+    except Exception as e:
+        from . import audit
+        await audit.write(user=user, source_ip=src_ip,
+                          action="subscription.delete", target=f"{cid}/{node}",
+                          cluster_id=cid, result=audit.result_error(e),
+                          request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    from . import audit
+    await audit.write(user=user, source_ip=src_ip,
+                      action="subscription.delete", target=f"{cid}/{node}",
+                      cluster_id=cid, result="ok", request_id=rid)
+    _cache.pop((cid, node, "sub"), None)
+    return web.json_response({"ok": True})
 
 
 _SERVICE_ACTIONS = {"start", "stop", "restart", "reload"}
@@ -178,7 +255,9 @@ async def syslog_handler(request: web.Request) -> web.Response:
 ROUTES = [
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/certificates",  certificates_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/updates",       updates_handler),
-    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/subscription",  subscription_handler),
+    ("GET",    r"/api/clusters/{cluster_id}/nodes/{node}/subscription",  subscription_handler),
+    ("PUT",    r"/api/clusters/{cluster_id}/nodes/{node}/subscription",  subscription_set_handler),
+    ("DELETE", r"/api/clusters/{cluster_id}/nodes/{node}/subscription",  subscription_delete_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/services",      services_handler),
     ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/syslog",        syslog_handler),
     ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/services/{service}/start",   service_start_handler),

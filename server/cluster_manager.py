@@ -8,10 +8,13 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable, Awaitable, TYPE_CHECKING
 
 from .config import ClusterConfig, get_config
 from .pve_client import PVEClient
+
+if TYPE_CHECKING:
+    from .clusters.base import ClusterAdapter
 from .models import (
     NodeMetrics,
     VMMetrics,
@@ -1307,11 +1310,16 @@ class Cluster:
 
 class ClusterManager:
     """
-    Manages multiple PVE clusters
+    Manages multiple clusters — PVE (legacy `Cluster` here) plus any
+    non-PVE adapters under `server/clusters/` (v0.4 ESXi preview).
     """
 
     def __init__(self):
         self.clusters: dict[str, Cluster] = {}
+        # Non-PVE adapters keyed by cluster id. v0.4 ships ESXi only.
+        # These do NOT expose `.client` and must NOT be returned from
+        # `get_cluster()` — PVE-specific handlers would AttributeError.
+        self.adapters: dict[str, "ClusterAdapter"] = {}
         self._callbacks: list[Callable[[dict], Awaitable[None]]] = []
 
     def add_callback(self, callback: Callable[[dict], Awaitable[None]]):
@@ -1327,29 +1335,49 @@ class ClusterManager:
             except Exception as e:
                 logger.error(f"Manager callback error: {e}")
 
+    async def _on_adapter_update(self, cluster_id: str, _snapshot: dict):
+        """Adapter callback wrapper — same fan-out as PVE clusters."""
+        data = self.get_all_data()
+        for callback in self._callbacks:
+            try:
+                await callback(data)
+            except Exception as e:
+                logger.error(f"Manager callback error (adapter): {e}")
+
     async def load_clusters(self):
         """Load clusters from configuration"""
         config = get_config()
+        from .clusters import make_adapter
 
         for cluster_config in config.clusters:
             if not cluster_config.enabled:
+                continue
+
+            adapter = make_adapter(cluster_config)
+            if adapter is not None:
+                # ESXi (or future non-PVE) cluster.
+                adapter.add_callback(self._on_adapter_update)
+                self.adapters[adapter.id] = adapter
                 continue
 
             cluster = Cluster(cluster_config)
             cluster.add_callback(self._on_cluster_update)
             self.clusters[cluster.id] = cluster
 
-        logger.info(f"Loaded {len(self.clusters)} clusters")
+        logger.info("Loaded %d PVE clusters + %d non-PVE adapters",
+                    len(self.clusters), len(self.adapters))
 
     async def start_all(self):
         """Start polling all clusters"""
         tasks = [cluster.start() for cluster in self.clusters.values()]
+        tasks += [a.start() for a in self.adapters.values()]
         await asyncio.gather(*tasks, return_exceptions=True)
         logger.info("All clusters started")
 
     async def stop_all(self):
         """Stop all clusters"""
         tasks = [cluster.stop() for cluster in self.clusters.values()]
+        tasks += [a.stop() for a in self.adapters.values()]
         await asyncio.gather(*tasks, return_exceptions=True)
         logger.info("All clusters stopped")
 
@@ -1358,22 +1386,26 @@ class ClusterManager:
         return self.clusters.get(cluster_id)
 
     def get_all_data(self) -> dict:
-        """Get data from all clusters"""
-        return {
-            "clusters": {
-                cluster_id: cluster.get_data()
-                for cluster_id, cluster in self.clusters.items()
-            },
-            "timestamp": time.time(),
+        """Get data from all clusters (PVE + non-PVE adapters)."""
+        merged: dict[str, dict] = {
+            cluster_id: cluster.get_data()
+            for cluster_id, cluster in self.clusters.items()
         }
+        for cid, adapter in self.adapters.items():
+            try:
+                merged[cid] = adapter.snapshot()
+            except Exception as e:
+                logger.warning("adapter snapshot %s failed: %s", cid, e)
+        return {"clusters": merged, "timestamp": time.time()}
 
     async def sync_clusters(self):
         """Sync running clusters with current configuration (start/stop as needed)"""
         config = get_config()
+        from .clusters import make_adapter
 
         # Get sets of cluster IDs
         config_enabled_ids = {c.id for c in config.clusters if c.enabled}
-        running_ids = set(self.clusters.keys())
+        running_ids = set(self.clusters.keys()) | set(self.adapters.keys())
 
         # Stop clusters that are now disabled
         to_stop = running_ids - config_enabled_ids
@@ -1382,11 +1414,22 @@ class ClusterManager:
             if cluster:
                 await cluster.stop()
                 logger.info(f"Stopped disabled cluster: {cluster_id}")
+            adapter = self.adapters.pop(cluster_id, None)
+            if adapter:
+                await adapter.stop()
+                logger.info(f"Stopped disabled adapter: {cluster_id}")
 
         # Start clusters that are now enabled but not running
         to_start = config_enabled_ids - running_ids
         for cluster_config in config.clusters:
             if cluster_config.id in to_start:
+                adapter = make_adapter(cluster_config)
+                if adapter is not None:
+                    adapter.add_callback(self._on_adapter_update)
+                    self.adapters[adapter.id] = adapter
+                    await adapter.start()
+                    logger.info(f"Started enabled adapter: {cluster_config.id}")
+                    continue
                 cluster = Cluster(cluster_config)
                 cluster.add_callback(self._on_cluster_update)
                 self.clusters[cluster.id] = cluster
@@ -1411,6 +1454,10 @@ class ClusterManager:
             await cluster.stop()
             logger.info(f"Stopped cluster for reload: {cluster_id}")
         self.clusters.clear()
+        for adapter_id, adapter in list(self.adapters.items()):
+            await adapter.stop()
+            logger.info(f"Stopped adapter for reload: {adapter_id}")
+        self.adapters.clear()
 
         # Reload config from file
         from .config import load_config

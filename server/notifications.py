@@ -226,6 +226,38 @@ def _matches_rule(row: dict, rule: dict) -> bool:
 
 # ---------------------------------------------------------------- dispatch
 
+async def send_test(channel_name: str) -> tuple[bool, str]:
+    """Synchronously send a test event to one channel and report success.
+    Used by the "Send test" button in the notifications UI."""
+    channels = [c for c in list_channels() if c.get("name") == channel_name]
+    if not channels:
+        return False, "channel_not_found"
+    ch = channels[0]
+    if not ch.get("enabled"):
+        return False, "channel_disabled"
+    fake_row = {
+        "ts_ms": int(__import__("time").time() * 1000),
+        "user": "jt-proxense",
+        "source_ip": "127.0.0.1",
+        "cluster_id": None,
+        "action": "notification.test",
+        "target": channel_name,
+        "params_hash": None,
+        "result": "ok",
+        "request_id": "test",
+    }
+    fake_rule = {
+        "id": 0, "name": "(test)", "action_pattern": "%",
+        "min_severity": "info", "cluster_filter": None,
+        "channel_ids": [ch["id"]], "enabled": True,
+    }
+    try:
+        await _send_channel(ch, fake_rule, fake_row)
+        return True, "ok"
+    except Exception as e:
+        return False, str(e)
+
+
 def dispatch(row: dict) -> None:
     """Schedule notification fan-out for one audit row.
 

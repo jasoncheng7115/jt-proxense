@@ -9,11 +9,26 @@ All endpoints share the same RBAC + audit pattern as v0.3 vm_control:
 """
 from __future__ import annotations
 
+import re
+
 from aiohttp import web
 
 from . import audit
 from .cluster_manager import cluster_manager
 from .middleware import role_required
+
+
+# OWASP A03 — narrow regex allow-lists for fields that flow into PVE.
+# `source` / `dest` accept IP, CIDR, IP-range, ipset name (+leading "+"),
+# alias name (no special prefix), or empty.
+_FW_ADDR_RE = re.compile(r"^[+A-Za-z0-9._:/\-]{0,128}$")
+_FW_PORT_RE = re.compile(r"^[0-9,:\-]{0,64}$")        # 80 / 80,443 / 8000-8100
+_FW_PROTO_RE = re.compile(r"^[a-zA-Z]{0,16}$")        # tcp / udp / icmp / etc
+_FW_TYPE_RE = re.compile(r"^(in|out|forward|group)$")
+_FW_IFACE_RE = re.compile(r"^[A-Za-z0-9._\-]{0,32}$")
+_FW_COMMENT_RE = re.compile(r"^[\x20-\x7e]{0,256}$")  # printable ASCII only
+_HA_SID_RE = re.compile(r"^(vm|ct):[0-9]{2,9}$")
+_HA_GROUP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]{0,63}$")
 
 
 def _audit_actor(request: web.Request) -> tuple[str, str, str]:
@@ -184,11 +199,17 @@ async def ha_group_create_handler(request: web.Request) -> web.Response:
         body = await request.json()
     except Exception:
         return web.json_response({"error": "bad_json"}, status=400)
-    group = body.get("group")
-    nodes = body.get("nodes")
+    group = (body.get("group") or "").strip()
+    nodes = (body.get("nodes") or "").strip()
     if not group or not nodes:
         return web.json_response({"error": "missing_fields",
                                   "required": ["group", "nodes"]}, status=400)
+    if not _HA_GROUP_RE.match(group):
+        return web.json_response({"error": "bad_group_name"}, status=400)
+    # nodes is a comma-separated list of node names with optional priorities,
+    # e.g. "pve01:2,pve02:1". Conservative regex.
+    if not re.match(r"^[A-Za-z0-9._\-:,]{1,512}$", nodes):
+        return web.json_response({"error": "bad_nodes"}, status=400)
     user, ip, rid = _audit_actor(request)
     try:
         await cluster.client.create_ha_group(
@@ -215,6 +236,8 @@ async def ha_group_delete_handler(request: web.Request) -> web.Response:
     cluster, err = _get_cluster_or_404(request)
     if err: return err
     group = request.match_info["group"]
+    if not _HA_GROUP_RE.match(group):
+        return web.json_response({"error": "bad_group"}, status=400)
     user, ip, rid = _audit_actor(request)
     try:
         await cluster.client.delete_ha_group(group)
@@ -250,15 +273,24 @@ async def ha_resource_add_handler(request: web.Request) -> web.Response:
         body = await request.json()
     except Exception:
         return web.json_response({"error": "bad_json"}, status=400)
-    sid = body.get("sid")
-    if not sid:
-        return web.json_response({"error": "missing_sid"}, status=400)
+    sid = (body.get("sid") or "").strip()
+    if not sid or not _HA_SID_RE.match(sid):
+        return web.json_response({"error": "bad_sid",
+                                  "expected": "vm:<id> | ct:<id>"}, status=400)
+    group = body.get("group")
+    if group and not _HA_GROUP_RE.match(str(group).strip()):
+        return web.json_response({"error": "bad_group"}, status=400)
+    state = (body.get("state") or "started").strip()
+    if state not in ("started", "stopped", "enabled", "disabled", "ignored"):
+        return web.json_response({"error": "bad_state"}, status=400)
+    comment = (body.get("comment") or "").strip()
+    if not _FW_COMMENT_RE.match(comment):
+        return web.json_response({"error": "bad_comment"}, status=400)
     user, ip, rid = _audit_actor(request)
     try:
         await cluster.client.add_ha_resource(
-            sid=sid, group=body.get("group"),
-            state=body.get("state", "started"),
-            comment=body.get("comment", ""),
+            sid=sid, group=(group or None),
+            state=state, comment=comment,
         )
     except Exception as e:
         await audit.write(user=user, source_ip=ip, action="ha.resource.add",
@@ -278,6 +310,8 @@ async def ha_resource_delete_handler(request: web.Request) -> web.Response:
     cluster, err = _get_cluster_or_404(request)
     if err: return err
     sid = request.match_info["sid"]
+    if not _HA_SID_RE.match(sid):
+        return web.json_response({"error": "bad_sid"}, status=400)
     user, ip, rid = _audit_actor(request)
     try:
         await cluster.client.delete_ha_resource(sid)
@@ -320,14 +354,26 @@ async def fw_cluster_add_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "bad_action",
                                   "valid": ["ACCEPT", "REJECT", "DROP"]},
                                  status=400)
+    rtype = (body.get("type") or "in").strip()
+    if not _FW_TYPE_RE.match(rtype):
+        return web.json_response({"error": "bad_type"}, status=400)
+    source = (body.get("source") or "").strip()
+    dest   = (body.get("dest")   or "").strip()
+    proto  = (body.get("proto")  or "").strip()
+    dport  = (body.get("dport")  or "").strip()
+    comment= (body.get("comment") or "").strip()
+    if not _FW_ADDR_RE.match(source):  return web.json_response({"error": "bad_source"}, status=400)
+    if not _FW_ADDR_RE.match(dest):    return web.json_response({"error": "bad_dest"}, status=400)
+    if not _FW_PROTO_RE.match(proto):  return web.json_response({"error": "bad_proto"}, status=400)
+    if not _FW_PORT_RE.match(dport):   return web.json_response({"error": "bad_dport"}, status=400)
+    if not _FW_COMMENT_RE.match(comment): return web.json_response({"error": "bad_comment"}, status=400)
     user, ip, rid = _audit_actor(request)
     try:
         await cluster.client.add_cluster_firewall_rule(
-            action=action, type=body.get("type", "in"),
+            action=action, type=rtype,
             enable=bool(body.get("enable", True)),
-            source=body.get("source", ""), dest=body.get("dest", ""),
-            proto=body.get("proto", ""), dport=body.get("dport", ""),
-            comment=body.get("comment", ""),
+            source=source, dest=dest, proto=proto, dport=dport,
+            comment=comment,
         )
     except Exception as e:
         await audit.write(user=user, source_ip=ip, action="firewall.cluster.add",
@@ -374,6 +420,72 @@ def _resolve_guest_type(cluster, vmid: int) -> tuple[str | None, str | None]:
 
 
 @role_required("operator")
+async def fw_vm_options_get_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    vmid = int(request.match_info["vmid"])
+    node, vm_type = _resolve_guest_type(cluster, vmid)
+    if not node:
+        return web.json_response({"error": "vm_not_found"}, status=404)
+    try:
+        opts = await cluster.client.get_vm_fw_options(node, vmid, vm_type or "qemu")
+    except Exception as e:
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    return web.json_response({"options": opts, "type": vm_type})
+
+
+@role_required("admin")
+async def fw_vm_options_set_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    vmid = int(request.match_info["vmid"])
+    node, vm_type = _resolve_guest_type(cluster, vmid)
+    if not node:
+        return web.json_response({"error": "vm_not_found"}, status=404)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    allowed = {"enable", "policy_in", "policy_out",
+               "log_level_in", "log_level_out",
+               "dhcp", "ipfilter", "macfilter", "ndp", "radv"}
+    fields: dict = {}
+    for k, v in body.items():
+        if k not in allowed:
+            continue
+        if k == "enable" or k.startswith("dhcp") or k in ("ipfilter", "macfilter", "ndp", "radv"):
+            fields[k] = 1 if bool(v) else 0
+        elif k.startswith("policy_"):
+            if v not in ("ACCEPT", "REJECT", "DROP"):
+                return web.json_response({"error": f"bad_{k}"}, status=400)
+            fields[k] = v
+        elif k.startswith("log_level_"):
+            if v not in ("nolog", "emerg", "alert", "crit", "err",
+                         "warning", "notice", "info", "debug"):
+                return web.json_response({"error": f"bad_{k}"}, status=400)
+            fields[k] = v
+    if not fields:
+        return web.json_response({"error": "no_changes"}, status=400)
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.update_vm_fw_options(node, vmid, vm_type or "qemu", **fields)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip,
+                          action=f"firewall.{vm_type}.options",
+                          target=f"{cid}/{node}/{vm_type}/{vmid}",
+                          cluster_id=cid, result=audit.result_error(e),
+                          request_id=rid, params={"keys": sorted(fields.keys())})
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip,
+                      action=f"firewall.{vm_type}.options",
+                      target=f"{cid}/{node}/{vm_type}/{vmid}",
+                      cluster_id=cid, result="ok",
+                      request_id=rid, params={"keys": sorted(fields.keys())})
+    return web.json_response({"ok": True})
+
+
+@role_required("operator")
 async def fw_vm_list_handler(request: web.Request) -> web.Response:
     cluster, err = _get_cluster_or_404(request)
     if err: return err
@@ -402,6 +514,18 @@ async def fw_vm_add_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "bad_json"}, status=400)
     if body.get("action") not in ("ACCEPT", "REJECT", "DROP"):
         return web.json_response({"error": "bad_action"}, status=400)
+    rtype = (body.get("type") or "in").strip()
+    if not _FW_TYPE_RE.match(rtype):
+        return web.json_response({"error": "bad_type"}, status=400)
+    for fld, pat in (
+        ("source", _FW_ADDR_RE), ("dest", _FW_ADDR_RE),
+        ("proto", _FW_PROTO_RE), ("dport", _FW_PORT_RE),
+        ("sport", _FW_PORT_RE),  ("iface", _FW_IFACE_RE),
+        ("comment", _FW_COMMENT_RE),
+    ):
+        v = body.get(fld) or ""
+        if not pat.match(str(v)):
+            return web.json_response({"error": f"bad_{fld}"}, status=400)
     user, ip, rid = _audit_actor(request)
     try:
         await cluster.client.add_vm_firewall_rule(node, vmid, vm_type, **body)
@@ -483,6 +607,211 @@ async def sdn_subnets_list_handler(request: web.Request) -> web.Response:
     return web.json_response({"subnets": rows})
 
 
+_SDN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]{0,15}$")
+_SDN_BRIDGE_RE = re.compile(r"^[A-Za-z0-9._\-]{1,32}$")
+_SDN_CIDR_RE = re.compile(r"^[0-9.]{7,18}/[0-9]{1,2}$")
+_SDN_IP_RE = re.compile(r"^[0-9.]{7,18}$")
+_SDN_VALID_ZTYPES = ("simple", "vlan", "qinq", "vxlan", "evpn")
+
+
+@role_required("admin")
+async def sdn_zone_create_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    zone = (body.get("zone") or "").strip()
+    ztype = (body.get("type") or "").strip().lower()
+    if not _SDN_NAME_RE.match(zone):
+        return web.json_response({"error": "bad_zone"}, status=400)
+    if ztype not in _SDN_VALID_ZTYPES:
+        return web.json_response({"error": "bad_type",
+                                  "valid": list(_SDN_VALID_ZTYPES)}, status=400)
+    bridge = (body.get("bridge") or "").strip()
+    if bridge and not _SDN_BRIDGE_RE.match(bridge):
+        return web.json_response({"error": "bad_bridge"}, status=400)
+    extra: dict = {}
+    if bridge: extra["bridge"] = bridge
+    # vlan + qinq need a `tag`
+    if body.get("tag") is not None and body.get("tag") != "":
+        try:
+            tag = int(body["tag"])
+            if tag < 1 or tag > 4094:
+                raise ValueError
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad_tag"}, status=400)
+        extra["tag"] = tag
+    if body.get("mtu"):
+        try:
+            mtu = int(body["mtu"])
+            if mtu < 576 or mtu > 65535:
+                raise ValueError
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad_mtu"}, status=400)
+        extra["mtu"] = mtu
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.create_sdn_zone(zone, ztype, **extra)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="sdn.zone.create",
+                          target=f"{cid}/{zone}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid,
+                          params={"type": ztype, **extra})
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="sdn.zone.create",
+                      target=f"{cid}/{zone}", cluster_id=cid,
+                      result="ok", request_id=rid,
+                      params={"type": ztype, **extra})
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def sdn_zone_delete_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    zone = request.match_info["zone"]
+    if not _SDN_NAME_RE.match(zone):
+        return web.json_response({"error": "bad_zone"}, status=400)
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.delete_sdn_zone(zone)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="sdn.zone.delete",
+                          target=f"{cid}/{zone}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="sdn.zone.delete",
+                      target=f"{cid}/{zone}", cluster_id=cid,
+                      result="ok", request_id=rid)
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def sdn_vnet_create_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    vnet = (body.get("vnet") or "").strip()
+    zone = (body.get("zone") or "").strip()
+    if not _SDN_NAME_RE.match(vnet) or not _SDN_NAME_RE.match(zone):
+        return web.json_response({"error": "bad_input"}, status=400)
+    tag = body.get("tag")
+    if tag is not None and tag != "":
+        try:
+            tag = int(tag)
+            if tag < 1 or tag > 4094:
+                raise ValueError
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad_tag"}, status=400)
+    else:
+        tag = None
+    alias = (body.get("alias") or "").strip() or None
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.create_sdn_vnet(vnet, zone, tag=tag, alias=alias)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="sdn.vnet.create",
+                          target=f"{cid}/{vnet}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid,
+                          params={"zone": zone, "tag": tag})
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="sdn.vnet.create",
+                      target=f"{cid}/{vnet}", cluster_id=cid,
+                      result="ok", request_id=rid,
+                      params={"zone": zone, "tag": tag})
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def sdn_vnet_delete_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    vnet = request.match_info["vnet"]
+    if not _SDN_NAME_RE.match(vnet):
+        return web.json_response({"error": "bad_vnet"}, status=400)
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.delete_sdn_vnet(vnet)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="sdn.vnet.delete",
+                          target=f"{cid}/{vnet}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="sdn.vnet.delete",
+                      target=f"{cid}/{vnet}", cluster_id=cid,
+                      result="ok", request_id=rid)
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def sdn_subnet_create_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    vnet = request.match_info["vnet"]
+    if not _SDN_NAME_RE.match(vnet):
+        return web.json_response({"error": "bad_vnet"}, status=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    subnet = (body.get("subnet") or "").strip()
+    if not _SDN_CIDR_RE.match(subnet):
+        return web.json_response({"error": "bad_subnet"}, status=400)
+    gateway = (body.get("gateway") or "").strip()
+    if gateway and not _SDN_IP_RE.match(gateway):
+        return web.json_response({"error": "bad_gateway"}, status=400)
+    snat = bool(body.get("snat", False))
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.create_sdn_subnet(vnet, subnet,
+                                                gateway=gateway or None,
+                                                snat=snat)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="sdn.subnet.create",
+                          target=f"{cid}/{vnet}/{subnet}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid,
+                          params={"gateway": gateway, "snat": snat})
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="sdn.subnet.create",
+                      target=f"{cid}/{vnet}/{subnet}", cluster_id=cid,
+                      result="ok", request_id=rid,
+                      params={"gateway": gateway, "snat": snat})
+    return web.json_response({"ok": True})
+
+
+@role_required("admin")
+async def sdn_subnet_delete_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    vnet = request.match_info["vnet"]
+    subnet = request.match_info["subnet"]
+    if not _SDN_NAME_RE.match(vnet) or not _SDN_CIDR_RE.match(subnet):
+        return web.json_response({"error": "bad_input"}, status=400)
+    user, ip, rid = _audit_actor(request)
+    cid = request.match_info["cluster_id"]
+    try:
+        await cluster.client.delete_sdn_subnet(vnet, subnet)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="sdn.subnet.delete",
+                          target=f"{cid}/{vnet}/{subnet}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="sdn.subnet.delete",
+                      target=f"{cid}/{vnet}/{subnet}", cluster_id=cid,
+                      result="ok", request_id=rid)
+    return web.json_response({"ok": True})
+
+
 @role_required("admin")
 async def sdn_reload_handler(request: web.Request) -> web.Response:
     cluster, err = _get_cluster_or_404(request)
@@ -550,6 +879,75 @@ async def repl_create_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+@role_required("operator")
+async def repl_run_now_handler(request: web.Request) -> web.Response:
+    """POST /api/clusters/{cid}/replication/{job_id}/run-now — schedule
+    immediate execution. PVE expects the call to hit the *node* the job
+    is configured to run on; we look up the node from the job_id format
+    `<vmid>-<index>` plus the cluster cache."""
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    job_id = request.match_info["job_id"]
+    if not re.match(r"^[0-9]+-[0-9]+$", job_id):
+        return web.json_response({"error": "bad_job_id"}, status=400)
+    # Look up the source node from the job's vmid.
+    try:
+        vmid = int(job_id.split("-", 1)[0])
+    except ValueError:
+        return web.json_response({"error": "bad_job_id"}, status=400)
+    src_node = None
+    for vm in cluster.cache.vms.values():
+        if int(vm.vmid) == vmid:
+            src_node = getattr(vm, "node", "")
+            break
+    if not src_node:
+        return web.json_response({"error": "vm_not_found_for_job"}, status=404)
+    user, ip, rid = _audit_actor(request)
+    try:
+        upid = await cluster.client.replication_run_now(src_node, job_id)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, action="replication.run_now",
+                          target=f"{request.match_info['cluster_id']}/{job_id}",
+                          cluster_id=request.match_info["cluster_id"],
+                          result=audit.result_error(e), request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip, action="replication.run_now",
+                      target=f"{request.match_info['cluster_id']}/{job_id}",
+                      cluster_id=request.match_info["cluster_id"],
+                      result="ok", request_id=rid)
+    return web.json_response({"ok": True, "upid": upid})
+
+
+@role_required("admin")
+async def repl_disable_toggle_handler(request: web.Request) -> web.Response:
+    cluster, err = _get_cluster_or_404(request)
+    if err: return err
+    job_id = request.match_info["job_id"]
+    if not re.match(r"^[0-9]+-[0-9]+$", job_id):
+        return web.json_response({"error": "bad_job_id"}, status=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
+    disabled = bool(body.get("disabled", True))
+    user, ip, rid = _audit_actor(request)
+    try:
+        await cluster.client.replication_set_disable(job_id, disabled)
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip,
+                          action=f"replication.{'disable' if disabled else 'enable'}",
+                          target=f"{request.match_info['cluster_id']}/{job_id}",
+                          cluster_id=request.match_info["cluster_id"],
+                          result=audit.result_error(e), request_id=rid)
+        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
+    await audit.write(user=user, source_ip=ip,
+                      action=f"replication.{'disable' if disabled else 'enable'}",
+                      target=f"{request.match_info['cluster_id']}/{job_id}",
+                      cluster_id=request.match_info["cluster_id"],
+                      result="ok", request_id=rid)
+    return web.json_response({"ok": True})
+
+
 @role_required("admin")
 async def repl_delete_handler(request: web.Request) -> web.Response:
     cluster, err = _get_cluster_or_404(request)
@@ -597,13 +995,23 @@ ROUTES = [
     ("GET",    "/api/clusters/{cluster_id}/vms/{vmid}/firewall/rules", fw_vm_list_handler),
     ("POST",   "/api/clusters/{cluster_id}/vms/{vmid}/firewall/rules", fw_vm_add_handler),
     ("DELETE", "/api/clusters/{cluster_id}/vms/{vmid}/firewall/rules/{pos}", fw_vm_delete_handler),
+    ("GET",    "/api/clusters/{cluster_id}/vms/{vmid}/firewall/options", fw_vm_options_get_handler),
+    ("PUT",    "/api/clusters/{cluster_id}/vms/{vmid}/firewall/options", fw_vm_options_set_handler),
     # SDN
     ("GET",    "/api/clusters/{cluster_id}/sdn/zones",                 sdn_zones_list_handler),
+    ("POST",   "/api/clusters/{cluster_id}/sdn/zones",                 sdn_zone_create_handler),
+    ("DELETE", "/api/clusters/{cluster_id}/sdn/zones/{zone}",          sdn_zone_delete_handler),
     ("GET",    "/api/clusters/{cluster_id}/sdn/vnets",                 sdn_vnets_list_handler),
+    ("POST",   "/api/clusters/{cluster_id}/sdn/vnets",                 sdn_vnet_create_handler),
+    ("DELETE", "/api/clusters/{cluster_id}/sdn/vnets/{vnet}",          sdn_vnet_delete_handler),
     ("GET",    "/api/clusters/{cluster_id}/sdn/vnets/{vnet}/subnets",  sdn_subnets_list_handler),
+    ("POST",   "/api/clusters/{cluster_id}/sdn/vnets/{vnet}/subnets",  sdn_subnet_create_handler),
+    ("DELETE", "/api/clusters/{cluster_id}/sdn/vnets/{vnet}/subnets/{subnet:.+}", sdn_subnet_delete_handler),
     ("POST",   "/api/clusters/{cluster_id}/sdn/reload",                sdn_reload_handler),
     # Storage replication
     ("GET",    "/api/clusters/{cluster_id}/replication",               repl_list_handler),
-    ("POST",   "/api/clusters/{cluster_id}/replication",               repl_create_handler),
-    ("DELETE", "/api/clusters/{cluster_id}/replication/{job_id}",      repl_delete_handler),
+    ("POST",   "/api/clusters/{cluster_id}/replication",                       repl_create_handler),
+    ("POST",   "/api/clusters/{cluster_id}/replication/{job_id}/run-now",      repl_run_now_handler),
+    ("PUT",    "/api/clusters/{cluster_id}/replication/{job_id}/disabled",     repl_disable_toggle_handler),
+    ("DELETE", "/api/clusters/{cluster_id}/replication/{job_id}",              repl_delete_handler),
 ]

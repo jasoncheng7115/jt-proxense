@@ -131,6 +131,28 @@ async def download_url_handler(request: web.Request) -> web.Response:
             {"error": "missing_or_invalid", "fields": ["url", "filename", "content"]},
             status=400,
         )
+    # OWASP A10 — restrict to http(s); reject anything else (file:, ftp:,
+    # gopher:, etc.). PVE does the actual fetch but we shouldn't enable
+    # weird schemes via our API surface.
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return web.json_response({"error": "bad_url"}, status=400)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return web.json_response({"error": "bad_url_scheme",
+                                  "allowed": ["http", "https"]}, status=400)
+    # OWASP A09 — strip embedded credentials before audit log so
+    # url-with-password (e.g. http://user:secret@host/file) doesn't leak
+    # into audit_log.params_hash inputs.
+    audit_url = parsed._replace(netloc=parsed.hostname or parsed.netloc).geturl()
+
+    # Filename: keep on the same storage's well-known content directory,
+    # so reject path traversal characters.
+    if (".." in filename or "/" in filename or "\x00" in filename
+            or len(filename) > 255):
+        return web.json_response({"error": "bad_filename"}, status=400)
+
     checksum = (body.get("checksum") or "").strip() or None
     checksum_algorithm = (body.get("checksum_algorithm") or "").strip() or None
     verify_certificates = bool(body.get("verify_certificates", True))
@@ -150,7 +172,7 @@ async def download_url_handler(request: web.Request) -> web.Response:
             user=user, source_ip=ip, action="storage.content.download_url",
             target=audit_target, cluster_id=cluster_id,
             result=audit.result_error(e), request_id=rid,
-            params={"url": url[:200], "filename": filename, "content": content},
+            params={"url": audit_url[:200], "filename": filename, "content": content},
         )
         return web.json_response(
             {"error": "pve_request_failed", "detail": str(e)},

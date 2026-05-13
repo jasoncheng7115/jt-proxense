@@ -37,6 +37,16 @@ from . import rrd_proxy
 from . import vm_backups
 from . import host_shell
 from . import vm_config as vm_config_mod
+from . import vm_create as vm_create_mod
+from . import node_hardware
+from . import fw_admin
+from . import storage_admin
+from . import ceph_admin
+from . import network_admin
+from . import maintenance
+from . import pve_users_admin
+from . import cluster_locks
+from . import audit_forwarder_admin
 from . import ha_view
 from . import pools_view
 from . import cluster_notes
@@ -642,6 +652,56 @@ def create_app() -> web.Application:
 
     # v0.3.30 PVE API tokens listing (admin)
     for method, path, handler in api_tokens.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 VM/CT creation wizard (operator+)
+    for method, path, handler in vm_create_mod.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 node hardware + disks/SMART (viewer+)
+    for method, path, handler in node_hardware.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 firewall ipsets/aliases/groups (operator/admin)
+    for method, path, handler in fw_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 storage CRUD (admin)
+    for method, path, handler in storage_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 ceph admin actions
+    for method, path, handler in ceph_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 node network bridge CRUD (admin)
+    for method, path, handler in network_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 node maintenance mode (admin)
+    for method, path, handler in maintenance.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 PVE users / groups / ACL (admin)
+    for method, path, handler in pve_users_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 cluster locks viewer + clear (operator/admin)
+    for method, path, handler in cluster_locks.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v0.4 audit forwarder admin (admin)
+    for method, path, handler in audit_forwarder_admin.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

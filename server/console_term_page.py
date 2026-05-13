@@ -355,7 +355,12 @@ async def console_term_page_handler(request: web.Request) -> web.Response:
     node = request.match_info["node"]
     vmid = int(request.match_info["vmid"])
     vm_name = (request.query.get("name") or "").strip()
-    heading = f"CT {vmid}" + (f" — {vm_name}" if vm_name else "")
+    # Distinguish CT (LXC termproxy) from VM serial (QEMU termproxy with
+    # serial=serial0). Caller passes ?kind=serial when opening a QEMU
+    # serial console; default is CT (kept for backwards compat).
+    kind = (request.query.get("kind") or "ct").strip().lower()
+    label = "VM" if kind == "serial" else "CT"
+    heading = f"{label} {vmid}" + (f" — {vm_name}" if vm_name else "")
     page_title = f"JT-PROXENSE — {heading}@{node}"
 
     lang = _pick_lang(request)

@@ -90,6 +90,13 @@ _SECURITY_HEADERS = {
 }
 
 
+def _is_https(request: web.Request) -> bool:
+    if request.scheme == "https":
+        return True
+    fwd = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower()
+    return fwd == "https"
+
+
 @web.middleware
 async def security_headers_middleware(request: web.Request, handler):
     """Stamp common security headers on every response.
@@ -98,14 +105,25 @@ async def security_headers_middleware(request: web.Request, handler):
     the cyberpunk pages use inline <style>+<script>. Setting a strict CSP
     would break them; loosening it would defeat the point. v0.3 will move
     inline pieces into linked assets so a proper CSP becomes feasible.
+
+    HSTS is added only when the request was served over HTTPS (direct or
+    via X-Forwarded-Proto). Sending Strict-Transport-Security over HTTP
+    is meaningless and wastes bytes.
     """
+    extra = {}
+    if _is_https(request):
+        extra["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     try:
         response = await handler(request)
     except web.HTTPException as e:
         for k, v in _SECURITY_HEADERS.items():
             e.headers.setdefault(k, v)
+        for k, v in extra.items():
+            e.headers.setdefault(k, v)
         raise
     for k, v in _SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    for k, v in extra.items():
         response.headers.setdefault(k, v)
     return response
 

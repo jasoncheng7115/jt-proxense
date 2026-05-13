@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from aiohttp import web
 
+from . import audit
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -174,9 +175,40 @@ async def cluster_log_handler(request: web.Request) -> web.Response:
     return web.json_response({"lines": rows or [], "count": len(rows or [])})
 
 
+@role_required("admin")
+async def task_stop_handler(request: web.Request) -> web.Response:
+    """DELETE /api/clusters/{cid}/nodes/{node}/tasks/{upid} — terminate a
+    running PVE task. PVE accepts this for tasks the calling token can
+    write; admin-only here so we don't accidentally let an operator kill
+    a long backup or migrate that another team owns."""
+    cid = request.match_info["cluster_id"]
+    node = request.match_info["node"]
+    upid = request.match_info["upid"]
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    user = (request.get("user") or {}).get("username", "anonymous")
+    src_ip = request.get("client_ip", "unknown")
+    rid = request.get("request_id", "")
+    try:
+        await cluster.client.stop_task(node, upid)
+    except Exception as e:
+        await audit.write(user=user, source_ip=src_ip, action="pve.task.stop",
+                          target=f"{cid}/{node}/{upid}", cluster_id=cid,
+                          result=audit.result_error(e), request_id=rid)
+        return web.json_response(
+            {"error": "pve_request_failed", "detail": str(e)}, status=502,
+        )
+    await audit.write(user=user, source_ip=src_ip, action="pve.task.stop",
+                      target=f"{cid}/{node}/{upid}", cluster_id=cid,
+                      result="ok", request_id=rid)
+    return web.json_response({"ok": True})
+
+
 ROUTES = [
-    ("GET", r"/api/clusters/{cluster_id}/tasks", list_tasks_handler),
-    ("GET", r"/api/clusters/{cluster_id}/log", cluster_log_handler),
-    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}/log", task_log_handler),
-    ("GET", r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}/status", task_status_handler),
+    ("GET",    r"/api/clusters/{cluster_id}/tasks", list_tasks_handler),
+    ("GET",    r"/api/clusters/{cluster_id}/log", cluster_log_handler),
+    ("GET",    r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}/log", task_log_handler),
+    ("GET",    r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}/status", task_status_handler),
+    ("DELETE", r"/api/clusters/{cluster_id}/nodes/{node}/tasks/{upid}", task_stop_handler),
 ]

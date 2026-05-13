@@ -78,10 +78,11 @@ _TEMPLATE = """<!DOCTYPE html>
     <title>JT-PROXENSE — {{T_TITLE}}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
-        :root { --bg:#050810; --bg-elev:#0d1320; --bg-elev-2:#14182a;
+        /* Locked to the SPA's --primary / --bg-* palette (styles.css :root). */
+        :root { --bg:#0a0a0f; --bg-elev:#0d1117; --bg-elev-2:#1a1a25;
             --cyan:#00f0ff; --cyan-soft:rgba(0,240,255,.18); --cyan-glow:rgba(0,240,255,.40);
-            --magenta:#bf00ff; --green:#00ff88; --red:#ff3860; --orange:#ff8a3c;
-            --text:#e6f6ff; --text-dim:#95a8c4; --text-muted:#6b7c93;
+            --magenta:#e066ff; --green:#00ff88; --red:#ff0040; --orange:#ff6b00;
+            --text:#e8e8e8; --text-dim:#a0a0a0; --text-muted:#707070;
             --border:rgba(0,240,255,.16); }
         @font-face{font-family:Orbitron;src:url(/fonts/orbitron-700.woff2) format('woff2');font-weight:700}
         @font-face{font-family:Rajdhani;src:url(/fonts/rajdhani-400.woff2) format('woff2');font-weight:400}
