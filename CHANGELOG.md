@@ -8,6 +8,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.1] — 2026-05-15
+
+Polish patch on top of v0.5.0 — readability + perf fixes spotted in
+production review.
+
+### Fixed
+
+- **Operation log (`/tasks`) flickered every 5s and could surface the
+  same task as multiple rows.** Auto-refresh interval relaxed from 5s
+  to 15s (a task log isn't a real-time gauge); responses are now
+  deduped client-side by UPID and the table only re-renders when the
+  upid/status signature actually changes — so most polls are no-ops.
+- **Health monitor severity pills were near-illegible.** The earlier
+  pill style used the raw saturated severity colour (`#ff0040` /
+  `#ff6b00`) as both text and border on a transparent dark background,
+  which made the text hard to read. New pills use lighter tinted text
+  on a deeper colour-matched fill with a saturated border + glowing dot;
+  reads cleanly at a glance for all three severities.
+
+### Changed
+
+- **`neon-breathe` panel pulse animation toned down significantly.**
+  Previous keyframe stacked four box-shadows up to 40 px wide, making
+  any card using the canonical panel-card surround visually dominate
+  its neighbours (overview cluster cards / cc-bottom panels / ceph
+  sub-panels all looked "too glowy" next to the thin static tiles).
+  Now: a faint inner halo + small border-opacity shift. Cards still
+  read as active without out-shouting their neighbours.
+- **Login page tagline** changed from "Cyberpunk PVE Monitor" /
+  「賽博龐克 PVE 監控」 to "Sci-fi Visual Dashboard" / 「科幻視覺看板」.
+
+---
+
 ## [0.5.0] — 2026-05-13
 
 A UX polish + new feature release: brand identity refresh, a new matrix
