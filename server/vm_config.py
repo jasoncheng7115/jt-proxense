@@ -244,6 +244,43 @@ async def _read_json_capped(request: web.Request) -> dict:
     return body
 
 
+def _validate_delete_list(raw: Any, kind: str) -> tuple[bool, str]:
+    """The PVE config PUT endpoint accepts `delete=key1,key2,...` to
+    unset config keys. Validate that every requested key is either a
+    scalar allow-listed field or a recognized slot (netN, scsiN, etc.).
+    Bare scalar keys are accepted only when explicitly in the editable
+    allow-list — we never let the operator unset things like `name`."""
+    if raw is None or raw == "":
+        return False, ""
+    if isinstance(raw, list):
+        keys = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        keys = [k.strip() for k in str(raw).split(",") if k.strip()]
+    if not keys:
+        return False, ""
+    table = VM_EDITABLE if kind == "qemu" else LXC_EDITABLE
+    cleaned: list[str] = []
+    for k in keys:
+        # Re-use the slot regexes to validate "deletable" slot names.
+        if _NET_SLOT_RE.match(k):
+            cleaned.append(k); continue
+        if kind == "qemu" and _DISK_SLOT_RE.match(k):
+            cleaned.append(k); continue
+        if kind == "qemu" and _HOSTPCI_SLOT_RE.match(k):
+            cleaned.append(k); continue
+        if kind == "qemu" and _USB_SLOT_RE.match(k):
+            cleaned.append(k); continue
+        if kind == "lxc" and _LXC_DISK_SLOT_RE.match(k):
+            cleaned.append(k); continue
+        # Allow unsetting selected scalar fields too (e.g. tags, description).
+        if k in {"tags", "description", "ciuser", "cipassword",
+                  "searchdomain", "nameserver", "sshkeys", "balloon",
+                  "cpu", "boot", "agent", "onboot", "protection"} and k in table:
+            cleaned.append(k); continue
+        return False, ""   # any unknown key kills the whole delete request
+    return True, ",".join(cleaned)
+
+
 def _validate_changes(changes: dict, kind: str) -> tuple[dict, list[str]]:
     """Returns (accepted_fields, rejected_field_names).
     Reject-by-default — anything not in the editable allow-list AND not a
@@ -252,6 +289,13 @@ def _validate_changes(changes: dict, kind: str) -> tuple[dict, list[str]]:
     rejected: list[str] = []
     table = VM_EDITABLE if kind == "qemu" else LXC_EDITABLE
     for k, v in changes.items():
+        if k == "delete":
+            ok, cleaned = _validate_delete_list(v, kind)
+            if ok:
+                accepted["delete"] = cleaned
+            else:
+                rejected.append("delete")
+            continue
         if k in table:
             ok = table[k](v)
             if ok is None:

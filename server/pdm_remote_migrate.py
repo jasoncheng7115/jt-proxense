@@ -138,7 +138,7 @@ async def list_target_endpoints_handler(request: web.Request) -> web.Response:
 
         for node_cfg in cluster_cfg.nodes:
             # Best-effort node-name lookup. Falls back to the lone cached node
-            # for single-node managed clusters (host-107 case).
+            # for standalone single-node managed clusters.
             node_name = host_to_node.get(node_cfg.host, "")
             if not node_name and target_cluster is not None:
                 cached_nodes = getattr(getattr(target_cluster, "cache", None), "nodes", None) or {}

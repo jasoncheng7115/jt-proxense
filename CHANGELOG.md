@@ -8,6 +8,57 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.2] — 2026-05-20
+
+Security hardening pass: introduces OWASP Top 10 (2025-tracking)
+pre-release audit, fixes an audit-log gap on backup verify, plugs a
+naked-handler access-control gap on task-status polling, and scrubs
+illustrative-but-real-looking host references from docs and tests.
+
+### Added
+
+- **OWASP Top 10 pre-release checklist** (`RELEASE_CHECKLIST.md` §3.5)
+  + automated grep regression scanner. New invocation:
+  `bash scripts/security-audit.sh /path/to/repo --owasp` runs A01
+  (every `*_handler` has `@role_required` or a delegated role check),
+  A03 (no `execute(f"…")` SQL outside migrations + no
+  `subprocess shell=True`), A05 (no `DEBUG=True`, no CORS wildcard),
+  and A09 (every POST/PUT/DELETE/PATCH handler has `audit.write` or
+  delegates to a known auditing helper). A01/A03/A05 are hard
+  failures; A09 emits a warning list. The other six categories live
+  in the checklist as manual sign-off — record any judgement calls
+  in the release CHANGELOG Security section. Mandatory before every
+  push.
+
+### Fixed
+
+- **`backup.verify` was not audited.** `verify_backup_handler` is a
+  storage-touching admin-ish action (PBS chunk index walk, file
+  read); previous releases bypassed the audit log entirely. Both
+  success and PVE-rejection paths now record `backup.verify` with
+  the volume id.
+- **`task_status_handler` (PVE task polling) had no role gate.** Any
+  authenticated user — including a stale-session caller with no
+  granted role — could poll arbitrary PVE task UPIDs by URL. Now
+  decorated with `@role_required("viewer")`; matches the rest of
+  the read-only handler family.
+
+### Security
+
+- **Removed real lab-host references from documentation and tests.**
+  CHANGELOG verification notes that named the specific PVE node /
+  vmid used during E2E runs are now generic ("a real PVE 8 cluster
+  node"); cluster-notes docstring examples switched from look-real
+  names (`host-101` / `host-104`) to obviously-fictional `pve-prod-01`
+  / `pve-edge-04`; `tests/test_pdm_remote_migrate.py` fixture cluster
+  id renamed from the operator's real standalone-host name to
+  `remote-cluster`; a comment in `pdm_remote_migrate.py` rewritten to
+  describe the case in general terms rather than naming a specific
+  host. No customer or operator credentials were ever in the public
+  tree; this round is about scrubbing identifying lab-infra references.
+
+---
+
 ## [0.5.1] — 2026-05-15
 
 Polish patch on top of v0.5.0 — readability + perf fixes spotted in
@@ -369,7 +420,7 @@ OWASP Top 10 audit pass.
 
 ### Added
 
-- **Per-cluster ops notes** — admin-editable, viewer-readable free-form text per cluster. Use cases: "PROD cluster — never reboot host-101 during business hours" / "host-104 still on legacy SSDs, plan migration before EOQ3". Reachable from the cluster-core ops bar (single-cluster mode). Stored in SQLite, 16 KB cap. New endpoints `GET/PUT /api/clusters/{cid}/notes` (viewer / admin), audited.
+- **Per-cluster ops notes** — admin-editable, viewer-readable free-form text per cluster. Use cases: "PROD cluster — never reboot pve-prod-01 during business hours" / "pve-edge-04 still on legacy SSDs, plan migration before EOQ". Reachable from the cluster-core ops bar (single-cluster mode). Stored in SQLite, 16 KB cap. New endpoints `GET/PUT /api/clusters/{cid}/notes` (viewer / admin), audited.
 
 ### Internal
 
@@ -664,7 +715,7 @@ OWASP Top 10 audit pass.
 ### Verification
 
 - Backend tests: 261 passed (1 isolation-related flake on `test_export_import_round_trip` that passes when run in isolation, pre-existed).
-- E2E: noVNC `RFB 003.008` banner, xterm `OK` ack, screenshot 320×200 PNG (24KB) all returned successfully against host-108 vmid 171.
+- E2E: noVNC `RFB 003.008` banner, xterm `OK` ack, screenshot 320×200 PNG (24KB) all returned successfully against a real PVE 8 cluster node.
 
 ---
 

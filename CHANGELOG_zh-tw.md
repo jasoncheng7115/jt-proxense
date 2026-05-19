@@ -8,6 +8,49 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.5.2] — 2026-05-20
+
+安全強化版本：導入 OWASP Top 10（追蹤 2025 修訂）的發版前審查機制、
+補上一個被遺漏的 backup verify audit、修一個 task-status polling 的
+未授權漏洞、把文件與測試中看起來像真實設備名稱的字眼清洗乾淨。
+
+### 新增
+
+- **OWASP Top 10 發版前檢查清單**（`RELEASE_CHECKLIST.md` §3.5）+
+  自動 grep regression scanner。新指令：
+  `bash scripts/security-audit.sh /path/to/repo --owasp`
+  跑 A01（每個 `*_handler` 都有 `@role_required` 或 delegated role
+  check）、A03（migrations 以外無 `execute(f"…")` SQL、無 `subprocess
+  shell=True`）、A05（沒有 `DEBUG=True`、沒有 CORS wildcard）、
+  A09（每個 POST/PUT/DELETE/PATCH handler 都有 `audit.write` 或
+  delegate 到已知的 auditing helper）。A01/A03/A05 為硬失敗；A09
+  輸出警告清單。其他六項在清單中由人工逐條簽核 — 任何判斷請記在
+  該版本 CHANGELOG Security 段。每次 push 前**強制**跑一輪。
+
+### 修正
+
+- **`backup.verify` 沒有寫 audit。** `verify_backup_handler` 是會觸碰
+  儲存的近似管理動作（PBS chunk index 走訪、檔案讀取），先前版本
+  完全沒進 audit log。現在成功 / PVE 失敗兩條路徑都會以 `backup.verify`
+  + volume id 寫入 audit。
+- **`task_status_handler`（PVE 任務輪詢）沒有角色檢查。** 任何已登入
+  使用者 — 包含 session 過期但仍持 cookie 的、沒有任何角色授權的
+  人 — 都可以直接打 URL 輪詢 PVE 任務 UPID。已加上
+  `@role_required("viewer")`，與其他唯讀 handler 一致。
+
+### 安全性
+
+- **移除文件與測試中真實實驗室節點 / VM 的識別字串。** CHANGELOG
+  裡寫過 E2E 驗證跑在哪台節點哪個 vmid 的描述改為「a real PVE 8
+  cluster node」；cluster-notes docstring 範例從看起來像真實的
+  `host-101` / `host-104` 換成明顯虛構的 `pve-prod-01` / `pve-edge-04`；
+  `tests/test_pdm_remote_migrate.py` 的 fixture cluster id 從操作者
+  實際的單節點主機名改為 `remote-cluster`；`pdm_remote_migrate.py`
+  一行註解改為描述通則而不點名特定主機。**從來沒有客戶或操作者
+  憑證**進過公開 repo；這次清洗是把識別性的實驗室設備名一併移除。
+
+---
+
 ## [0.5.1] — 2026-05-15
 
 v0.5.0 上線後的視覺＋效能修正補丁。
@@ -336,7 +379,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **每叢集 OPS 備註** — admin 可編輯、viewer+ 可看的自由格式備註。常見用途：「PROD 叢集 — 上班時間不可重啟 host-101」「host-104 還在用舊 SSD，EOQ3 前要遷」。從 cluster-core 操作列（單一叢集模式）進入。SQLite 儲存，16 KB 上限。新 endpoint `GET/PUT /api/clusters/{cid}/notes`（viewer / admin），有 audit。
+- **每叢集 OPS 備註** — admin 可編輯、viewer+ 可看的自由格式備註。常見用途：「PROD 叢集 — 上班時間不可重啟 pve-prod-01」「pve-edge-04 還在用舊 SSD，EOQ 前要遷」。從 cluster-core 操作列（單一叢集模式）進入。SQLite 儲存，16 KB 上限。新 endpoint `GET/PUT /api/clusters/{cid}/notes`（viewer / admin），有 audit。
 
 ### 內部
 
@@ -630,7 +673,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 ### 驗證
 
 - 後端測試：261 passed（1 個 `test_export_import_round_trip` 因 suite 隔離 race 偶發失敗，獨立跑就過，不是這次改動造成）。
-- 端對端：對 host-108 vmid 171 的 noVNC 拿到 `RFB 003.008` banner、xterm 拿到 `OK` ack、screenshot 拿到 320×200 / 24KB PNG，三條都成功。
+- 端對端：對一台真實 PVE 8 cluster 節點的 noVNC 拿到 `RFB 003.008` banner、xterm 拿到 `OK` ack、screenshot 拿到 320×200 / 24KB PNG，三條都成功。
 
 ---
 

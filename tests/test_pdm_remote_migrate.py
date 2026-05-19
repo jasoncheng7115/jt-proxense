@@ -58,11 +58,11 @@ class _FakeCluster:
 def fake_clusters(monkeypatch, db_path):
     src = _FakeCluster("cluster1", [_FakeVM(123, "node1", "qemu"),
                                      _FakeVM(300, "node1", "lxc")])
-    tgt = _FakeCluster("host-107", [])
+    tgt = _FakeCluster("remote-cluster", [])
 
     from server import cluster_manager as cm
     monkeypatch.setattr(cm.cluster_manager, "get_cluster",
-                        lambda cid: {"cluster1": src, "host-107": tgt}.get(cid))
+                        lambda cid: {"cluster1": src, "remote-cluster": tgt}.get(cid))
 
     # Provide a config with both clusters so the handler can pull token data
     from server.config import (
@@ -81,7 +81,7 @@ def fake_clusters(monkeypatch, db_path):
                 enabled=True,
             ),
             ClusterConfig(
-                id="host-107",
+                id="remote-cluster",
                 nodes=[PVENodeConfig(host="203.0.113.107", port=8006)],
                 auth=PVEAuthConfig(user="root@pam", token_name="jt-proxense",
                                    token_value="dst-secret"),
@@ -112,9 +112,9 @@ async def test_list_endpoints_excludes_self(fake_clusters, aiohttp_client):
     r = await client.get("/api/clusters/cluster1/remote-endpoints")
     assert r.status == 200
     body = await r.json()
-    # Only host-107's nodes should show; cluster1 is self
+    # Only remote-cluster's nodes should show; cluster1 is self
     cids = {e["cluster_id"] for e in body["endpoints"]}
-    assert cids == {"host-107"}
+    assert cids == {"remote-cluster"}
     assert body["endpoints"][0]["node_host"] == "203.0.113.107"
 
 
@@ -134,7 +134,7 @@ async def test_list_endpoints_unknown_cluster(fake_clusters, aiohttp_client):
 async def test_migrate_missing_fields(fake_clusters, aiohttp_client):
     client = await aiohttp_client(_make_app())
     r = await client.post("/api/clusters/cluster1/vms/123/remote-migrate",
-                          json={"target_cluster_id": "host-107"})
+                          json={"target_cluster_id": "remote-cluster"})
     assert r.status == 400
     body = await r.json()
     assert "target_endpoint_host" in body["fields"]
@@ -144,7 +144,7 @@ async def test_migrate_missing_fields(fake_clusters, aiohttp_client):
 async def test_migrate_lxc_unsupported(fake_clusters, aiohttp_client):
     client = await aiohttp_client(_make_app())
     r = await client.post("/api/clusters/cluster1/vms/300/remote-migrate",
-                          json={"target_cluster_id": "host-107",
+                          json={"target_cluster_id": "remote-cluster",
                                 "target_endpoint_host": "203.0.113.107",
                                 "target_vmid": 300,
                                 "target_bridge_map": "vmbr0=vmbr0",
@@ -159,7 +159,7 @@ async def test_migrate_lxc_unsupported(fake_clusters, aiohttp_client):
 async def test_migrate_unknown_vm(fake_clusters, aiohttp_client):
     client = await aiohttp_client(_make_app())
     r = await client.post("/api/clusters/cluster1/vms/9999/remote-migrate",
-                          json={"target_cluster_id": "host-107",
+                          json={"target_cluster_id": "remote-cluster",
                                 "target_endpoint_host": "x", "target_vmid": 1,
                                 "target_bridge_map": "x", "target_storage_map": "x",
                                 "target_endpoint_fingerprint": "AA:BB"})
@@ -183,7 +183,7 @@ async def test_migrate_target_cluster_not_in_config(fake_clusters, aiohttp_clien
 async def test_migrate_dispatches_with_endpoint_string(fake_clusters, aiohttp_client):
     client = await aiohttp_client(_make_app())
     r = await client.post("/api/clusters/cluster1/vms/123/remote-migrate",
-                          json={"target_cluster_id": "host-107",
+                          json={"target_cluster_id": "remote-cluster",
                                 "target_endpoint_host": "203.0.113.107",
                                 "target_endpoint_port": 8006,
                                 "target_endpoint_fingerprint": "AA:BB:CC:DD",
@@ -198,7 +198,7 @@ async def test_migrate_dispatches_with_endpoint_string(fake_clusters, aiohttp_cl
     assert body["target"]["endpoint_host"] == "203.0.113.107"
 
     rows = await audit.query(action="vm.remote_migrate")
-    assert any("cluster1/node1/vm/123 -> host-107" in r["target"] for r in rows)
+    assert any("cluster1/node1/vm/123 -> remote-cluster" in r["target"] for r in rows)
 
 
 @pytest.mark.asyncio
@@ -210,7 +210,7 @@ async def test_migrate_audit_excludes_secret_endpoint(fake_clusters, aiohttp_cli
     when we change only the (synthetic) endpoint string. Easiest direct
     check: query the audit row's params_hash and ensure it's small/stable."""
     client = await aiohttp_client(_make_app())
-    body = {"target_cluster_id": "host-107",
+    body = {"target_cluster_id": "remote-cluster",
             "target_endpoint_host": "203.0.113.107",
             "target_vmid": 200,
             "target_bridge_map": "vmbr0=vmbr0",
@@ -294,7 +294,7 @@ async def test_target_layout_filters_to_image_capable_storage(fake_clusters, aio
         ],
     )
     client = await aiohttp_client(_make_app())
-    r = await client.get("/api/clusters/host-107/nodes/host-107/migration-targets")
+    r = await client.get("/api/clusters/remote-cluster/nodes/remote-cluster/migration-targets")
     assert r.status == 200
     body = await r.json()
     storage_ids = {s["storage"] for s in body["storages"]}

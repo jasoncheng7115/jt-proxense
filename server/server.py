@@ -44,6 +44,7 @@ from . import storage_admin
 from . import ceph_admin
 from . import network_admin
 from . import maintenance
+from . import host_upgrade
 from . import pve_users_admin
 from . import cluster_locks
 from . import audit_forwarder_admin
@@ -690,6 +691,11 @@ def create_app() -> web.Application:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
+    # v0.6 batch host upgrade orchestrator (admin)
+    for method, path, handler in host_upgrade.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
     # v0.4 PVE users / groups / ACL (admin)
     for method, path, handler in pve_users_admin.ROUTES:
         route = app.router.add_route(method, path, handler)
@@ -875,6 +881,12 @@ async def start_server():
 
     # Cluster polling in the background.
     asyncio.create_task(_bring_up_clusters())
+
+    # Resume any in-flight host-upgrade jobs that were left running when
+    # the daemon was last stopped (orderly restart mid-sweep, OS reboot,
+    # etc.). Each job's state is fully driven from SQLite so this just
+    # re-launches the per-job runner.
+    asyncio.create_task(host_upgrade.resume_running_jobs_on_startup())
 
     return runner
 

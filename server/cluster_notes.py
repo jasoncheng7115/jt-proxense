@@ -1,8 +1,8 @@
 """Per-cluster free-form ops notes.
 
-Operators leave reminders like "PROD cluster — never reboot host-101 during
-business hours" or "host-104 still on legacy SSDs, plan migration before end
-of Q3". Stored in SQLite (one row per cluster_id), retrieved on demand.
+Operators leave reminders like "PROD cluster — never reboot pve-prod-01
+during business hours" or "pve-edge-04 still on legacy SSDs, plan migration
+before EOQ". Stored in SQLite (one row per cluster_id), retrieved on demand.
 
 Routes:
   GET /api/clusters/{cluster_id}/notes

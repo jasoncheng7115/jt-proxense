@@ -340,6 +340,7 @@ async def vm_migrate_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "upid": upid, "vm": vm, "target_node": target})
 
 
+@role_required("viewer")
 async def task_status_handler(request: web.Request) -> web.Response:
     """Poll a PVE task by UPID. No write — viewer can call."""
     cluster_id = request.match_info["cluster_id"]

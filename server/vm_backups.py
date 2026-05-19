@@ -17,6 +17,7 @@ import asyncio
 
 from aiohttp import web
 
+from . import audit
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -136,13 +137,28 @@ async def verify_backup_handler(request: web.Request) -> web.Response:
     volume = (body.get("volume") or "").strip()
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._/:\-]{1,512}$", volume):
         return web.json_response({"error": "bad_volume"}, status=400)
+    user = (request.get("user") or {}).get("username", "anonymous")
+    src_ip = request.get("client_ip", "unknown")
+    rid = request.get("request_id", "")
+    target = f"{cid}/{node}/{storage}/{volume}"
     try:
         meta = await cluster.client.get_storage_content(node, storage, volume)
     except Exception as e:
+        await audit.write(
+            user=user, source_ip=src_ip, action="backup.verify",
+            target=target, cluster_id=cid,
+            result=audit.result_error(e), request_id=rid,
+            params={"volume": volume},
+        )
         return web.json_response(
             {"ok": False, "verified": False, "detail": str(e)},
             status=502,
         )
+    await audit.write(
+        user=user, source_ip=src_ip, action="backup.verify",
+        target=target, cluster_id=cid, result="ok", request_id=rid,
+        params={"volume": volume},
+    )
     return web.json_response({
         "ok": True, "verified": True, "metadata": meta,
     })
