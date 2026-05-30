@@ -58,6 +58,8 @@ _NODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
 _LOOP_TICK_S          = 2.0
 _REBOOT_TIMEOUT_S     = 600      # 10 min for slow ZFS/initramfs boots
 _MIGRATE_WAIT_S       = 1800     # 30 min per VM migrate (safety cap)
+_SHUTDOWN_WAIT_S      = 300      # 5 min for an ACPI graceful guest shutdown
+_START_WAIT_S         = 180      # 3 min for a guest to come back up
 _TASK_POLL_S          = 4.0
 
 # Single source of truth for the apt command. Kept here (not user input)
@@ -418,6 +420,72 @@ async def _restore_node(cluster, target_node: str, original_node: str,
     return results
 
 
+async def _shutdown_node_guests(cluster, node: str, node_id: int) -> list[dict]:
+    """in_place mode step 1: ACPI-shutdown every running guest on `node`.
+
+    Returns [{vmid, type, ok, upid, exitstatus}] — the ok=True entries are the
+    guests we later start back up via _start_node_guests after the reboot.
+    """
+    results: list[dict] = []
+    vms = _vms_on_node(cluster, node)
+    await _ev(node_id, "info",
+               f"in-place: shutting down {len(vms)} running guest(s) on {node}")
+    for vm in vms:
+        vmid = int(vm.vmid)
+        vm_type = getattr(vm, "type", "qemu")
+        try:
+            if vm_type == "lxc":
+                upid = await cluster.client.ct_shutdown(node, vmid)
+            else:
+                upid = await cluster.client.vm_shutdown(node, vmid)
+            st = await _wait_for_task(cluster, node, upid, _SHUTDOWN_WAIT_S)
+            ok = (st.get("exitstatus") or "") == "OK"
+            results.append({"vmid": vmid, "type": vm_type, "ok": ok,
+                            "upid": upid, "exitstatus": st.get("exitstatus")})
+            await _ev(node_id, "info" if ok else "warn",
+                       f"{vm_type}/{vmid} shutdown: {st.get('exitstatus')}")
+        except Exception as e:
+            results.append({"vmid": vmid, "type": vm_type, "ok": False,
+                            "detail": str(e)})
+            await _ev(node_id, "warn", f"{vm_type}/{vmid} shutdown failed: {e}")
+    return results
+
+
+async def _start_node_guests(cluster, node: str, guests: list[dict],
+                             node_id: int) -> list[dict]:
+    """in_place mode final step: start the guests we shut down (ok=True ones).
+
+    Best-effort: a guest that the node already auto-started on boot (onboot=1)
+    will fail here with "already running" — that's logged as a warning, not a
+    host failure, since the upgrade itself already succeeded.
+    """
+    results: list[dict] = []
+    to_start = [g for g in guests if g.get("ok")]
+    await _ev(node_id, "info",
+               f"in-place: starting {len(to_start)} guest(s) back up on {node}")
+    for g in to_start:
+        vmid = int(g["vmid"])
+        vm_type = g.get("type", "qemu")
+        try:
+            if vm_type == "lxc":
+                upid = await cluster.client.ct_start(node, vmid)
+            else:
+                upid = await cluster.client.vm_start(node, vmid)
+            st = await _wait_for_task(cluster, node, upid, _START_WAIT_S)
+            ok = (st.get("exitstatus") or "") == "OK"
+            results.append({"vmid": vmid, "type": vm_type, "ok": ok,
+                            "upid": upid, "exitstatus": st.get("exitstatus")})
+            await _ev(node_id, "info" if ok else "warn",
+                       f"{vm_type}/{vmid} start: {st.get('exitstatus')}")
+        except Exception as e:
+            results.append({"vmid": vmid, "type": vm_type, "ok": False,
+                            "detail": str(e)})
+            await _ev(node_id, "warn",
+                       f"{vm_type}/{vmid} start failed (already running after "
+                       f"boot?): {e}")
+    return results
+
+
 # ─────────────────────────────────────────────────────── job runner
 
 class _JobControl:
@@ -525,10 +593,11 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                             in_flight: set[str]) -> None:
     node_id = n["id"]
     source = n["node"]
+    in_place = (target_mode == "in_place")
 
-    # Resolve target node
+    # Resolve target node (in_place migrates nothing, so it needs no target)
     target = n.get("target_node")
-    if not target:
+    if not in_place and not target:
         if target_mode == "manual":
             target = (target_manual.get(source) or "").strip() or None
         if not target:
@@ -543,16 +612,28 @@ async def _run_single_host(cluster, job_id: int, n: dict,
         await _set_node_target(node_id, target)
 
     in_flight.add(source)
+    stopped: list[dict] = []
     try:
-        # 1. evacuate
+        # 1. evacuate guests — or, in_place, gracefully shut them down
         await _set_node_status(node_id, "evacuating", started=True)
-        evac = await _evacuate_node(cluster, source, target, node_id)
-        await _patch_node_detail(node_id, {"evacuated": evac})
-        if any(not e.get("ok") for e in evac):
-            await _set_node_status(node_id, "failed",
-                                    error="one or more guests failed to migrate",
-                                    finished=True)
-            return
+        if in_place:
+            stopped = await _shutdown_node_guests(cluster, source, node_id)
+            await _patch_node_detail(node_id, {"stopped": stopped})
+            if any(not g.get("ok") for g in stopped):
+                await _set_node_status(node_id, "failed",
+                                        error="one or more guests failed to shut down",
+                                        finished=True)
+                await _ev(node_id, "warn",
+                           "in-place: a guest did not shut down cleanly — aborting host")
+                return
+        else:
+            evac = await _evacuate_node(cluster, source, target, node_id)
+            await _patch_node_detail(node_id, {"evacuated": evac})
+            if any(not e.get("ok") for e in evac):
+                await _set_node_status(node_id, "failed",
+                                        error="one or more guests failed to migrate",
+                                        finished=True)
+                return
 
         # 2. apt dist-upgrade
         await _set_node_status(node_id, "updating")
@@ -595,8 +676,14 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                                         finished=True)
                 return
 
-        # 5. restore (optional)
-        if migrate_back:
+        # 5. bring guests back: restart in place, or migrate back (migrate mode)
+        if in_place:
+            # Always restart the guests we stopped, whether the admin rebooted
+            # or skipped — they were shut down, so they must come back up.
+            await _set_node_status(node_id, "restoring")
+            started = await _start_node_guests(cluster, source, stopped, node_id)
+            await _patch_node_detail(node_id, {"started": started})
+        elif migrate_back:
             await _set_node_status(node_id, "restoring")
             try:
                 res = await _restore_node(cluster, target, source, evac, node_id)
@@ -713,7 +800,7 @@ async def create_job(request: web.Request) -> web.Response:
                                        "node": n}, status=400)
 
     target_mode = body.get("target_mode") or "auto"
-    if target_mode not in ("auto", "manual"):
+    if target_mode not in ("auto", "manual", "in_place"):
         return web.json_response({"error": "bad_target_mode"}, status=400)
     target_manual = body.get("target_manual") or {}
     if not isinstance(target_manual, dict):
@@ -722,7 +809,10 @@ async def create_job(request: web.Request) -> web.Response:
         if not _NODE_RE.match(k) or not _NODE_RE.match(v):
             return web.json_response({"error": "bad_target_manual_name"}, status=400)
 
-    migrate_back = bool(body.get("migrate_back", True))
+    # in_place = no migration; guests are shut down, the host reboots, then the
+    # guests that were running are started again. Migrate-back is meaningless
+    # there (nothing left the host), so force it off.
+    migrate_back = False if target_mode == "in_place" else bool(body.get("migrate_back", True))
     opts = {
         "target_mode": target_mode,
         "target_manual": target_manual,

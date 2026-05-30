@@ -8,6 +8,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.2] — 2026-05-29
+
+### Added
+
+- **In-place (no-migration) host-upgrade mode.** The host-upgrade
+  wizard's "VM evacuation target" step gains a third choice alongside
+  auto and manual: **in-place**. Instead of live-migrating guests to
+  another node, the running guests on the host are gracefully shut
+  down (ACPI), the host runs `apt dist-upgrade` and reboots, and then
+  the guests that were running are started again on the same host.
+  Brief guest downtime, but no spare capacity is needed on other
+  nodes — useful for single-node-tight clusters or maintenance
+  windows that accept downtime. Migrate-back is hidden in this mode
+  (nothing leaves the host). A guest that fails to shut down cleanly
+  aborts that host; a guest that the node already auto-started on boot
+  (`onboot=1`) is logged rather than treated as a failure.
+
+---
+
 ## [0.6.1] — 2026-05-29
 
 ### Added
