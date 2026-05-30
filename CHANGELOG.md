@@ -8,6 +8,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.1] — 2026-05-29
+
+### Added
+
+- **`jt-proxense unlock` CLI command.** Clears the per-IP login
+  rate-limit (`failed_logins`) so an operator locked out by the
+  "too many attempts, please try again later" guard can sign in
+  again without waiting out the 5-minute window. `--ip <ip>` clears
+  one IP, `--all` clears every IP, and no argument lists the IPs
+  currently recorded. Works offline (no running service required)
+  and is audited as `auth.unlock`. It only resets the rate-limit
+  counter — it never touches passwords. Documented in the
+  emergency lock-out recovery sections of the README and the Pages
+  site.
+
+---
+
 ## [0.6.0] — 2026-05-29
 
 Batch host-upgrade orchestrator plus the PBS-aware backup and

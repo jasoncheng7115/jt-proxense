@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.6.0
+# JT-PROXENSE v0.6.1
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
@@ -100,7 +100,15 @@ The CLI works without the service running. Per SOP §7.4:
 sudo jt-proxense auth disable          # flip auth off, restart service
 sudo jt-proxense reset-password admin  # reset to a known password
 sudo jt-proxense user reset-totp admin # clear lost authenticator
+sudo jt-proxense unlock                # list IPs currently rate-limited
+sudo jt-proxense unlock --ip 1.2.3.4   # clear the lockout for one IP
+sudo jt-proxense unlock --all          # clear the lockout for every IP
 ```
+
+If the login form shows **"Too many attempts, please try again later"**,
+that IP hit the per-IP rate limit (5 failed logins / 5 min). It clears
+itself after 5 minutes, or immediately with `jt-proxense unlock`. This
+only clears the rate-limit counter — it never changes passwords.
 
 See also [SECURITY.md](SECURITY.md) for the threat model and disclosure policy.
 

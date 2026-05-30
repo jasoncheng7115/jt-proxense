@@ -13,6 +13,7 @@ Usage:
     jt-proxense user list
     jt-proxense user del <name>
     jt-proxense reset-password <user> [--password <new>]
+    jt-proxense unlock [--ip <ip> | --all]
     jt-proxense config get <key>
     jt-proxense config set <key> <value>
     jt-proxense config reset <key>
@@ -285,6 +286,49 @@ def cmd_reset_password(args):
         sys.exit(1)
 
 
+def cmd_unlock(args):
+    """Clear login rate-limit lockout (the `failed_logins` table).
+
+    After LOGIN_RATE_MAX failed logins from one IP inside LOGIN_RATE_WINDOW_S
+    the login form returns "嘗試次數過多，請稍後再試"; the window self-expires,
+    but this is the CLI escape hatch. Recovery only — does NOT touch passwords.
+
+    With no flag, lists which IPs currently have records so you can pick one.
+    """
+    # Do all DB work inside the with-block, then audit/print AFTER it closes —
+    # _cli_audit opens its own connection, and nesting it here would deadlock on
+    # SQLite's write lock ("database is locked").
+    cleared = target = listing = None
+    with db.connect_sync() as c:
+        if args.all:
+            cleared = c.execute("SELECT COUNT(*) AS n FROM failed_logins").fetchone()["n"]
+            c.execute("DELETE FROM failed_logins")
+            target = "*"
+        elif args.ip:
+            cleared = c.execute("SELECT COUNT(*) AS n FROM failed_logins WHERE source_ip=?",
+                                (args.ip,)).fetchone()["n"]
+            c.execute("DELETE FROM failed_logins WHERE source_ip=?", (args.ip,))
+            target = args.ip
+        else:
+            listing = c.execute(
+                "SELECT source_ip, COUNT(*) AS n, MAX(ts) AS last "
+                "FROM failed_logins GROUP BY source_ip ORDER BY n DESC"
+            ).fetchall()
+
+    if listing is not None:
+        if not listing:
+            print("no failed-login records — nothing is locked out")
+            return
+        print("locked / recorded IPs (pass --ip <ip> to clear one, or --all):")
+        for r in listing:
+            print(f"  {r['source_ip']:<22} {r['n']} failed attempt(s)")
+        return
+
+    _cli_audit("auth.unlock", target=target, params={"cleared": cleared})
+    where = "all IPs" if target == "*" else target
+    print(f"cleared {cleared} failed-login record(s) for {where}")
+
+
 def cmd_config_get(args):
     cfg = _read_yaml()
     cur = cfg
@@ -490,6 +534,15 @@ def _parser():
     p_reset.add_argument("user")
     p_reset.add_argument("--password", help="if omitted, a one-time password is generated")
     p_reset.set_defaults(func=cmd_reset_password)
+
+    p_unlock = sub.add_parser(
+        "unlock",
+        help="clear login rate-limit lockout (failed_logins); never touches passwords")
+    g_unlock = p_unlock.add_mutually_exclusive_group()
+    g_unlock.add_argument("--ip", help="clear the lockout for this source IP only")
+    g_unlock.add_argument("--all", action="store_true",
+                          help="clear the lockout for every IP")
+    p_unlock.set_defaults(func=cmd_unlock)
 
     pc = sub.add_parser("config", help="config.yaml read/write")
     sc = pc.add_subparsers(dest="action", required=True)

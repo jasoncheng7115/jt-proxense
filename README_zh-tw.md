@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.6.0
+# JT-PROXENSE v0.6.1
 
 > English version: [README.md](README.md)
 
@@ -100,7 +100,14 @@ CLI 不需要服務在跑也能用。SOP §7.4 鐵則：
 sudo jt-proxense auth disable          # 關掉認證、重啟服務
 sudo jt-proxense reset-password admin  # 重設成已知密碼
 sudo jt-proxense user reset-totp admin # 清除遺失的 authenticator
+sudo jt-proxense unlock                # 列出目前被限流（鎖住）的 IP
+sudo jt-proxense unlock --ip 1.2.3.4   # 只解除單一 IP 的鎖
+sudo jt-proxense unlock --all          # 解除所有 IP 的鎖
 ```
+
+登入頁若出現 **「嘗試次數過多，請稍後再試」**，表示該 IP 觸發了
+單一 IP 的登入限流（5 分鐘內失敗 5 次）。等 5 分鐘會自動解除，或用
+`jt-proxense unlock` 立即解除。此指令只清除限流計數，**不會更動密碼**。
 
 威脅模型與漏洞回報請見 [SECURITY.md](SECURITY.md)。
 
