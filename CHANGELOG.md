@@ -8,6 +8,56 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] — 2026-05-29
+
+Batch host-upgrade orchestrator plus the PBS-aware backup and
+guest-config-driven console work that had been staged behind it.
+Ships the v0.5.3-candidate UI improvements under one release.
+
+### Added
+
+- **Batch host upgrade orchestrator.** Rolling, per-host sweep:
+  evacuate guests → `apt dist-upgrade` over SSH → admin-confirmed
+  reboot → optional migrate-back. State machine is DB-persisted
+  (migration `007_host_upgrade.sql`) so a daemon restart is handled
+  deterministically. apt runs noninteractive with
+  `--force-confdef --force-confold` so dpkg can never hang on a
+  config prompt. Admin-only on all mutations; every step audited.
+- **PBS-aware backup modal.** When the selected storage is PBS the
+  per-file `compress` control is hidden (PBS does chunk-level dedup)
+  and PBS-relevant extras surface: `notes-template`, `protected`,
+  `mailto` + `mailnotification`. Storage list is deduped by name so
+  shared storages no longer repeat once per node.
+- **Config-driven console menu.** VM serial xterm appears only when
+  the guest config has `serialN`; SPICE only when `vga` is qxl /
+  virtio-vga. Menu fetches guest config on open with a short cache.
+- **Real RRD sparkline on /nodes** with a user-selectable timeframe
+  (default 24h, persisted to localStorage), replacing the synthetic
+  trace.
+- **Disk / NIC add + delete and ISO mount / eject** in the VM config
+  modal.
+- **Context-menu height handling** — measure-and-flip with
+  scroll-on-overflow for long VM / node menus.
+
+### Fixed
+
+- **Host upgrade state machine.** An operator "skip" decision now
+  records the terminal state `skipped` (was incorrectly `done`); a
+  failed migrate-back now marks the host `failed` instead of `done`,
+  so guests left on the target node are no longer reported as a clean
+  finish; a crash during migrate-back is isolated to that host
+  instead of aborting the whole job.
+- **Host upgrade daemon-restart safety.** A host found in an
+  in-flight state after a daemon restart is now marked `failed`
+  ("manual review required") rather than blindly re-run — re-running
+  would repeat the destructive evacuate/migrate from scratch.
+  Regression coverage added in `tests/test_host_upgrade.py`.
+- **Maintenance modal target-node dropdown** now populates correctly
+  in single-cluster mode (the cluster-data lookup falls back from the
+  `clusters` map to the single `cluster` prop).
+
+---
+
 ## [0.5.2] — 2026-05-20
 
 Security hardening pass: introduces OWASP Top 10 (2025-tracking)

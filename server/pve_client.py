@@ -1036,11 +1036,15 @@ class PVEClient:
 
     async def trigger_backup(self, node: str, *, vmid: int | str,
                              storage: str, mode: str = "snapshot",
-                             compress: str = "zstd", **kwargs) -> str:
+                             compress: str | None = None, **kwargs) -> str:
         """Run an ad-hoc vzdump on `node`. Returns the task UPID.
-        Accepts a single vmid or a comma-separated list."""
-        data = {"vmid": str(vmid), "storage": storage,
-                "mode": mode, "compress": compress}
+        Accepts a single vmid or a comma-separated list.
+        `compress` left None means "don't send" — appropriate for PBS
+        storages where PVE ignores the field anyway. Caller decides
+        based on storage type."""
+        data: dict = {"vmid": str(vmid), "storage": storage, "mode": mode}
+        if compress:
+            data["compress"] = compress
         for k, v in kwargs.items():
             data[k] = v
         return await self._request("POST", f"/nodes/{node}/vzdump", data=data)

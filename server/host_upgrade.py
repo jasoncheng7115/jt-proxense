@@ -92,6 +92,31 @@ def _job_row_to_dict(row) -> dict:
     }
 
 
+# Terminal node states — never re-processed by the job runner.
+_TERMINAL_STATUSES = ("done", "failed", "skipped", "aborted")
+# In-flight states — only reachable on re-entry after a daemon restart (a
+# fresh job starts every node 'queued'). These cannot be safely auto-resumed.
+_IN_FLIGHT_STATUSES = ("evacuating", "updating", "awaiting_reboot",
+                       "rebooting", "restoring")
+
+
+def _resume_disposition(status: str) -> str:
+    """How the job runner should treat a node row when (re)entering the loop:
+
+      'skip' — already in a terminal state, leave it alone.
+      'fail' — was in-flight when the daemon restarted; re-running would repeat
+               the destructive evacuate/migrate from scratch (worst case a node
+               that was 'restoring' has its guests yanked off source again), so
+               fail it for manual review instead of blindly resuming.
+      'run'  — fresh ('queued' or anything else): process normally.
+    """
+    if status in _TERMINAL_STATUSES:
+        return "skip"
+    if status in _IN_FLIGHT_STATUSES:
+        return "fail"
+    return "run"
+
+
 def _node_row_to_dict(row) -> dict:
     return {
         "id":          row["id"],
@@ -459,7 +484,17 @@ async def _run_job(job_id: int) -> None:
                 await _ev(nrow["id"], "warn", "job aborted by operator")
                 break
             node_dict = _node_row_to_dict(nrow)
-            if node_dict["status"] in ("done", "failed", "skipped", "aborted"):
+            disp = _resume_disposition(node_dict["status"])
+            if disp == "skip":
+                continue
+            if disp == "fail":
+                await _set_node_status(
+                    node_dict["id"], "failed",
+                    error="interrupted by daemon restart — manual review required",
+                    finished=True)
+                await _ev(node_dict["id"], "error",
+                           "daemon restarted mid-upgrade; marked failed for "
+                           "manual review (no auto-resume of in-flight host)")
                 continue
             await _run_single_host(cluster, job_id, node_dict,
                                     target_mode, target_manual,
@@ -563,10 +598,31 @@ async def _run_single_host(cluster, job_id: int, n: dict,
         # 5. restore (optional)
         if migrate_back:
             await _set_node_status(node_id, "restoring")
-            res = await _restore_node(cluster, target, source, evac, node_id)
+            try:
+                res = await _restore_node(cluster, target, source, evac, node_id)
+            except Exception as e:
+                # A restore crash must not bubble up and abort the whole job —
+                # fail just this host and let the remaining hosts proceed.
+                await _patch_node_detail(node_id, {"restore_error": str(e)})
+                await _set_node_status(node_id, "failed",
+                                        error=f"migrate-back crashed: {e}",
+                                        finished=True)
+                await _ev(node_id, "error", f"migrate-back crashed: {e}")
+                return
             await _patch_node_detail(node_id, {"restored": res})
+            if any(not r.get("ok") for r in res):
+                await _set_node_status(node_id, "failed",
+                                        error="one or more guests failed to migrate back",
+                                        finished=True)
+                await _ev(node_id, "warn",
+                           "migrate-back incomplete — guest(s) left on target node")
+                return
 
-        await _set_node_status(node_id, "done", finished=True)
+        # 'skip' = operator declined the reboot; the host was still upgraded and
+        # (if requested) restored, so it's a distinct terminal state from 'done'.
+        await _set_node_status(
+            node_id, "skipped" if decision == "skip" else "done",
+            finished=True)
     finally:
         in_flight.discard(source)
 

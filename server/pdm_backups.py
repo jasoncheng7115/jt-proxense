@@ -171,11 +171,30 @@ async def trigger_handler(request: web.Request) -> web.Response:
                                   "required": ["vmid", "storage"]},
                                  status=400)
     user, ip, rid = _audit_actor(request)
+    # Whitelisted extra fields per PVE vzdump API. Compression is silently
+    # ignored when storage is PBS (PBS does its own chunk-level dedup); the
+    # client omits it for PBS, but we also accept it being absent here.
+    extra: dict = {}
+    if "notes-template" in body and isinstance(body["notes-template"], str):
+        extra["notes-template"] = body["notes-template"][:1024]
+    if "protected" in body:
+        extra["protected"] = 1 if body["protected"] else 0
+    if "mailnotification" in body and body["mailnotification"] in {"always", "failure"}:
+        extra["mailnotification"] = body["mailnotification"]
+    if "mailto" in body and isinstance(body["mailto"], str):
+        # very loose validation — PVE itself validates the email list
+        if body["mailto"].strip():
+            extra["mailto"] = body["mailto"][:512]
     try:
+        kwargs = {
+            "mode": body.get("mode", "snapshot"),
+        }
+        # Compress only included when explicitly given AND not blank.
+        if body.get("compress"):
+            kwargs["compress"] = body["compress"]
+        kwargs.update(extra)
         upid = await cluster.client.trigger_backup(
-            node, vmid=vmid, storage=storage,
-            mode=body.get("mode", "snapshot"),
-            compress=body.get("compress", "zstd"),
+            node, vmid=vmid, storage=storage, **kwargs,
         )
     except Exception as e:
         await audit.write(
