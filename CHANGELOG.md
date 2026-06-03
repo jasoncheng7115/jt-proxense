@@ -8,6 +8,27 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.3] — 2026-06-03
+
+### Added
+
+- **Live ECG waveform back on the Nodes view.** The "波形範圍 /
+  sparkline range" selector gains a **Live (即時)** option alongside
+  the RRD windows (1H / 24H / 7D / 30D / 1Y). When selected, each node
+  card shows the real-time animated heartbeat trace (CPU / MEM / IOW)
+  fed by the live WebSocket metrics — the pre-v0.5.3 behaviour — while
+  the historical RRD sparklines remain available on the other ranges.
+  The choice persists in `localStorage` (`jtp.nodes.timeframe`).
+
+### Fixed
+
+- **Sidebar version label was hard-coded to `v0.4.0`.** It now reads
+  the build-time `__APP_VERSION__` (from `package.json`), so the
+  sidebar shows the actual running version instead of a stale literal
+  that had never been updated through the version bumps.
+
+---
+
 ## [0.6.2] — 2026-05-29
 
 ### Added
