@@ -8,6 +8,27 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.4] — 2026-06-03
+
+### Changed
+
+- **Nodes view defaults to the live ECG.** The "波形範圍 / sparkline
+  range" now starts on **Live** instead of 24H. The persistence key was
+  bumped (`jtp.nodes.timeframe` → `jtp.nodes.timeframe.v2`) so the new
+  default actually takes effect for existing browsers that had auto-saved
+  the old 24H default; subsequent choices persist again under the new key.
+
+### Fixed
+
+- **Subscription "Manage" and certificate "Renew" buttons had poor
+  contrast.** They reused the green `ok` status-badge style with a cyan
+  border (green text clashing with a cyan outline, reading as a status
+  pill rather than a button). They now use a dedicated filled accent
+  button style (solid cyan, dark bold text) for clear contrast and an
+  obvious clickable affordance.
+
+---
+
 ## [0.6.3] — 2026-06-03
 
 ### Added
