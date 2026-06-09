@@ -8,6 +8,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.5] — 2026-06-08
+
+### Added
+
+- **Ceph-aware host upgrades — wait for OSD rebalance between hosts.**
+  The batch host-upgrade orchestrator previously rebooted hosts
+  back-to-back with no Ceph awareness, which on a Ceph cluster could
+  reboot a second node while the first was still recovering and drop
+  PGs below `min_size` (I/O stall or data loss). It now auto-detects
+  Ceph and, per host: sets the cluster `noout` flag around the reboot
+  (so a brief OSD-down doesn't trigger a full rebalance), unsets it
+  once the node is back, and **waits until every PG is `active+clean`
+  (no degraded / misplaced objects, no recovery in flight) before
+  touching the next host**. The clean check intentionally relies on PG
+  state, not `health.status`, because `noout` itself makes Ceph report
+  `HEALTH_WARN`. If rebalance hasn't finished after a soft cap (60 min)
+  the job holds and warns rather than ever proceeding into a dirty
+  cluster — abort to override. `noout` is cleared on every error path
+  and on daemon-restart recovery so the flag is never left pinned. A
+  wizard checkbox (default on) can opt out; it's a no-op on non-Ceph
+  clusters.
+
+---
+
 ## [0.6.4] — 2026-06-03
 
 ### Changed

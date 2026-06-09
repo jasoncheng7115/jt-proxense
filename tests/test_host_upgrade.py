@@ -48,6 +48,48 @@ def test_resume_disposition_partitions_all_known_states():
         assert hu._resume_disposition(s) in ("skip", "fail", "run")
 
 
+# ─────────────────────────────────────── ceph rebalance gate (pure logic)
+
+def _pgmap(states, **extra):
+    return {"pgmap": {"num_pgs": sum(c for _, c in states),
+                      "pgs_by_state": [{"state_name": n, "count": c} for n, c in states],
+                      **extra}}
+
+
+def test_ceph_clean_all_active_clean():
+    clean, _ = hu._ceph_clean_state(_pgmap([("active+clean", 128)]))
+    assert clean is True
+
+
+def test_ceph_dirty_when_pgs_recovering():
+    # A non-active+clean PG state must block (this is the whole point: don't
+    # touch the next host while Ceph is still recovering from the last one).
+    clean, summary = hu._ceph_clean_state(
+        _pgmap([("active+clean", 120), ("active+recovering", 8)]))
+    assert clean is False
+    assert "recovering" in summary
+
+
+def test_ceph_dirty_when_degraded_or_misplaced():
+    assert hu._ceph_clean_state(_pgmap([("active+clean", 128)], degraded_objects=42))[0] is False
+    assert hu._ceph_clean_state(_pgmap([("active+clean", 128)], misplaced_objects=5))[0] is False
+    assert hu._ceph_clean_state(
+        _pgmap([("active+clean", 128)], recovering_objects_per_sec=10))[0] is False
+
+
+def test_ceph_dirty_when_empty_or_missing_pgmap():
+    # Defensive: no pgmap / zero PGs must NOT read as clean (fail safe).
+    assert hu._ceph_clean_state({})[0] is False
+    assert hu._ceph_clean_state({"pgmap": {}})[0] is False
+
+
+def test_ceph_clean_ignores_health_warn_string():
+    # noout sets HEALTH_WARN; the gate must rely on PG state, not the string.
+    st = _pgmap([("active+clean", 64)])
+    st["health"] = {"status": "HEALTH_WARN"}
+    assert hu._ceph_clean_state(st)[0] is True
+
+
 # ─────────────────────────────────────── DB terminal-state persistence
 
 async def _make_node(status: str = "queued") -> int:

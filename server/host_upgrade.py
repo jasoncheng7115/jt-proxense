@@ -61,6 +61,9 @@ _MIGRATE_WAIT_S       = 1800     # 30 min per VM migrate (safety cap)
 _SHUTDOWN_WAIT_S      = 300      # 5 min for an ACPI graceful guest shutdown
 _START_WAIT_S         = 180      # 3 min for a guest to come back up
 _TASK_POLL_S          = 4.0
+_CEPH_CLEAN_WAIT_S    = 3600     # 1h soft cap, then hold + warn (never proceed dirty)
+_CEPH_POLL_S          = 10.0     # how often to poll ceph status while waiting
+_CEPH_EV_EVERY_S      = 60.0     # throttle "still rebalancing…" progress events
 
 # Single source of truth for the apt command. Kept here (not user input)
 # so a misconfigured job can't run "rm -rf /" via curl. Use Dpkg
@@ -209,6 +212,117 @@ async def _set_job_status(job_id: int, status: str, *,
             tuple(args),
         )
         await c.commit()
+
+
+# ─────────────────────────────────────────────────────── ceph safety
+
+def _any_online_node(cluster) -> Optional[str]:
+    for n, info in cluster.cache.nodes.items():
+        if (getattr(info, "status", "") or "").lower() == "online":
+            return n
+    return None
+
+
+async def _ceph_present(cluster) -> bool:
+    """True if this cluster runs Ceph (the status endpoint returns a health
+    block). Used to auto-enable the rebalance gate; a non-Ceph cluster just
+    skips it."""
+    node = _any_online_node(cluster)
+    if not node:
+        return False
+    try:
+        st = await cluster.client.get_ceph_status(node)
+    except Exception:
+        return False
+    return bool(st) and bool(st.get("health") or st.get("pgmap"))
+
+
+def _ceph_clean_state(st: dict) -> tuple[bool, str]:
+    """Is Ceph fully balanced? Clean = every PG active+clean, zero degraded /
+    misplaced objects, no recovery in flight.
+
+    We deliberately do NOT gate on health.status == HEALTH_OK: setting the
+    `noout` flag (which we do around each reboot) makes Ceph report
+    HEALTH_WARN on its own, so the health string would never clear. PG state
+    is the real signal."""
+    pgmap = st.get("pgmap") or {}
+    num_pgs = pgmap.get("num_pgs")
+    states = pgmap.get("pgs_by_state") or []
+    clean_pgs = sum(int(s.get("count", 0) or 0) for s in states
+                    if s.get("state_name") == "active+clean")
+    dirty = [f"{s.get('state_name')}×{s.get('count')}" for s in states
+             if s.get("state_name") != "active+clean"]
+    degraded = float(pgmap.get("degraded_objects", 0) or 0)
+    misplaced = float(pgmap.get("misplaced_objects", 0) or 0)
+    recovering = float(pgmap.get("recovering_objects_per_sec", 0) or 0)
+    clean = (
+        isinstance(num_pgs, int) and num_pgs > 0
+        and clean_pgs == num_pgs and not dirty
+        and degraded == 0 and misplaced == 0 and recovering == 0
+    )
+    if clean:
+        return True, f"all {num_pgs} PGs active+clean"
+    parts = []
+    if isinstance(num_pgs, int) and num_pgs:
+        parts.append(f"{clean_pgs}/{num_pgs} PGs clean")
+    if dirty:
+        parts.append(", ".join(dirty[:4]))
+    if degraded:
+        parts.append(f"degraded={int(degraded)}")
+    if misplaced:
+        parts.append(f"misplaced={int(misplaced)}")
+    return False, "; ".join(parts) or "not active+clean"
+
+
+async def _ceph_set_noout(cluster, on: bool, node_id: int) -> None:
+    """Set/unset the cluster-wide `noout` flag. Best-effort + logged: while
+    noout is set, a briefly-down OSD (host reboot) is not marked out, so Ceph
+    doesn't kick off a full rebalance for a short maintenance window."""
+    try:
+        if on:
+            await cluster.client.ceph_set_flag("noout")
+        else:
+            await cluster.client.ceph_unset_flag("noout")
+        await _ev(node_id, "info", f"ceph: noout {'set' if on else 'unset'}")
+    except Exception as e:
+        await _ev(node_id, "warn",
+                   f"ceph: failed to {'set' if on else 'unset'} noout: {e}")
+
+
+async def _wait_ceph_clean(cluster, job_id: int, node_id: int) -> bool:
+    """Block until Ceph is fully balanced before the next host is touched.
+
+    Returns False only if the job is aborted while waiting. After a soft cap
+    it keeps holding (never proceeds while dirty) and warns the operator to
+    abort if it's genuinely stuck — this is the 'pause for admin' behaviour."""
+    start = time.time()
+    last_ev = 0.0
+    warned = False
+    await _ev(node_id, "info",
+               "ceph: waiting for rebalance to finish (active+clean) before next host")
+    while True:
+        if _control.is_aborted(job_id):
+            return False
+        node = _any_online_node(cluster)
+        try:
+            st = await cluster.client.get_ceph_status(node) if node else {}
+        except Exception:
+            st = {}
+        clean, summary = _ceph_clean_state(st or {})
+        if clean:
+            await _ev(node_id, "info", f"ceph: {summary} — proceeding to next host")
+            return True
+        now = time.time()
+        elapsed = now - start
+        if elapsed > _CEPH_CLEAN_WAIT_S and not warned:
+            warned = True
+            await _ev(node_id, "warn",
+                       f"ceph: still rebalancing after {int(elapsed // 60)} min "
+                       f"({summary}) — holding; abort the job to override")
+        elif now - last_ev >= _CEPH_EV_EVERY_S:
+            last_ev = now
+            await _ev(node_id, "info", f"ceph: rebalancing… {summary}")
+        await asyncio.sleep(_CEPH_POLL_S)
 
 
 # ─────────────────────────────────────────────────────── helpers
@@ -544,6 +658,14 @@ async def _run_job(job_id: int) -> None:
         target_mode   = opts.get("target_mode")   or "auto"
         target_manual = opts.get("target_manual") or {}
         migrate_back  = bool(opts.get("migrate_back", True))
+        # Ceph safety gate: auto-detect Ceph and (unless the operator opted out)
+        # set noout around each reboot + wait for active+clean before the next
+        # host, so we never reboot a second node while the first is still
+        # rebalancing (which could drop PGs below min_size → I/O stall / loss).
+        ceph_aware = bool(opts.get("ceph_aware", True))
+        ceph_gate = ceph_aware and await _ceph_present(cluster)
+        if ceph_gate:
+            logger.info("upgrade job %d: Ceph detected — rebalance gate ON", job_id)
 
         in_flight: set[str] = set()
 
@@ -563,10 +685,14 @@ async def _run_job(job_id: int) -> None:
                 await _ev(node_dict["id"], "error",
                            "daemon restarted mid-upgrade; marked failed for "
                            "manual review (no auto-resume of in-flight host)")
+                # The crash may have left `noout` set (in-memory flag lost on
+                # restart). Clear it defensively — unset is idempotent.
+                if ceph_gate:
+                    await _ceph_set_noout(cluster, False, node_dict["id"])
                 continue
             await _run_single_host(cluster, job_id, node_dict,
                                     target_mode, target_manual,
-                                    migrate_back, in_flight)
+                                    migrate_back, ceph_gate, in_flight)
 
         async with db.connect() as c:
             cur = await c.execute(
@@ -589,11 +715,12 @@ async def _run_job(job_id: int) -> None:
 
 async def _run_single_host(cluster, job_id: int, n: dict,
                             target_mode: str, target_manual: dict,
-                            migrate_back: bool,
+                            migrate_back: bool, ceph_gate: bool,
                             in_flight: set[str]) -> None:
     node_id = n["id"]
     source = n["node"]
     in_place = (target_mode == "in_place")
+    noout_active = False    # did we set ceph noout for this host's reboot?
 
     # Resolve target node (in_place migrates nothing, so it needs no target)
     target = n.get("target_node")
@@ -669,12 +796,22 @@ async def _run_single_host(cluster, job_id: int, n: dict,
 
         # 4. reboot (if confirmed)
         if decision == "reboot":
+            # Ceph: hold OSDs `in` across the reboot so a brief down doesn't
+            # trigger a full rebalance.
+            if ceph_gate:
+                await _ceph_set_noout(cluster, True, node_id)
+                noout_active = True
             await _set_node_status(node_id, "rebooting")
             if not await _reboot_node(cluster, source, node_id):
                 await _set_node_status(node_id, "failed",
                                         error="reboot did not complete in time",
                                         finished=True)
                 return
+            # Node + OSDs are back up — release noout so recovery of any writes
+            # made during downtime can proceed, then we wait for it below.
+            if ceph_gate and noout_active:
+                await _ceph_set_noout(cluster, False, node_id)
+                noout_active = False
 
         # 5. bring guests back: restart in place, or migrate back (migrate mode)
         if in_place:
@@ -705,6 +842,15 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                            "migrate-back incomplete — guest(s) left on target node")
                 return
 
+        # 6. Ceph gate: don't release the next host until the cluster is fully
+        # rebalanced (active+clean). Only relevant if we actually rebooted.
+        if ceph_gate and decision == "reboot":
+            if not await _wait_ceph_clean(cluster, job_id, node_id):
+                await _set_node_status(node_id, "failed",
+                                        error="aborted while waiting for ceph rebalance",
+                                        finished=True)
+                return
+
         # 'skip' = operator declined the reboot; the host was still upgraded and
         # (if requested) restored, so it's a distinct terminal state from 'done'.
         await _set_node_status(
@@ -712,6 +858,10 @@ async def _run_single_host(cluster, job_id: int, n: dict,
             finished=True)
     finally:
         in_flight.discard(source)
+        # Safety net: if an error path left noout set (e.g. reboot failed while
+        # the node was down), clear it so we never leave the cluster pinned.
+        if noout_active:
+            await _ceph_set_noout(cluster, False, node_id)
 
 
 # ─────────────────────────────────────────────────────── REST endpoints
@@ -817,6 +967,10 @@ async def create_job(request: web.Request) -> web.Response:
         "target_mode": target_mode,
         "target_manual": target_manual,
         "migrate_back": migrate_back,
+        # Auto-detected at run time; the operator can opt out here. When on AND
+        # the cluster runs Ceph, the runner sets noout around each reboot and
+        # waits for active+clean before the next host.
+        "ceph_aware": bool(body.get("ceph_aware", True)),
         "reboot_policy": "ask",
         "apt_cmd": APT_CMD,
     }
