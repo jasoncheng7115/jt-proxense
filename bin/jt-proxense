@@ -14,6 +14,8 @@ Usage:
     jt-proxense user del <name>
     jt-proxense reset-password <user> [--password <new>]
     jt-proxense unlock [--ip <ip> | --all]
+    jt-proxense export-config <file> [--passphrase <pp>]
+    jt-proxense import-config <file> [--passphrase <pp>] [--force]
     jt-proxense config get <key>
     jt-proxense config set <key> <value>
     jt-proxense config reset <key>
@@ -329,6 +331,141 @@ def cmd_unlock(args):
     print(f"cleared {cleared} failed-login record(s) for {where}")
 
 
+def _chown_service_user(path: Path) -> None:
+    """Hand `path` to the jt-proxense service user (CLI usually runs as root).
+    Falls back to the owner of the path's parent dir, then leaves it as-is."""
+    if os.geteuid() != 0:
+        return
+    uid = gid = None
+    try:
+        import pwd
+        pw = pwd.getpwnam("jt-proxense")
+        uid, gid = pw.pw_uid, pw.pw_gid
+    except Exception:
+        try:
+            st = path.parent.stat()
+            if st.st_uid != 0:
+                uid, gid = st.st_uid, st.st_gid
+        except OSError:
+            pass
+    if uid is not None:
+        try:
+            os.chown(path, uid, gid)
+        except OSError as e:
+            sys.stderr.write(f"warning: chown {path} failed: {e}\n")
+
+
+# Files that together make up a full jt-proxense instance, for host migration.
+def _config_bundle_members():
+    from server import secret_store
+    return [
+        ("config.yaml",     CONFIG_PATH,                  0o640),
+        ("jt-proxense.db",  DB_PATH,                      0o644),
+        ("master.key",      secret_store.MASTER_KEY_PATH, 0o600),
+    ]
+
+
+def cmd_export_config(args):
+    """Bundle config.yaml + DB + master.key into ONE passphrase-encrypted file,
+    for migrating jt-proxense to another host. The bundle contains the master
+    key and the whole DB (incl. encrypted cluster secrets), so it is encrypted
+    with a passphrase the operator chooses (same KDF as `secret export`)."""
+    import io, tarfile, getpass, sqlite3, tempfile
+    from server import secret_store
+    from cryptography.fernet import Fernet
+    pp = args.passphrase or getpass.getpass("export passphrase (>=8 chars): ")
+    if not pp or len(pp) < 8:
+        print("passphrase must be at least 8 characters", file=sys.stderr); sys.exit(1)
+
+    buf = io.BytesIO()
+    included: list[str] = []
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        manifest = json.dumps({"app": "jt-proxense",
+                               "schema_version": db.schema_version()}).encode()
+        ti = tarfile.TarInfo("MANIFEST.json"); ti.size = len(manifest)
+        tar.addfile(ti, io.BytesIO(manifest))
+        for name, path, _mode in _config_bundle_members():
+            if not (path and Path(path).exists()):
+                sys.stderr.write(f"  warn: {name} not found at {path} — skipping\n")
+                continue
+            if name == "jt-proxense.db":
+                # Consistent snapshot via SQLite's online-backup API — safe even
+                # if the service is running (WAL): tarring the raw .db file would
+                # miss the -wal and capture a torn/stale copy.
+                fd, snap = tempfile.mkstemp(prefix="jtp-dbsnap-"); os.close(fd)
+                try:
+                    src = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+                    dst = sqlite3.connect(snap)
+                    with dst:
+                        src.backup(dst)
+                    dst.close(); src.close()
+                    tar.add(snap, arcname=name)
+                finally:
+                    try:
+                        os.unlink(snap)
+                    except OSError:
+                        pass
+            else:
+                tar.add(str(path), arcname=name)
+            included.append(name)
+
+    token = Fernet(secret_store._passphrase_to_key(pp)).encrypt(buf.getvalue())
+    out = Path(args.file)
+    out.write_bytes(token)
+    try:
+        os.chmod(out, 0o600)
+    except OSError:
+        pass
+    _cli_audit("config.export", target=str(out), params={"files": included})
+    print(f"exported config → {out}  ({', '.join(included)}; {len(token)} bytes, passphrase-encrypted)")
+    print("  ⚠ contains the master key + full DB — keep it safe and delete after import.")
+
+
+def cmd_import_config(args):
+    """Restore a bundle made by `export-config` onto this host. STOP the
+    service first (`systemctl stop jt-proxense`) so the DB isn't being written.
+    Refuses to clobber an existing instance unless --force is given."""
+    import io, tarfile, getpass
+    from server import secret_store
+    from cryptography.fernet import Fernet, InvalidToken
+    pp = args.passphrase or getpass.getpass("import passphrase: ")
+
+    dests = {name: (Path(path), mode) for name, path, mode in _config_bundle_members()}
+    existing = [str(p) for (p, _m) in dests.values() if p.exists()]
+    if existing and not args.force:
+        print("refusing to overwrite existing files (use --force):", file=sys.stderr)
+        for e in existing:
+            print(f"  {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        clear = Fernet(secret_store._passphrase_to_key(pp)).decrypt(Path(args.file).read_bytes())
+    except InvalidToken:
+        print("import passphrase is wrong (or file corrupt)", file=sys.stderr); sys.exit(1)
+
+    restored: list[str] = []
+    with tarfile.open(fileobj=io.BytesIO(clear), mode="r:gz") as tar:
+        for name, (dest, mode) in dests.items():
+            try:
+                member = tar.getmember(name)
+            except KeyError:
+                continue
+            data = tar.extractfile(member).read()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            try:
+                os.chmod(dest, mode)
+            except OSError:
+                pass
+            _chown_service_user(dest)
+            _chown_service_user(dest.parent)
+            restored.append(name)
+
+    _cli_audit("config.import", target=args.file, params={"files": restored})
+    print(f"imported: {', '.join(restored)}")
+    print("  now: sudo systemctl restart jt-proxense")
+
+
 def cmd_config_get(args):
     cfg = _read_yaml()
     cur = cfg
@@ -543,6 +680,20 @@ def _parser():
     g_unlock.add_argument("--all", action="store_true",
                           help="clear the lockout for every IP")
     p_unlock.set_defaults(func=cmd_unlock)
+
+    p_xc = sub.add_parser("export-config",
+        help="bundle config.yaml + DB + master.key into one passphrase-encrypted file (host migration)")
+    p_xc.add_argument("file")
+    p_xc.add_argument("--passphrase", help="if omitted, prompts on stdin (hidden); >= 8 chars")
+    p_xc.set_defaults(func=cmd_export_config)
+
+    p_ic = sub.add_parser("import-config",
+        help="restore an export-config bundle onto this host (stop the service first)")
+    p_ic.add_argument("file")
+    p_ic.add_argument("--passphrase")
+    p_ic.add_argument("--force", action="store_true",
+                      help="overwrite an existing config.yaml / DB / master.key")
+    p_ic.set_defaults(func=cmd_import_config)
 
     pc = sub.add_parser("config", help="config.yaml read/write")
     sc = pc.add_subparsers(dest="action", required=True)

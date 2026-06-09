@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.6.6
+# JT-PROXENSE v0.7.0
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
@@ -31,23 +31,50 @@ sudo -u jt-proxense $EDITOR /opt/jt-proxense/config.yaml
 sudo systemctl restart jt-proxense
 ```
 
-## Upgrade
+## Update
+
+The installer is idempotent — re-running the one-liner fetches the latest
+code and restarts the service:
 
 ```bash
-cd /opt/jt-proxense
-sudo -u jt-proxense git pull
-sudo systemctl restart jt-proxense
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
 ```
 
 ## Uninstall
 
+One-liner — completely removes the service, app, data, secret store + master
+key, and the service user (irreversible):
+
 ```bash
-sudo systemctl disable --now jt-proxense
-sudo rm /etc/systemd/system/jt-proxense.service
-sudo systemctl daemon-reload
-sudo rm -rf /opt/jt-proxense          # add this only if you also want to drop config + data
-sudo userdel jt-proxense              # optional
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
 ```
+
+It asks for confirmation (type `remove`); add `--yes` to skip:
+`… | sudo bash -s -- --yes`. **Export your config first if you might want it
+back** — see [Migrate to another host](#migrate-to-another-host).
+
+## Migrate to another host
+
+jt-proxense bundles everything that makes an instance (the cluster config, the
+SQLite DB with users / audit / cluster notes, and the master key that decrypts
+the stored cluster secrets) into one passphrase-encrypted file:
+
+```bash
+# on the OLD host — export (prompts for a passphrase):
+sudo jt-proxense export-config /root/jt-proxense.enc
+
+# copy /root/jt-proxense.enc to the NEW host, then install + import:
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
+sudo systemctl stop jt-proxense
+sudo jt-proxense import-config /root/jt-proxense.enc --force
+sudo systemctl restart jt-proxense
+
+# once verified, remove the old host:
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
+```
+
+The bundle contains the master key and the full DB, so keep it safe and delete
+it after import.
 
 ---
 

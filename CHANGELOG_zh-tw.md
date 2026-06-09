@@ -8,6 +8,33 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.7.0] — 2026-06-09
+
+### 新增
+
+- **主機搬移:`export-config` / `import-config` CLI。** 把構成一個
+  instance 的所有東西 —— `config.yaml`、SQLite DB(使用者/角色/稽核/
+  筆記/主機升級狀態 + 加密的叢集密鑰列)、以及解密用的
+  `/etc/jt-proxense/master.key` —— 打包成單一 passphrase 加密檔,並可在
+  另一台主機還原。DB 透過 SQLite 線上備份 API 擷取,即使服務執行中
+  快照也一致。`import-config` 沒有 `--force` 不會覆蓋既有 instance,
+  還原後會把檔案歸還給服務使用者。
+- **`uninstall.sh` —— 一行完整移除。**
+  `curl … /uninstall.sh | sudo bash` 會停用服務並移除 unit、
+  `/opt/jt-proxense`、`/var/lib/jt-proxense`、`/etc/jt-proxense`
+  (master key)、以及服務使用者。透過控制終端確認(可在 pipe 下運作)
+  或加 `--yes`。
+
+### 變更
+
+- **一行更新**現在就是重跑安裝程式(具冪等性:抓最新 + 重啟)。
+  README 與介紹頁都列出 安裝 / 更新 / 解除安裝 / 搬移 的一行指令。
+- **`main` 成為正式分支。** 一行安裝指令是從 `main` 抓的;發布現在
+  都落在 `main`,所以全新 `curl … | bash` 一定拿到最新版(先前 `main`
+  落後於開發分支,導致一行安裝默默裝到舊版)。
+
+---
+
 ## [0.6.6] — 2026-06-09
 
 ### 修正

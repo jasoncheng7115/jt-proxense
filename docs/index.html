@@ -22,7 +22,7 @@
         <a href="#" class="nav-brand">
             <img src="logo.png" alt="">
             JT-PROXENSE
-            <span class="ver">v0.6.6</span>
+            <span class="ver">v0.7.0</span>
         </a>
         <nav class="nav-links">
             <a href="#install">Install</a>
@@ -87,6 +87,11 @@
                 <div class="install-tip">
                     <strong>After install:</strong>
                     Edit <code>/opt/jt-proxense/config.yaml</code> with your PVE clusters, then <code>sudo systemctl restart jt-proxense</code>. Default URL: <code>http://&lt;your-server&gt;:8098/</code>.
+                </div>
+                <div class="install-tip">
+                    <strong>Update</strong> — re-run the installer (idempotent): <code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code><br>
+                    <strong>Uninstall</strong> (complete, irreversible): <code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash</code><br>
+                    <strong>Migrate</strong> to a new host: <code>sudo jt-proxense export-config bundle.enc</code> on the old host → install on the new one → <code>sudo jt-proxense import-config bundle.enc --force</code>.
                 </div>
             </div>
         </div>
@@ -336,7 +341,7 @@
             <a href="index.zh-tw.html">繁體中文</a>
         </nav>
         <div class="foot-meta">
-            JT-PROXENSE v0.6.6 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
+            JT-PROXENSE v0.7.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
         </div>
     </div>
 </footer>

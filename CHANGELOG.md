@@ -8,6 +8,37 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] — 2026-06-09
+
+### Added
+
+- **Host migration: `export-config` / `import-config` CLI.** Bundles
+  everything that defines an instance — `config.yaml`, the SQLite DB
+  (users / roles / audit / notes / host-upgrade state + encrypted
+  cluster-secret rows), and the `/etc/jt-proxense/master.key` that
+  decrypts them — into one passphrase-encrypted file, and restores it
+  on another host. The DB is captured via SQLite's online-backup API
+  so the snapshot is consistent even while the service is running.
+  `import-config` refuses to clobber an existing instance without
+  `--force` and hands the restored files back to the service user.
+- **`uninstall.sh` — one-line complete removal.**
+  `curl … /uninstall.sh | sudo bash` stops + disables the service and
+  removes the unit, `/opt/jt-proxense`, `/var/lib/jt-proxense`,
+  `/etc/jt-proxense` (master key), and the service user. Confirms via
+  the controlling terminal (works through a pipe) or `--yes`.
+
+### Changed
+
+- **One-line update** is now documented as simply re-running the
+  installer (it's idempotent: fetch latest + restart). README + landing
+  page now show install / update / uninstall / migrate one-liners.
+- **`main` is the canonical branch.** The install one-liner pulls from
+  `main`; releases now land there so a fresh `curl … | bash` always
+  gets the latest version (previously `main` lagged the dev branch, so
+  one-line installs silently fetched stale code).
+
+---
+
 ## [0.6.6] — 2026-06-09
 
 ### Fixed

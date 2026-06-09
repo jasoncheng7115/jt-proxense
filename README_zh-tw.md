@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.6.6
+# JT-PROXENSE v0.7.0
 
 > English version: [README.md](README.md)
 
@@ -31,23 +31,45 @@ sudo -u jt-proxense $EDITOR /opt/jt-proxense/config.yaml
 sudo systemctl restart jt-proxense
 ```
 
-## 升級
+## 更新
+
+安裝程式具冪等性 —— 重跑同一行指令就會抓最新版並重啟服務:
 
 ```bash
-cd /opt/jt-proxense
-sudo -u jt-proxense git pull
-sudo systemctl restart jt-proxense
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
 ```
 
 ## 解除安裝
 
+一行指令 —— 完整移除服務、程式、資料、密鑰庫 + master key、以及服務使用者(不可逆):
+
 ```bash
-sudo systemctl disable --now jt-proxense
-sudo rm /etc/systemd/system/jt-proxense.service
-sudo systemctl daemon-reload
-sudo rm -rf /opt/jt-proxense          # 連設定 / 資料一起清掉才需要這行
-sudo userdel jt-proxense              # 可選
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
 ```
+
+會要求確認(輸入 `remove`);要略過加 `--yes`:`… | sudo bash -s -- --yes`。
+**若日後可能要救回,請先匯出設定** —— 見[搬移到另一台主機](#搬移到另一台主機)。
+
+## 搬移到另一台主機
+
+jt-proxense 會把構成一個 instance 的所有東西(叢集設定、含使用者/稽核/筆記的
+SQLite DB、以及解密已存叢集密鑰用的 master key)打包成**一個 passphrase 加密檔**:
+
+```bash
+# 在「舊」主機 — 匯出(會問 passphrase):
+sudo jt-proxense export-config /root/jt-proxense.enc
+
+# 把 /root/jt-proxense.enc 複製到「新」主機,然後安裝 + 匯入:
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
+sudo systemctl stop jt-proxense
+sudo jt-proxense import-config /root/jt-proxense.enc --force
+sudo systemctl restart jt-proxense
+
+# 驗證沒問題後,移除舊主機:
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
+```
+
+設定包內含 master key 與完整 DB,請妥善保管,匯入後刪除。
 
 ---
 

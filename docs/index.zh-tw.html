@@ -22,7 +22,7 @@
         <a href="#" class="nav-brand">
             <img src="logo.png" alt="">
             JT-PROXENSE
-            <span class="ver">v0.6.6</span>
+            <span class="ver">v0.7.0</span>
         </a>
         <nav class="nav-links">
             <a href="#install">安裝</a>
@@ -87,6 +87,11 @@
                 <div class="install-tip">
                     <strong>裝完後：</strong>
                     編輯 <code>/opt/jt-proxense/config.yaml</code> 填入 PVE 叢集，再 <code>sudo systemctl restart jt-proxense</code>。預設網址：<code>http://&lt;your-server&gt;:8098/</code>。
+                </div>
+                <div class="install-tip">
+                    <strong>更新</strong> — 重跑安裝程式即可(冪等)：<code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code><br>
+                    <strong>解除安裝</strong>(完整、不可逆)：<code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash</code><br>
+                    <strong>搬移</strong>到新主機：舊機 <code>sudo jt-proxense export-config bundle.enc</code> → 新機安裝 → <code>sudo jt-proxense import-config bundle.enc --force</code>。
                 </div>
             </div>
         </div>
@@ -336,7 +341,7 @@
             <a href="index.html">English</a>
         </nav>
         <div class="foot-meta">
-            JT-PROXENSE v0.6.6 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
+            JT-PROXENSE v0.7.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
         </div>
     </div>
 </footer>
