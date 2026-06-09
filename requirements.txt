@@ -18,6 +18,10 @@ qrcode[pil]>=7.4.2
 
 # v0.2.x: PAM authentication backend (optional, only loaded when auth.backend='pam')
 python-pam>=2.0.2
+# python-pam 2.0.2 imports `six` at runtime but doesn't declare it as a
+# dependency, so pin it explicitly — a fresh box without six otherwise fails
+# the install smoke test (ModuleNotFoundError: six).
+six>=1.16.0
 
 # v0.3.x: LDAP / Active Directory authentication backend (optional,
 # only loaded when auth.backend='ldap'). Group → role mapping lives in

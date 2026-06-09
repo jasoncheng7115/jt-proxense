@@ -8,6 +8,26 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.1] — 2026-06-09
+
+### Fixed
+
+- **One-line install failed on modern Debian / Ubuntu (PEP 668).** On
+  systems that mark the base Python environment "externally managed"
+  (Ubuntu 24.04, Debian 12+), `install.sh` died at the dependency step.
+  It now detects the `EXTERNALLY-MANAGED` marker and installs with
+  `--break-system-packages` (this host is a dedicated appliance); older
+  systems are unaffected.
+- **Missing `six` dependency.** `python-pam` 2.0.2 imports `six` at
+  runtime without declaring it, so the install smoke test failed on a
+  fresh box (`ModuleNotFoundError: six`). `six` is now pinned in
+  `requirements.txt`.
+- **Install preflight assumed `curl`.** The reachability check now
+  accepts `curl` *or* `wget` and never blocks the install. (A box with
+  only `wget` can install via `wget -qO- … | sudo bash`.)
+
+---
+
 ## [0.7.0] — 2026-06-09
 
 ### Added

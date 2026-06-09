@@ -82,10 +82,11 @@ ask_yes_no() {
 say "[1/7] Network preflight (8s timeout per host)..."
 preflight_host() {
     local host="$1"
-    if curl -fsSI --connect-timeout 8 --max-time 8 "https://${host}/" >/dev/null 2>&1; then
+    if { command -v curl >/dev/null 2>&1 && curl -fsSI --connect-timeout 8 --max-time 8 "https://${host}/" >/dev/null 2>&1; } \
+    || { command -v wget >/dev/null 2>&1 && wget -q --spider --timeout=8 "https://${host}/" 2>/dev/null; }; then
         ok "${host} reachable"
     else
-        warn "${host} not reachable — install may fail"
+        warn "${host} not reachable (or no curl/wget yet to check) — continuing anyway"
     fi
 }
 preflight_host "github.com"
@@ -153,6 +154,18 @@ fi
 # ---------- 5. python deps ----------
 say "[5/7] Python dependencies (system pip)..."
 PIP_OPTS="--quiet --root-user-action=ignore"
+# PEP 668: modern Debian/Ubuntu (and others) mark the base environment
+# "externally managed" and refuse system-wide pip. This host is a dedicated
+# jt-proxense appliance, so permit it where that marker is present. Guarded so
+# older pip (which lacks the flag) is untouched.
+if python3 - <<'PYEOF' 2>/dev/null
+import os, sys, sysconfig
+sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)
+PYEOF
+then
+    PIP_OPTS="$PIP_OPTS --break-system-packages"
+    warn "PEP 668 environment — installing deps with --break-system-packages"
+fi
 python3 -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
 python3 -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt"
 ok "dependencies installed"

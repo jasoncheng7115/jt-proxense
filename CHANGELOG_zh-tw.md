@@ -8,6 +8,23 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.7.1] — 2026-06-09
+
+### 修正
+
+- **一行安裝在新版 Debian / Ubuntu 失敗(PEP 668)。** 在把基礎 Python
+  環境標記為「externally managed」的系統(Ubuntu 24.04、Debian 12+),
+  `install.sh` 會在安裝依賴那步掛掉。現在會偵測 `EXTERNALLY-MANAGED`
+  標記並以 `--break-system-packages` 安裝(本主機是專用 appliance);
+  舊系統不受影響。
+- **缺少 `six` 依賴。** `python-pam` 2.0.2 在執行期 import `six` 卻沒宣告,
+  導致全新主機的安裝 smoke test 失敗(`ModuleNotFoundError: six`)。
+  已在 `requirements.txt` 釘上 `six`。
+- **安裝 preflight 假設有 `curl`。** 連線檢查現在接受 `curl` 或 `wget`,
+  且不會擋住安裝。(只有 `wget` 的主機可用 `wget -qO- … | sudo bash` 安裝。)
+
+---
+
 ## [0.7.0] — 2026-06-09
 
 ### 新增
