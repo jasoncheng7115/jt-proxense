@@ -8,6 +8,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.2] — 2026-06-09
+
+### Fixed
+
+- **Host upgrade: make `apt dist-upgrade` truly unattended.** The
+  command already used `DEBIAN_FRONTEND=noninteractive` +
+  `--force-conf{def,old}`, but that doesn't silence **`needrestart`**
+  (Ubuntu 22.04+/Debian 12), which would pop an interactive "restart
+  which services?" dialog and hang the SSH session. Now the command
+  also sets `NEEDRESTART_MODE=a` and `UCF_FORCE_CONFOLD=1`, the SSH
+  exec runs with **stdin=/dev/null** (any stray prompt gets EOF and
+  proceeds/fails fast instead of blocking), and the whole run has a
+  **60-minute hard cap** — if apt ever does block, that host is killed
+  and failed and the batch continues, rather than hanging forever.
+- **`uninstall.sh`** now also removes the `/usr/local/bin/jt-proxense`
+  CLI symlink (previously left dangling).
+
+---
+
 ## [0.7.1] — 2026-06-09
 
 ### Fixed

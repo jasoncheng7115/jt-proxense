@@ -68,6 +68,7 @@ systemctl daemon-reload 2>/dev/null || true
 
 echo "[3/5] removing files…"
 rm -rf "$INSTALL_DIR" "$STATE_DIR" "$KEY_DIR"
+rm -f /usr/local/bin/jt-proxense    # CLI symlink installed by install.sh
 
 echo "[4/5] removing service user…"
 if id "$SERVICE_USER" >/dev/null 2>&1; then

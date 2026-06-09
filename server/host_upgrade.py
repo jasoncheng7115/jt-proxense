@@ -58,6 +58,7 @@ _NODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]{0,63}$")
 _LOOP_TICK_S          = 2.0
 _REBOOT_TIMEOUT_S     = 600      # 10 min for slow ZFS/initramfs boots
 _MIGRATE_WAIT_S       = 1800     # 30 min per VM migrate (safety cap)
+_APT_WAIT_S           = 3600     # hard cap on apt dist-upgrade; kill if exceeded
 _SHUTDOWN_WAIT_S      = 300      # 5 min for an ACPI graceful guest shutdown
 _START_WAIT_S         = 180      # 3 min for a guest to come back up
 _TASK_POLL_S          = 4.0
@@ -66,12 +67,19 @@ _CEPH_POLL_S          = 10.0     # how often to poll ceph status while waiting
 _CEPH_EV_EVERY_S      = 60.0     # throttle "still rebalancing…" progress events
 
 # Single source of truth for the apt command. Kept here (not user input)
-# so a misconfigured job can't run "rm -rf /" via curl. Use Dpkg
-# --force-conf{def,old} to keep existing config files where there's a
-# conflict — interactive prompts would deadlock the SSH session.
+# so a misconfigured job can't run "rm -rf /" via curl. Everything here exists
+# to make the upgrade FULLY non-interactive — an interactive prompt would
+# deadlock the SSH session (no TTY to answer it):
+#   DEBIAN_FRONTEND=noninteractive  → debconf uses defaults, never asks
+#   NEEDRESTART_MODE=a              → needrestart (Ubuntu 22.04+/Debian 12)
+#                                     auto-restarts services instead of popping
+#                                     its interactive whiptail "restart which?"
+#   UCF_FORCE_CONFOLD=1             → ucf-managed conffiles keep the old version
+#   Dpkg --force-conf{def,old}      → dpkg conffile conflicts keep existing
 APT_CMD = (
     "apt-get update && "
-    "DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y "
+    "DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a UCF_FORCE_CONFOLD=1 "
+    "apt-get dist-upgrade -y "
     "-o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold"
 )
@@ -431,7 +439,10 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
         async with asyncssh.connect(
             host, port=port, username=user, known_hosts=None,
         ) as conn:
-            proc = await conn.create_process(APT_CMD)
+            # stdin=DEVNULL: any process that still tries to read a prompt gets
+            # immediate EOF and proceeds/fails fast, instead of blocking on an
+            # open pipe with no TTY to answer.
+            proc = await conn.create_process(APT_CMD, stdin=asyncssh.DEVNULL)
             assert proc.stdout and proc.stderr
 
             async def _drain(stream, kind):
@@ -444,9 +455,25 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
                         del tail[0:50]
                     await _ev(node_id, kind, line[:400])
 
-            await asyncio.gather(_drain(proc.stdout, "info"),
-                                  _drain(proc.stderr, "warn"))
-            await proc.wait()
+            # Hard cap the whole run. If apt ever does block on a prompt (e.g. a
+            # package whose postinst reads /dev/tty directly, bypassing debconf),
+            # we kill it and fail just this host rather than hang the job forever.
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(_drain(proc.stdout, "info"),
+                                   _drain(proc.stderr, "warn"),
+                                   proc.wait()),
+                    timeout=_APT_WAIT_S,
+                )
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                await _ev(node_id, "error",
+                           f"apt exceeded {_APT_WAIT_S // 60} min and was killed "
+                           f"(likely an interactive prompt) — failing this host")
+                return False, "apt timed out (possible interactive prompt)", False
             rc = proc.returncode or 0
             rr = await conn.run("test -e /var/run/reboot-required", check=False)
             reboot_req = rr.exit_status == 0

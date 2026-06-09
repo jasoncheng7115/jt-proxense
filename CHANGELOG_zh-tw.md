@@ -8,6 +8,23 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.7.2] — 2026-06-09
+
+### 修正
+
+- **主機升級:讓 `apt dist-upgrade` 真正完全非互動。** 原本已用
+  `DEBIAN_FRONTEND=noninteractive` + `--force-conf{def,old}`,但那不會
+  讓 **`needrestart`**(Ubuntu 22.04+/Debian 12)閉嘴 —— 它會跳出互動式
+  「要重啟哪些服務?」對話框並卡住 SSH。現在指令額外設 `NEEDRESTART_MODE=a`
+  與 `UCF_FORCE_CONFOLD=1`,SSH 執行以 **stdin=/dev/null** 跑(任何殘留
+  提示會立刻收到 EOF,直接繼續或快速失敗而非卡住),整段還有 **60 分鐘
+  硬上限** —— 萬一真的卡住,該台會被 kill 並標記失敗,批次繼續,而不是
+  永遠掛著。
+- **`uninstall.sh`** 現在也會移除 `/usr/local/bin/jt-proxense` CLI
+  symlink(先前會留下斷掉的 symlink)。
+
+---
+
 ## [0.7.1] — 2026-06-09
 
 ### 修正
