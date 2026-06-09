@@ -38,6 +38,11 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# After a poll finds no Ceph on a cluster, skip this many subsequent polls
+# before re-probing (so non-Ceph clusters don't 500-probe every cycle, while
+# Ceph added later is still eventually picked up).
+_CEPH_RECHECK_CYCLES = 60
+
 
 @dataclass
 class NetworkRateTracker:
@@ -449,11 +454,12 @@ class Cluster:
             tasks = await self.client.get_cluster_tasks(running=True, limit=100)
             new_tasks: dict[str, VMTask] = {}
 
-            # Debug: Log all running tasks
-            if tasks:
-                logger.info(f"[{self.id}] Running tasks count: {len(tasks)}")
+            # Per-poll task dump — DEBUG only (this fired every poll cycle at
+            # INFO and was the bulk of the idle-CPU log spam).
+            if tasks and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"[{self.id}] Running tasks count: {len(tasks)}")
                 for t in tasks:
-                    logger.info(f"  Task: type={t.get('type')}, id={t.get('id')}, node={t.get('node')}, status={t.get('status')}")
+                    logger.debug(f"  Task: type={t.get('type')}, id={t.get('id')}, node={t.get('node')}, status={t.get('status')}")
 
             # Helper to get target from task status (detailed endpoint)
             async def get_target_from_status(node: str, upid: str) -> str:
@@ -622,9 +628,9 @@ class Cluster:
                                 target_node="",
                             )
                             new_tasks[upid] = vm_task
-                            logger.info(f"Backup task detected: vmid={current_backup_vmid} ({current_vmtype}), node={task_node}")
+                            logger.debug(f"Backup task detected: vmid={current_backup_vmid} ({current_vmtype}), node={task_node}")
                         else:
-                            logger.info(f"vzdump task found but no current backup VM detected (started={len(started_vms)}, finished={len(finished_vms)})")
+                            logger.debug(f"vzdump task found but no current backup VM detected (started={len(started_vms)}, finished={len(finished_vms)})")
                     except Exception as e:
                         logger.warning(f"Failed to get vzdump task log: {e}")
                     continue  # Skip normal processing for vzdump
@@ -1028,9 +1034,17 @@ class Cluster:
 
     async def _fetch_ceph_data(self):
         """Fetch Ceph cluster data"""
-        logger.info(f"Fetching Ceph data, nodes: {list(self.cache.nodes.keys())}")
+        # Don't re-probe Ceph every poll on clusters that have none: each probe
+        # is a PVE call that 500s on non-Ceph nodes. Once a full pass finds no
+        # Ceph we back off and only re-check every _CEPH_RECHECK_CYCLES polls
+        # (so Ceph added later is still picked up, just not instantly).
+        if getattr(self, "_ceph_skip_cycles", 0) > 0:
+            self._ceph_skip_cycles -= 1
+            return
+
+        logger.debug(f"Fetching Ceph data, nodes: {list(self.cache.nodes.keys())}")
         if not self.cache.nodes:
-            logger.info("No nodes in cache, skipping Ceph fetch")
+            logger.debug("No nodes in cache, skipping Ceph fetch")
             return
 
         # Try to get Ceph status from first online node
@@ -1039,9 +1053,9 @@ class Cluster:
                 continue
 
             try:
-                logger.info(f"Fetching Ceph status from node {node_name}")
+                logger.debug(f"Fetching Ceph status from node {node_name}")
                 ceph_status = await self.client.get_ceph_status(node_name)
-                logger.info(f"Ceph status response: {bool(ceph_status)}, keys: {list(ceph_status.keys()) if ceph_status else []}")
+                logger.debug(f"Ceph status response: {bool(ceph_status)}, keys: {list(ceph_status.keys()) if ceph_status else []}")
                 if not ceph_status:
                     continue
 
@@ -1195,10 +1209,15 @@ class Cluster:
                     ]
 
                 logger.debug(f"Ceph data fetched for cluster {self.id}: {self.cache.ceph.mon_count} MONs, {self.cache.ceph.osd_count} OSDs")
+                self._ceph_skip_cycles = 0   # found Ceph — keep polling it
                 break
 
             except Exception as e:
                 logger.debug(f"Ceph not available on {node_name}: {e}")
+        else:
+            # No online node returned a Ceph status → this cluster has no Ceph.
+            # Back off so we don't probe (and 500) on every poll cycle.
+            self._ceph_skip_cycles = _CEPH_RECHECK_CYCLES
 
     def _extract_osds_from_tree(self, osd_data: dict) -> list[CephOSD]:
         """Extract OSD list from CRUSH tree structure"""

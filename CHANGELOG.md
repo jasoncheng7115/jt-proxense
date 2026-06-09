@@ -8,6 +8,24 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.6] — 2026-06-09
+
+### Fixed
+
+- **High idle CPU from per-poll log spam + redundant Ceph probing.**
+  `cluster_manager` logged a full task dump (`Running tasks count`,
+  per-task `Task: type=…`), `Backup task detected`, and the Ceph fetch
+  trace on *every* poll cycle at INFO — ~130 journal lines/min at idle.
+  It also re-probed Ceph status on every node every cycle, which 500s
+  on non-Ceph clusters. These per-poll lines are now DEBUG, and a
+  cluster found to have no Ceph backs off (re-checks every 60 polls
+  instead of every poll). On a 4-cluster test box this cut idle CPU
+  roughly in half (~25% → ~13%, now idling between polls instead of
+  constantly busy) and log volume ~99% (131 → ~1 line/min). No change
+  to monitoring behaviour or poll cadence.
+
+---
+
 ## [0.6.5] — 2026-06-08
 
 ### Added
