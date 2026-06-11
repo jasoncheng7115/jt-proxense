@@ -146,6 +146,12 @@ class AuthConfig:
     # backend == 'ldap'. Schema documented in server/auth_ldap.py.
     # Stored as a dict so users can extend without touching the dataclass.
     ldap: dict = field(default_factory=dict)
+    # Reverse proxies allowed to set X-Forwarded-For (IPs or CIDRs). Loopback
+    # and private ranges are trusted implicitly; add public proxy IPs here.
+    # If the immediate peer is not trusted, XFF is ignored and the real socket
+    # IP is used — so a direct public client can't spoof XFF to dodge the
+    # per-IP login rate limit.
+    trusted_proxies: list = field(default_factory=list)
 
 
 @dataclass

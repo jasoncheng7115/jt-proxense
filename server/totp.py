@@ -175,11 +175,15 @@ def verify_code(user_id: int, code: str) -> bool:
         ).fetchall()
         for r in rows:
             if verify_password(code, r["code_hash"]):
-                c.execute(
-                    "UPDATE totp_backup_codes SET used_at=? WHERE id=?",
+                # Atomic consume: only succeed if WE flip used_at from NULL.
+                # A concurrent request using the same code loses the race
+                # (rowcount 0) and is rejected — strict single-use.
+                cur = c.execute(
+                    "UPDATE totp_backup_codes SET used_at=? "
+                    "WHERE id=? AND used_at IS NULL",
                     (db.now_ms(), r["id"]),
                 )
-                return True
+                return cur.rowcount == 1
     return False
 
 

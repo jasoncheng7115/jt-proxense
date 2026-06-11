@@ -427,9 +427,22 @@ class InfluxReceiver:
         # ends up as raw gzip bytes (some configs / proxies strip the
         # encoding header), peek for the gzip magic and decompress.
         if body_bytes[:2] == b"\x1f\x8b":
-            import gzip
+            import zlib
+            # Bounded decompress: never materialize more than 64 MB so a gzip
+            # bomb (8 MB compressed → multi-GB) can't exhaust memory.
+            _MAX_DECOMPRESSED = 64 * 1024 * 1024
             try:
-                body_bytes = gzip.decompress(body_bytes)
+                dco = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                out = bytearray(dco.decompress(body_bytes, _MAX_DECOMPRESSED + 1))
+                while dco.unconsumed_tail and len(out) <= _MAX_DECOMPRESSED:
+                    out += dco.decompress(dco.unconsumed_tail,
+                                          _MAX_DECOMPRESSED + 1 - len(out))
+                if len(out) > _MAX_DECOMPRESSED:
+                    self._stats["parse_errors"] += 1
+                    return web.Response(status=413,
+                                        text="gzip body too large after decompression")
+                out += dco.flush()
+                body_bytes = bytes(out)
             except Exception as e:
                 self._stats["parse_errors"] += 1
                 return web.Response(status=400, text=f"bad gzip: {e}")

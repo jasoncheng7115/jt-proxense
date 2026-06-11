@@ -292,6 +292,17 @@ async def change_password_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "current_password_invalid"}, status=401)
 
     auth.set_password(user["username"], new, must_change_pw=False)
+    # Revoke every OTHER session for this user so a stolen cookie can't outlive
+    # the password change; keep the current session so the user stays signed in.
+    current_sid = request.cookies.get(auth.SESSION_COOKIE) or ""
+    try:
+        async with db.connect() as c:
+            await c.execute("DELETE FROM sessions WHERE user_id=? AND id<>?",
+                            (user_row["id"], current_sid))
+            await c.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "session revoke after password change failed: %s", e)
     await audit.write(
         user=user["username"],
         source_ip=request.get("client_ip", "unknown"),

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import quote as _q
 import time
 from typing import Optional
 
@@ -217,7 +218,7 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
         # QEMU: classic vncproxy + RFB framebuffer grab.
         pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
         url = (f"https://{pve_node_cfg.host}:{pve_node_cfg.port}"
-               f"/api2/json/nodes/{node}/qemu/{vmid}/vncproxy")
+               f"/api2/json/nodes/{_q(node, safe='')}/qemu/{vmid}/vncproxy")
         headers = {"Cookie": f"PVEAuthCookie={ticket}"}
         if csrf:
             headers["CSRFPreventionToken"] = csrf

@@ -26,6 +26,7 @@ from aiohttp import web
 
 from . import audit
 from . import auth
+from . import db
 from . import totp as totp_mod
 from .middleware import role_required
 
@@ -123,6 +124,19 @@ async def set_password_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "password_too_short"}, status=400)
     actor, ip, rid = _audit(request)
     ok = auth.set_password(username, new_pw, must_change_pw=must_change)
+    if ok:
+        # Force the target user offline everywhere — an admin reset usually
+        # means the account may be compromised, so existing cookies must die.
+        target = auth.get_user_by_username(username)
+        if target:
+            try:
+                async with db.connect() as c:
+                    await c.execute("DELETE FROM sessions WHERE user_id=?",
+                                    (target["id"],))
+                    await c.commit()
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "session revoke after admin password reset failed: %s", e)
     await audit.write(
         user=actor, source_ip=ip, action="admin.user.set_password",
         target=username, result="ok" if ok else "not_found", request_id=rid,

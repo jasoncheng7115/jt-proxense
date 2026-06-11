@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import quote as _q
 import ssl
 from typing import Optional
 
@@ -199,7 +200,7 @@ async def console_prepare_handler(request: web.Request) -> web.Response:
     proxy_endpoint = "termproxy" if is_term else "vncproxy"
     proxy_url = (
         f"https://{pve_node_cfg.host}:{pve_node_cfg.port}"
-        f"/api2/json/nodes/{node}/{api_path}/{vmid}/{proxy_endpoint}"
+        f"/api2/json/nodes/{_q(node, safe='')}/{api_path}/{vmid}/{proxy_endpoint}"
     )
     headers = {"Cookie": f"PVEAuthCookie={ticket}"}
     if csrf:
@@ -355,7 +356,7 @@ async def console_ws_handler(request: web.Request) -> web.WebSocketResponse:
     from urllib.parse import quote as _q
     pve_url = (
         f"wss://{pve_node_cfg.host}:{pve_node_cfg.port}"
-        f"/api2/json/nodes/{node}/{api_path}/{vmid}/vncwebsocket"
+        f"/api2/json/nodes/{_q(node, safe='')}/{api_path}/{vmid}/vncwebsocket"
         f"?port={pve_port}&vncticket={_q(vnc_ticket, safe='')}"
     )
 
@@ -490,7 +491,7 @@ async def console_term_ws_handler(request: web.Request) -> web.WebSocketResponse
     from urllib.parse import quote as _q
     pve_url = (
         f"wss://{pve_node_cfg.host}:{pve_node_cfg.port}"
-        f"/api2/json/nodes/{node}/{api_path}/{vmid}/vncwebsocket"
+        f"/api2/json/nodes/{_q(node, safe='')}/{api_path}/{vmid}/vncwebsocket"
         f"?port={entry.pve_port}&vncticket={_q(entry.vnc_ticket, safe='')}"
     )
     ws_headers = {"Cookie": f"PVEAuthCookie={entry.pve_ticket}"}

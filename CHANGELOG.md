@@ -8,6 +8,41 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.3] — 2026-06-11
+
+### Security
+
+Hardening pass from a full defensive review (no critical holes were
+found; these strengthen the auth/notification surface):
+
+- **X-Forwarded-For is now only trusted from a trusted proxy.** Client
+  IP for the per-IP login rate limit is taken from XFF only when the
+  immediate peer is loopback/private (where reverse proxies sit) or
+  listed in the new `auth.trusted_proxies`. A direct public client can
+  no longer spoof XFF to dodge the 5-fails/5-min lockout.
+- **Sessions are revoked on password change/reset.** A self password
+  change drops all *other* sessions; an admin reset drops *all* of the
+  target user's sessions — a stolen cookie can't outlive the credential.
+- **Login is constant-time for unknown users.** The local backend now
+  runs a dummy Argon2 verify when the username doesn't exist, so
+  response timing no longer reveals which usernames are valid.
+- **Notification channel secrets are masked in API responses** (SMTP
+  password, webhook `Authorization`/token headers) and **webhook URLs
+  are rejected if they target loopback/link-local** (e.g. the cloud
+  metadata endpoint); private-LAN webhooks remain allowed.
+- **Telegraf influx receiver: bounded gzip decompression** (64 MB cap)
+  closes a decompression-bomb DoS; the read endpoints `/api/telegraf/*`
+  now require the `viewer` role.
+- **TOTP backup codes are now atomically single-use** (compare-and-set,
+  no read-then-write race).
+- **Config export bundles use a per-export random salt** (PBKDF2 200k);
+  bundles made before this version still import (legacy fixed-salt path
+  retained). The encrypted secret-store master-key permission failure is
+  now logged loudly instead of silently ignored.
+- Console PVE URLs URL-encode the node name (defensive).
+
+---
+
 ## [0.7.2] — 2026-06-09
 
 ### Fixed

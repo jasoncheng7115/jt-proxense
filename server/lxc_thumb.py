@@ -96,7 +96,7 @@ async def capture_lxc_text_png(
     #    ticket and PVE rejects it).
     proxy_url = (
         f"https://{pve_host}:{pve_port}"
-        f"/api2/json/nodes/{node}/lxc/{vmid}/termproxy"
+        f"/api2/json/nodes/{_urlquote(node, safe='')}/lxc/{vmid}/termproxy"
     )
     headers_post = {"Cookie": f"PVEAuthCookie={pve_auth_cookie}"}
     if pve_csrf:
@@ -124,7 +124,7 @@ async def capture_lxc_text_png(
 
             ws_url = (
                 f"wss://{pve_host}:{pve_port}"
-                f"/api2/json/nodes/{node}/lxc/{vmid}/vncwebsocket"
+                f"/api2/json/nodes/{_urlquote(node, safe='')}/lxc/{vmid}/vncwebsocket"
                 f"?port={term_port}&vncticket={_urlquote(term_ticket, safe='')}"
             )
             ws_headers = {"Cookie": f"PVEAuthCookie={pve_auth_cookie}"}

@@ -18,6 +18,7 @@ back as the X-Request-Id header. The audit module reads it from there.
 from __future__ import annotations
 
 import functools
+import ipaddress
 import logging
 import secrets
 from typing import Awaitable, Callable, Optional
@@ -25,6 +26,7 @@ from typing import Awaitable, Callable, Optional
 from aiohttp import web
 
 from . import auth as auth_mod
+from . import config as config_mod
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +60,41 @@ def _role_rank(role: Optional[str]) -> int:
     return {"viewer": 1, "operator": 2, "admin": 3}.get(role or "", 0)
 
 
+def _is_trusted_proxy(remote: Optional[str]) -> bool:
+    """Is the immediate peer allowed to set X-Forwarded-For? Reverse proxies
+    sit on loopback or the private LAN, so those are trusted implicitly;
+    additional public proxy IPs/CIDRs come from auth.trusted_proxies."""
+    if not remote:
+        return False
+    try:
+        ip = ipaddress.ip_address(remote)
+    except ValueError:
+        return False
+    if ip.is_loopback or ip.is_private or ip.is_link_local:
+        return True
+    try:
+        trusted = config_mod.get_config().auth.trusted_proxies or []
+    except Exception:
+        trusted = []
+    for entry in trusted:
+        try:
+            if ip in ipaddress.ip_network(str(entry), strict=False):
+                return True
+        except ValueError:
+            if remote == str(entry):
+                return True
+    return False
+
+
 def _client_ip(request: web.Request) -> str:
-    """Best-effort client IP. X-Forwarded-For takes precedence (we trust
-    the local reverse proxy if config says so — for v0.2 just trust it)."""
+    """Client IP for rate-limiting + audit. X-Forwarded-For is honored ONLY
+    when the immediate peer is a trusted proxy — otherwise a direct public
+    client could spoof XFF to dodge the per-IP login lockout."""
+    remote = request.remote or "unknown"
     xff = request.headers.get("X-Forwarded-For")
-    if xff:
+    if xff and _is_trusted_proxy(remote):
         return xff.split(",")[0].strip()
-    return request.remote or "unknown"
+    return remote
 
 
 # ---------------------------------------------------------------- middleware

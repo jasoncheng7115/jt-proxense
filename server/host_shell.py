@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import quote as _q
 import ssl
 import json
 import html as _html
@@ -122,7 +123,7 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
     # MUST be sent as a raw Cookie header (cookies={} would percent-encode).
     proxy_url = (
         f"https://{pve_node_cfg.host}:{pve_node_cfg.port}"
-        f"/api2/json/nodes/{node}/termproxy"
+        f"/api2/json/nodes/{_q(node, safe='')}/termproxy"
     )
     headers = {
         "Cookie": f"PVEAuthCookie={ticket}",
@@ -216,7 +217,7 @@ async def host_shell_term_ws_handler(request: web.Request) -> web.WebSocketRespo
     from urllib.parse import quote as _q
     pve_url = (
         f"wss://{pve_node_cfg.host}:{pve_node_cfg.port}"
-        f"/api2/json/nodes/{node}/vncwebsocket"
+        f"/api2/json/nodes/{_q(node, safe='')}/vncwebsocket"
         f"?port={entry.pve_port}&vncticket={_q(entry.vnc_ticket, safe='')}"
     )
     ws_headers = {"Cookie": f"PVEAuthCookie={entry.pve_ticket}"}

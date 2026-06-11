@@ -409,7 +409,7 @@ def cmd_export_config(args):
                 tar.add(str(path), arcname=name)
             included.append(name)
 
-    token = Fernet(secret_store._passphrase_to_key(pp)).encrypt(buf.getvalue())
+    token = secret_store._encrypt_with_passphrase(pp, buf.getvalue())
     out = Path(args.file)
     out.write_bytes(token)
     try:
@@ -439,7 +439,7 @@ def cmd_import_config(args):
         sys.exit(1)
 
     try:
-        clear = Fernet(secret_store._passphrase_to_key(pp)).decrypt(Path(args.file).read_bytes())
+        clear = secret_store._decrypt_with_passphrase(pp, Path(args.file).read_bytes())
     except InvalidToken:
         print("import passphrase is wrong (or file corrupt)", file=sys.stderr); sys.exit(1)
 

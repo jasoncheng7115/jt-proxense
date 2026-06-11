@@ -182,7 +182,7 @@ async def test_dispatch_fires_webhook_on_matching_audit(db_path):
 
         cid = notifications.create_channel(
             "test-hook", "webhook",
-            config={"url": f"http://127.0.0.1:{port}/hook"},
+            config={"url": f"http://localhost:{port}/hook"},
         )
         notifications.create_rule(
             "everything",
@@ -225,7 +225,7 @@ async def test_dispatch_skips_non_matching_rule(db_path):
     try:
         port = site._server.sockets[0].getsockname()[1]
         cid = notifications.create_channel("h", "webhook",
-                                            config={"url": f"http://127.0.0.1:{port}/hook"})
+                                            config={"url": f"http://localhost:{port}/hook"})
         notifications.create_rule("only-auth",
                                    action_pattern="auth.%",
                                    channel_ids=[cid])
@@ -272,7 +272,7 @@ async def test_dispatch_skips_disabled_channel(db_path):
     try:
         port = site._server.sockets[0].getsockname()[1]
         cid = notifications.create_channel("h", "webhook",
-                                            config={"url": f"http://127.0.0.1:{port}/hook"},
+                                            config={"url": f"http://localhost:{port}/hook"},
                                             enabled=False)
         notifications.create_rule("all", channel_ids=[cid])
 

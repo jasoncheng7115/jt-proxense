@@ -79,6 +79,19 @@ def needs_rehash(encoded: str) -> bool:
         return False
 
 
+_dummy_hash_cache: Optional[str] = None
+
+
+def _dummy_hash() -> str:
+    """A real Argon2 hash of a random secret, computed once and cached. Used to
+    run a full password verification for unknown/ineligible users so login
+    response time doesn't reveal which usernames exist (timing enumeration)."""
+    global _dummy_hash_cache
+    if _dummy_hash_cache is None:
+        _dummy_hash_cache = hash_password(secrets.token_urlsafe(16))
+    return _dummy_hash_cache
+
+
 # ---------------------------------------------------------------- user CRUD
 
 def create_user(username: str, password: str, *, must_change_pw: bool = False) -> int:
@@ -328,10 +341,13 @@ async def login(username: str, password: str, *, source_ip: str, user_agent: str
             import logging as _l
             _l.getLogger(__name__).warning("ldap role-grant failed for %s: %s", username, e)
     else:
-        # local backend
-        if not user or not user["enabled"] \
-                or user["password_hash"] == "*PAM*" \
-                or not verify_password(password, user["password_hash"]):
+        # local backend — ALWAYS run a password verification (against a dummy
+        # hash when the user is missing/disabled/PAM-sentinel) so the response
+        # time is the same whether or not the username exists.
+        eligible = bool(user and user["enabled"] and user["password_hash"] != "*PAM*")
+        stored = user["password_hash"] if eligible else _dummy_hash()
+        pw_ok = verify_password(password, stored)
+        if not eligible or not pw_ok:
             record_failed_login(source_ip, username)
             return None
 

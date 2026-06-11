@@ -553,8 +553,8 @@ def create_app() -> web.Application:
         # Telegraf-fed supplemental host metrics (admin/operator scope —
         # the data is host-level, not cluster-level, so we don't gate by
         # cluster scope; viewer can read).
-        ("GET",  "/api/telegraf/hosts",     get_telegraf_hosts_handler),
-        ("GET",  "/api/telegraf/{host}",    get_telegraf_host_handler),
+        ("GET",  "/api/telegraf/hosts",     role_required("viewer")(get_telegraf_hosts_handler)),
+        ("GET",  "/api/telegraf/{host}",    role_required("viewer")(get_telegraf_host_handler)),
     ]
 
     for method, path, handler in api_routes:

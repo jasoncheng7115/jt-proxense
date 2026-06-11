@@ -24,7 +24,9 @@ def _audit(request, action, target, result, params=None):
 
 @role_required("admin")
 async def channels_list_handler(request):
-    return web.json_response({"channels": notifications.list_channels()})
+    # Mask secrets (smtp password, webhook auth headers) before returning.
+    channels = [notifications.redact_channel(c) for c in notifications.list_channels()]
+    return web.json_response({"channels": channels})
 
 
 @role_required("admin")

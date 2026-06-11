@@ -8,6 +8,33 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.7.3] — 2026-06-11
+
+### 安全性
+
+一次完整防禦性審查後的強化(沒有發現重大漏洞,以下是針對認證/
+通知面的加固):
+
+- **X-Forwarded-For 只在「受信任代理」時才採信。** 登入限流用的
+  client IP 只有在直接連線端是 loopback/私網(反代所在)或列於新增的
+  `auth.trusted_proxies` 時,才取自 XFF。直連的公網用戶端無法再偽造
+  XFF 來繞過 5 次/5 分 的鎖定。
+- **改密/重設密碼會撤銷 session。** 自行改密會撤銷其他所有 session;
+  管理者重設則撤銷該帳號所有 session —— 被竊 cookie 無法存活於密碼變更。
+- **登入對不存在的帳號改為固定耗時。** local 後端在帳號不存在時改跑
+  一次 dummy Argon2 驗證,回應時間不再洩漏哪些帳號有效。
+- **通知頻道密鑰在 API 回應中遮蔽**(SMTP 密碼、webhook
+  `Authorization`/token 標頭),且 **webhook URL 指向 loopback/link-local
+  會被拒**(例如雲端 metadata 端點);私網 webhook 仍允許。
+- **Telegraf influx 接收器:解壓有上限**(64MB),堵住解壓炸彈 DoS;
+  讀取端點 `/api/telegraf/*` 現需 `viewer` 角色。
+- **TOTP 備援碼改為原子性單次使用**(compare-and-set,無讀後寫競態)。
+- **設定匯出包改用每次隨機 salt**(PBKDF2 200k);本版之前的包仍可匯入
+  (保留舊固定 salt 路徑)。密鑰庫 master key 權限設定失敗改為大聲記錄。
+- Console 的 PVE URL 對 node 名稱做 URL 編碼(防禦性)。
+
+---
+
 ## [0.7.2] — 2026-06-09
 
 ### 修正

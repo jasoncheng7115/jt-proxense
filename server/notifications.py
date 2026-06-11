@@ -78,11 +78,56 @@ def get_channel(name: str) -> Optional[dict]:
     return d
 
 
+def _validate_webhook_url(url: str) -> None:
+    """Reject webhook URLs that point at loopback or link-local addresses.
+    Link-local (169.254/16, fe80::/10) covers the cloud-metadata endpoint;
+    loopback covers same-host services. Private LAN targets are allowed on
+    purpose — internal webhooks are a normal use of this product."""
+    import ipaddress
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("webhook url must be http(s)")
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError("webhook url must have a host")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return  # hostname (not a literal IP) — DNS-rebinding is out of scope here
+    if ip.is_loopback or ip.is_link_local:
+        raise ValueError("webhook url may not target loopback/link-local addresses")
+
+
+# Config keys whose values are secrets and must be masked in API responses.
+_SECRET_CONFIG_KEYS = {"smtp_password", "password", "token", "secret"}
+
+
+def redact_channel(ch: dict) -> dict:
+    """Return a copy of a channel dict with secret config values masked, for
+    safe display in API responses (never used on the send path)."""
+    out = dict(ch)
+    cfg = dict(out.get("config") or {})
+    for k in list(cfg.keys()):
+        if k.lower() in _SECRET_CONFIG_KEYS and cfg[k]:
+            cfg[k] = "***"
+    headers = cfg.get("headers")
+    if isinstance(headers, dict):
+        cfg["headers"] = {
+            k: ("***" if k.lower() in ("authorization", "x-api-key", "token", "cookie") else v)
+            for k, v in headers.items()
+        }
+    out["config"] = cfg
+    return out
+
+
 def create_channel(name: str, type_: str, config: dict, *, enabled: bool = True) -> int:
     if type_ not in ("webhook", "email"):
         raise ValueError(f"unsupported channel type: {type_}")
-    if type_ == "webhook" and not config.get("url"):
-        raise ValueError("webhook channel requires url")
+    if type_ == "webhook":
+        if not config.get("url"):
+            raise ValueError("webhook channel requires url")
+        _validate_webhook_url(str(config["url"]))
     if type_ == "email":
         for k in ("smtp_host", "smtp_port", "to"):
             if not config.get(k):
@@ -110,6 +155,8 @@ def update_channel(name: str, *, enabled: Optional[bool] = None,
     if enabled is not None:
         sets.append("enabled = ?"); args.append(1 if enabled else 0)
     if config is not None:
+        if config.get("url"):
+            _validate_webhook_url(str(config["url"]))
         sets.append("config_json = ?"); args.append(json.dumps(config, ensure_ascii=False))
     if not sets:
         return False

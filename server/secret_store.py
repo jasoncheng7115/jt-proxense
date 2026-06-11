@@ -65,8 +65,11 @@ def ensure_master_key(path: Path | None = None) -> Path:
     if p.exists():
         try:
             os.chmod(p, 0o600)
-        except PermissionError:
-            pass
+        except OSError as e:
+            # Don't fail startup, but surface it loudly — a world-readable
+            # master key is a real exposure the operator needs to know about.
+            logger.error("could not enforce 0600 on master key %s: %s — "
+                         "fix file permissions manually", p, e)
         return p
     p.parent.mkdir(parents=True, exist_ok=True)
     key = Fernet.generate_key()
@@ -306,16 +309,42 @@ def rotate_key(*, actor: str = "cli", new_key: bytes | None = None) -> str:
 # is meaningful (you can move it to a fresh install) without us re-using the
 # master key (which the destination install won't have).
 
-def _passphrase_to_key(passphrase: str) -> bytes:
-    """Derive a Fernet-compatible key from a human passphrase. PBKDF2-SHA256
-    100k iterations. Salt is fixed (we want determinism — operator types
-    same passphrase, gets same key). Long passphrases are recommended."""
+# New passphrase-encryption envelope: a magic prefix + 16-byte random salt +
+# Fernet token. Old dumps (raw Fernet token, no prefix) used a FIXED salt at
+# 100k iterations — _decrypt_with_passphrase still reads those, so existing
+# bundles keep importing. New dumps use a per-dump random salt at 200k.
+_KDF_MAGIC = b"JTPSALT1:"
+_LEGACY_SALT = b"jt-proxense-secret-export-v1"
+
+
+def _derive_key(passphrase: str, salt: bytes, iterations: int) -> bytes:
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    salt = b"jt-proxense-secret-export-v1"
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100_000)
-    raw = kdf.derive(passphrase.encode("utf-8"))
-    return base64.urlsafe_b64encode(raw)
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt,
+                     iterations=iterations)
+    return base64.urlsafe_b64encode(kdf.derive(passphrase.encode("utf-8")))
+
+
+def _passphrase_to_key(passphrase: str) -> bytes:
+    """Legacy fixed-salt deriver (100k). Kept for decrypting old dumps."""
+    return _derive_key(passphrase, _LEGACY_SALT, 100_000)
+
+
+def _encrypt_with_passphrase(passphrase: str, data: bytes) -> bytes:
+    """Encrypt `data` under a passphrase using a per-call random salt."""
+    salt = os.urandom(16)
+    token = Fernet(_derive_key(passphrase, salt, 200_000)).encrypt(data)
+    return _KDF_MAGIC + salt + token
+
+
+def _decrypt_with_passphrase(passphrase: str, blob: bytes) -> bytes:
+    """Decrypt a blob from _encrypt_with_passphrase, OR a legacy fixed-salt
+    Fernet token. Raises cryptography.fernet.InvalidToken on wrong passphrase."""
+    if blob.startswith(_KDF_MAGIC):
+        off = len(_KDF_MAGIC)
+        salt, token = blob[off:off + 16], blob[off + 16:]
+        return Fernet(_derive_key(passphrase, salt, 200_000)).decrypt(token)
+    return Fernet(_passphrase_to_key(passphrase)).decrypt(blob)
 
 
 def export_dump(path: Path, *, passphrase: str, actor: str = "cli") -> int:
@@ -347,7 +376,7 @@ def export_dump(path: Path, *, passphrase: str, actor: str = "cli") -> int:
         "exported_at": int(time.time()),
         "rows": out,
     }, ensure_ascii=False).encode("utf-8")
-    wrap = Fernet(_passphrase_to_key(passphrase)).encrypt(payload)
+    wrap = _encrypt_with_passphrase(passphrase, payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(wrap)
     os.chmod(path, 0o600)
@@ -362,7 +391,7 @@ def import_dump(path: Path, *, passphrase: str, actor: str = "cli",
         raise FileNotFoundError(path)
     blob = path.read_bytes()
     try:
-        clear = Fernet(_passphrase_to_key(passphrase)).decrypt(blob)
+        clear = _decrypt_with_passphrase(passphrase, blob)
     except InvalidToken:
         raise ValueError("import passphrase is wrong")
     data = json.loads(clear.decode("utf-8"))
