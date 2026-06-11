@@ -22,7 +22,7 @@
         <a href="#" class="nav-brand">
             <img src="logo.png" alt="">
             JT-PROXENSE
-            <span class="ver">v0.7.3</span>
+            <span class="ver">v0.8.0</span>
         </a>
         <nav class="nav-links">
             <a href="#install">Install</a>
@@ -39,7 +39,7 @@
 <section class="hero">
     <div class="container">
         <div class="hero-pill">Live · Real-time PVE telemetry</div>
-        <h1>See your Proxmox VE<br>from the starship bridge.</h1>
+        <h1>The real-time<br>command center for Proxmox VE.</h1>
         <p class="hero-sub">
             Real-time Proxmox VE monitoring with a sci-fi cyberpunk UI.
             Six views over VMs, containers, nodes, storage, and Ceph &mdash;
@@ -88,10 +88,41 @@
                     <strong>After install:</strong>
                     Edit <code>/opt/jt-proxense/config.yaml</code> with your PVE clusters, then <code>sudo systemctl restart jt-proxense</code>. Default URL: <code>http://&lt;your-server&gt;:8098/</code>.
                 </div>
-                <div class="install-tip">
-                    <strong>Update</strong> — re-run the installer (idempotent): <code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code><br>
-                    <strong>Uninstall</strong> (complete, irreversible): <code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash</code><br>
-                    <strong>Migrate</strong> to a new host: <code>sudo jt-proxense export-config bundle.enc</code> on the old host → install on the new one → <code>sudo jt-proxense import-config bundle.enc --force</code>.
+                <div class="lifecycle">
+                    <div class="lifecycle-row">
+                        <div class="lifecycle-label">Update</div>
+                        <div class="lifecycle-body">
+                            <p>Re-run the installer — idempotent, config and data are preserved.</p>
+                            <div class="code-block">
+                                <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash">Copy</button>
+<span class="prompt">$</span>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
+                            </div>
+                        </div>
+                    </div>
+                    <div class="lifecycle-row">
+                        <div class="lifecycle-label danger">Uninstall</div>
+                        <div class="lifecycle-body">
+                            <p>Removes the service, program and data completely (irreversible).</p>
+                            <div class="code-block">
+                                <button class="copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash">Copy</button>
+<span class="prompt">$</span>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
+                            </div>
+                        </div>
+                    </div>
+                    <div class="lifecycle-row">
+                        <div class="lifecycle-label">Migrate</div>
+                        <div class="lifecycle-body">
+                            <p>Export one encrypted bundle (config, database, keys) on the old host → install on the new host, then import.</p>
+                            <div class="code-block">
+                                <button class="copy-btn" data-copy="sudo jt-proxense export-config bundle.enc">Copy</button>
+<span class="prompt">$</span>sudo jt-proxense export-config bundle.enc <span class="code-note"># old host</span>
+                            </div>
+                            <div class="code-block">
+                                <button class="copy-btn" data-copy="sudo jt-proxense import-config bundle.enc --force">Copy</button>
+<span class="prompt">$</span>sudo jt-proxense import-config bundle.enc --force <span class="code-note"># new host (install first)</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -341,7 +372,7 @@
             <a href="index.zh-tw.html">繁體中文</a>
         </nav>
         <div class="foot-meta">
-            JT-PROXENSE v0.7.3 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
+            JT-PROXENSE v0.8.0 &nbsp;·&nbsp; © 2026 Jason Cheng (Jason Tools)
         </div>
     </div>
 </footer>

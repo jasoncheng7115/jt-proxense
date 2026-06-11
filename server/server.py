@@ -33,6 +33,8 @@ from . import ocr
 from . import pve_tasks
 from . import backup_jobs
 from . import node_inspect
+from . import log_health
+from . import vm_export
 from . import rrd_proxy
 from . import vm_backups
 from . import host_shell
@@ -661,6 +663,16 @@ def create_app() -> web.Application:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
+    # Log-derived health findings (ECC/MCE/OOM/disk errors; viewer+)
+    for method, path, handler in log_health.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # VM export to OVA / Hyper-V (operator+; internal job queue)
+    for method, path, handler in vm_export.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
     # v0.4 node hardware + disks/SMART (viewer+)
     for method, path, handler in node_hardware.ROUTES:
         route = app.router.add_route(method, path, handler)
@@ -887,6 +899,13 @@ async def start_server():
     # etc.). Each job's state is fully driven from SQLite so this just
     # re-launches the per-job runner.
     asyncio.create_task(host_upgrade.resume_running_jobs_on_startup())
+
+    # Export jobs: mark conversions orphaned by the restart as failed,
+    # then run the 24 h output-retention reaper.
+    async def _export_lifecycle():
+        await vm_export.mark_orphans_on_startup()
+        await vm_export.retention_reaper()
+    asyncio.create_task(_export_lifecycle())
 
     return runner
 

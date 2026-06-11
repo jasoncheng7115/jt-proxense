@@ -8,6 +8,98 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.0] — 2026-06-11
+
+### Added
+
+- **VM export to OVA / Hyper-V VHDX** (operator+, QEMU only). VM context
+  menu gains "Export to other format" driving `jt_pve2ova` /
+  `jt_pve2hyperv` on the node over SSH. The wizard detects the tools
+  (one-click install / upgrade with GitHub latest-version check, missing
+  deps like `ovftool` surfaced), lets you pick a temp directory from the
+  node's file-path storages (free space + writability validated against
+  the estimated source-disk total; tight space needs explicit confirm),
+  and warns when the VM is running (conversion is live-read, no
+  snapshot — crash-consistent at best). Conversions run in an internal
+  job queue (`export_jobs` table, migration 008) that survives closed
+  browser windows; the new "Export jobs" panel (Tasks page) shows
+  status/log, streams downloads over SSH, supports delete-now, and a
+  server-side reaper purges outputs 24 h after completion. In-flight
+  jobs orphaned by a daemon restart are marked failed for manual review.
+  Every action is audited.
+- **Log-derived health findings.** New `GET /api/clusters/{id}/log-health`
+  scans each node's syslog tail (5-min cache, single-flight) for
+  uncorrectable/corrected ECC, MCE, OOM-kill, disk I/O errors, ATA CRC,
+  filesystem corruption, kernel BUG/panic, segfaults and hung tasks —
+  surfaced as critical/warning cards on the Health page.
+- **Add / delete connections from the WebUI.** Settings → Clusters gains
+  a "new connection" form (cluster or standalone node; API-token auth)
+  and per-connection delete — persisted to config.yaml with hot reload,
+  no restart.
+- **Users page entry points.** The user-management page (existed at
+  /users since v0.4 but had no door) is now in the sidebar (admin-only,
+  shortcut `A`) and the command palette.
+- **Matrix table column picker.** Choose visible columns (persisted);
+  six previously unavailable columns: cluster, vCPU, memory quota, disk
+  usage, disk total, disk I/O.
+- **Thumbnail auto-fit.** The size slider is now a target width — the
+  grid picks the closest column count and stretches cards to fill the
+  row exactly, live while dragging.
+- **Ceph: OSD usage distribution chart** next to the latency scatter —
+  one bar per OSD, usage-threshold colours, average marker.
+
+### Changed
+
+- **Panel-card unification sweep.** Dashboard, Ceph, Storage, Health,
+  Tasks, Backups, Upgrade and Users now share the canonical panel-card
+  surface (cyan rim + scan-line + dot-header); local clones removed.
+- **Storage page redesign.** Tank colours now follow a cool-band
+  per-type palette (teal ZFS / steel dir / azure LVM / green NFS /
+  violet PBS / cyan RBD) with amber/red reserved for 85 %/95 % usage;
+  section frames unified; filter tabs gained icons; view toggles and
+  detail-page actions show text labels when width allows.
+- **Nodes page.** Per-cluster load ring + stats sidebar merged into one
+  compact strip above the node grid; standalone hosts share a single
+  section instead of one full-width row each.
+- **Ceph page.** Bounded card growth (internal scroll for daemons,
+  pools, OSD array) keeps the three columns aligned at any cluster
+  size.
+- Cluster selector moved next to the pause button, widened, and is no
+  longer disabled on the dashboard.
+- zh-TW terminology: 「記錄」 replaces 「日誌」 everywhere; treemap is
+  now 「矩形樹圖」.
+- Sidebar brand shows only the version (cluster name lives in the
+  selector).
+
+### Fixed
+
+- **Storage right-click menu / tooltip rendered far from the cursor.**
+  Two root causes: the page-enter transition persisted a non-none
+  transform (making `.view-container` the containing block for every
+  `position: fixed` descendant), and the menu wasn't portaled. Both
+  fixed; menus now render via `createPortal(document.body)`.
+- **Tasks page rendered an unstyled table when deep-linked.** `.vm-table`
+  base styles lived only in the matrix view's style block; moved to the
+  global stylesheet.
+- Matrix toolbar buttons no longer wrap CJK labels mid-character —
+  labels collapse to icons when the toolbar runs out of width.
+- Copy-UPID button no longer wraps to two lines; VMID filter input
+  height matches the dropdowns beside it.
+- "Select all VMs with tag" bar is now translated.
+- Panel-head count chips readable again (contrast bump).
+
+### Security
+
+- vm_export: operator+ on every route; whitelist-validated formats /
+  ESXi versions / node names; `shlex.quote` on all remote values;
+  download filenames checked against the job's recorded output list
+  (no traversal); purge path re-validated against the server-generated
+  prefix; tool installs, job create/delete and downloads audited.
+- log_health: viewer-gated, read-only, throttled via the global PVE
+  semaphore with 5-min per-cluster cache.
+
+---
+
 ## [0.7.3] — 2026-06-11
 
 ### Security
