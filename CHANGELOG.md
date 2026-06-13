@@ -8,6 +8,70 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.1] — 2026-06-13
+
+### Added
+
+- **Per-node NTP / chrony configuration** (admin). Node context menu →
+  "NTP": shows `chronyc` sync status + sources, lets you edit the NTP
+  server list (written to a `/etc/chrony/conf.d/jt-proxense-ntp.conf`
+  drop-in, never touching the distro's `chrony.conf`) and restart
+  chrony — all over SSH. Server allow-list-validates every server
+  entry and audits writes.
+- **SSH-setup helper.** The node-level SSH features (NTP, host upgrade,
+  VM export, storage download) need passwordless root SSH from the
+  jt-proxense host; a new "SSH setup guide" surfaces the host's public
+  key plus copy-paste `ssh-copy-id` / verify commands. Reachable from
+  Settings → Server, and offered inline whenever an SSH "permission
+  denied" error appears. `GET /api/ssh/pubkey` reads (and first-run
+  generates) the host keypair.
+- **Ceph I/O panel** gains an IOPS trend chart (shares the byte-rate
+  wave engine) and an average-OSD-latency readout; the OSD usage
+  distribution chart gains instant hover tooltips.
+
+### Changed
+
+- **Host-upgrade now steers the API endpoint off a node before
+  rebooting it.** If the node being rebooted is jt-proxense's active
+  PVE endpoint, the client proactively hops to another healthy node
+  instead of waiting for reactive failover — no apparent outage during
+  the reboot window. (Multi-node clusters only; standalone nodes still
+  briefly unreachable, as expected.)
+- **Plix font weight split** — Chinese now uses Plix Light for body and
+  Plix Regular for headings/bold (single-weight mapping made bold CJK
+  look dim next to Latin); Latin stays Orbitron / Share Tech Mono.
+- **Radar view** — phosphor afterglow sweep, per-blip sonar ping
+  ripples, expanding centre pulse, and a rotating outer degree-tick
+  ring.
+- Matrix toolbar buttons unified on the display face at a larger size;
+  numerous modal font-size bumps (create wizard, cluster-admin modals,
+  upgrade wizard) and the create wizard's native `<select>`s replaced
+  with the cyber select.
+- Cluster ops button bar re-laid-out as a uniform full-width grid.
+- Tasks detail pane restyled to match the matrix; the task table is now
+  sortable by every column; log text is selectable + has a copy button.
+- zh-TW terminology: 任務 → 作業 (everywhere), 資源池 → 資源集區,
+  「即時」→「即時心電圖」.
+- Tab-title health badge uses plain-text markers instead of emoji.
+
+### Fixed
+
+- Cluster ops button bar collapsed to a single right-hand column.
+- Storage right-click menu / tooltip rendered far from the cursor
+  (portaled to body; page-transition transform no longer persists).
+- VMID filter / storage-detail search heights now match their
+  neighbouring controls.
+- Sidebar version tag repositioned tight under the wordmark.
+
+### Security
+
+- node_ntp + ssh_setup are admin-gated; NTP server strings pass a
+  hostname/IP allow-list and are shell-quoted; the chrony drop-in path
+  is fixed (no operator-controlled path). SSH pubkey endpoint is
+  read-only.
+
+---
+
 ## [0.8.0] — 2026-06-11
 
 ### Added

@@ -35,6 +35,8 @@ from . import backup_jobs
 from . import node_inspect
 from . import log_health
 from . import vm_export
+from . import node_ntp
+from . import ssh_setup
 from . import rrd_proxy
 from . import vm_backups
 from . import host_shell
@@ -670,6 +672,16 @@ def create_app() -> web.Application:
 
     # VM export to OVA / Hyper-V (operator+; internal job queue)
     for method, path, handler in vm_export.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # Per-node NTP / chrony config (admin; SSH-based)
+    for method, path, handler in node_ntp.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # SSH pubkey helper (admin) — powers the passwordless-SSH setup SOP
+    for method, path, handler in ssh_setup.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

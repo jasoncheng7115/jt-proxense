@@ -496,6 +496,15 @@ async def _reboot_node(cluster, node: str, node_id: int) -> bool:
         await _ev(node_id, "error", "asyncssh not installed")
         return False
     host, user, port = _ssh_for(cluster, node)
+    # If this host happens to be jt-proxense's ACTIVE API endpoint, hop
+    # off it now — reactive failover would otherwise burn a few failed
+    # polls (and look like an outage) while the host reboots.
+    try:
+        if cluster.client.steer_away_from(host):
+            await _ev(node_id, "info",
+                      f"API endpoint steered away from {host} before reboot")
+    except Exception:
+        pass
     await _ev(node_id, "info", f"reboot requested on {host}")
     try:
         async with asyncssh.connect(

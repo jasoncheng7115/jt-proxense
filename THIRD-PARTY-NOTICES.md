@@ -51,6 +51,7 @@ dependencies. They are not re-fetched at runtime.
 | **Orbitron** | SIL Open Font License 1.1 | <https://fonts.google.com/specimen/Orbitron> |
 | **Rajdhani** | SIL Open Font License 1.1 | <https://fonts.google.com/specimen/Rajdhani> |
 | **Share Tech Mono** | SIL Open Font License 1.1 | <https://fonts.google.com/specimen/Share+Tech+Mono> |
+| **Plix 普力士** (IBM Plex Sans CJK merge; CJK glyphs) | SIL Open Font License 1.1 | <https://github.com/cathree3/Plix> |
 
 The SIL Open Font License 1.1 permits redistribution and embedding in any
 product, including commercial ones, provided the fonts are not sold by

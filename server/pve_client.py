@@ -182,6 +182,28 @@ class PVEClient:
 
             raise
 
+    def steer_away_from(self, host: str) -> bool:
+        """Proactively move the active endpoint OFF `host` (e.g. right
+        before the host-upgrade orchestrator reboots it), instead of
+        waiting for max_consecutive_failures to trigger reactive
+        failover. No-op when `host` isn't the active endpoint or there
+        is nowhere else to go. Returns True if we switched."""
+        cur = self.current_node
+        if cur is None or cur.host != host or len(self.nodes) < 2:
+            return False
+        for i in range(1, len(self.nodes)):
+            idx = (self._current_node_index + i) % len(self.nodes)
+            cand = self.nodes[idx]
+            if cand.host == host:
+                continue
+            health = self.node_health[f"{cand.host}:{cand.port}"]
+            if health.healthy or health.consecutive_failures < self.max_consecutive_failures:
+                self._current_node_index = idx
+                logger.info("steered API endpoint away from %s → %s:%s (pre-reboot)",
+                            host, cand.host, cand.port)
+                return True
+        return False
+
     async def _failover(self):
         """Switch to next healthy node"""
         original_index = self._current_node_index
