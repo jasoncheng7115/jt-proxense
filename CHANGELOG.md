@@ -8,6 +8,29 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.2] — 2026-06-13
+
+### Added
+
+- **One-click SSH key propagation across a cluster.** The SSH-setup
+  guide now lets you authorise just ONE node by hand (`ssh-copy-id`),
+  then pick it as a "seed" and have jt-proxense fan the host public key
+  out to every other member — PVE cluster nodes share root SSH, so the
+  seed reaches its peers. Per-node ✓/✕ results; idempotent (re-runnable).
+  New `GET /api/ssh/targets` (cluster/node list for the picker) and
+  `POST /api/ssh/propagate` (admin, audited; pushes only the server's
+  own validated pubkey, piped via stdin so it's never shell-interpolated
+  on the peer).
+
+### Security
+
+- ssh.propagate is admin-gated + audited; the propagated key is read
+  from the host's own file and format-validated (operator input cannot
+  inject a key); inter-node command is single-quoted and the key
+  travels over stdin.
+
+---
+
 ## [0.8.1] — 2026-06-13
 
 ### Added

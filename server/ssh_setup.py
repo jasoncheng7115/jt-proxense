@@ -12,18 +12,25 @@ Route:
 from __future__ import annotations
 
 import logging
-import os
+import re
+import shlex
 import subprocess
 from pathlib import Path
 
 from aiohttp import web
 
+from . import audit
+from .cluster_manager import cluster_manager
 from .middleware import role_required
 
 logger = logging.getLogger(__name__)
 
 _KEY = Path.home() / ".ssh" / "id_ed25519"
 _PUB = Path.home() / ".ssh" / "id_ed25519.pub"
+
+# ed25519/rsa public key line — used to refuse anything that isn't a key
+# before it ever reaches a shell.
+_PUBKEY_RE = re.compile(r"^(ssh-ed25519|ssh-rsa|ecdsa-sharp?2-nistp\d+)\s+[A-Za-z0-9+/=]+(\s+\S+)?$")
 
 
 @role_required("admin")
@@ -50,6 +57,116 @@ async def pubkey_handler(request: web.Request) -> web.Response:
                                   "error": str(e)}, status=500)
 
 
+def _read_pubkey() -> str | None:
+    try:
+        return _PUB.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+
+
+@role_required("admin")
+async def targets_handler(request: web.Request) -> web.Response:
+    """List clusters + their node names so the UI can offer a
+    seed-node picker for key propagation."""
+    out = []
+    data = (cluster_manager.get_all_data() or {}).get("clusters", {})
+    for cid, cd in data.items():
+        nodes = sorted((cd or {}).get("nodes", {}).keys())
+        if nodes:
+            out.append({"id": cid, "name": (cd or {}).get("name") or cid,
+                        "nodes": nodes})
+    return web.json_response({"ok": True, "clusters": out})
+
+
+@role_required("admin")
+async def propagate_handler(request: web.Request) -> web.Response:
+    """Fan the jt-proxense host pubkey out across a cluster from ONE
+    already-seeded node: we SSH into `seed_node` (which the operator
+    has authorised), then from THERE append the key to every other
+    member's /root/.ssh/authorized_keys — PVE clusters share root SSH
+    between members, so the seed node can reach its peers.
+
+    Body: {cluster_id, seed_node}. Admin-only, audited.
+    """
+    user = (request.get("user") or {}).get("username", "anonymous")
+    ip = request.get("client_ip", "unknown")
+    rid = request.get("request_id", "")
+
+    body = await request.json()
+    cid = str(body.get("cluster_id", ""))
+    seed = str(body.get("seed_node", ""))
+
+    cluster = cluster_manager.get_cluster(cid)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+
+    pubkey = _read_pubkey()
+    if not pubkey or not _PUBKEY_RE.match(pubkey):
+        return web.json_response({"error": "no_pubkey"}, status=500)
+
+    health = cluster.client.get_health_status() or {}
+    if seed not in health:
+        return web.json_response({"error": "bad_seed_node"}, status=400)
+    seed_host = health[seed].get("host") or seed
+    targets = [(n, (info or {}).get("host") or n)
+               for n, info in health.items() if n != seed]
+    if not targets:
+        return web.json_response({"error": "single_node_cluster"}, status=400)
+
+    # Per-target: pipe the key over the inter-node SSH hop and append it
+    # idempotently. The key travels via stdin so it never has to be
+    # quoted inside the target-side command. Inner command is
+    # single-quoted → sent literally to the peer.
+    target_hosts = [h for _, h in targets]
+    remote_inner = ("umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; "
+                    "k=$(cat); grep -qF \"$k\" ~/.ssh/authorized_keys || "
+                    "printf '%s\\n' \"$k\" >> ~/.ssh/authorized_keys")
+    script_lines = [f"KEY={shlex.quote(pubkey)}"]
+    for h in target_hosts:
+        qh = shlex.quote(h)
+        script_lines.append(
+            f"if printf '%s\\n' \"$KEY\" | ssh -o BatchMode=yes "
+            f"-o StrictHostKeyChecking=no -o ConnectTimeout=8 root@{qh} "
+            f"{shlex.quote(remote_inner)}; then echo \"OK {h}\"; "
+            f"else echo \"FAIL {h}\"; fi")
+    script = "\n".join(script_lines)
+
+    user_ssh = getattr(cluster.config, "ssh_user", None) or "root"
+    port = int(getattr(cluster.config, "ssh_port", None) or 22)
+    results = []
+    try:
+        import asyncssh
+        async with asyncssh.connect(seed_host, port=port, username=user_ssh,
+                                    known_hosts=None) as conn:
+            r = await conn.run(script, check=False, timeout=90)
+            for line in (r.stdout or "").splitlines():
+                line = line.strip()
+                if line.startswith("OK "):
+                    results.append({"host": line[3:], "ok": True})
+                elif line.startswith("FAIL "):
+                    results.append({"host": line[5:], "ok": False})
+            err_tail = (r.stderr or "").strip()[:300]
+    except Exception as e:
+        await audit.write(user=user, source_ip=ip, request_id=rid,
+                          action="ssh.propagate", cluster_id=cid,
+                          target=f"seed={seed}", result=f"error: {e}")
+        return web.json_response(
+            {"ok": False, "error": str(e),
+             "message": "could not SSH into the seed node — authorise it first"},
+            status=502)
+
+    ok_n = sum(1 for x in results if x["ok"])
+    await audit.write(user=user, source_ip=ip, request_id=rid,
+                      action="ssh.propagate", cluster_id=cid,
+                      target=f"seed={seed}",
+                      result=f"ok ({ok_n}/{len(results)})",
+                      params={"seed": seed, "targets": target_hosts})
+    return web.json_response({"ok": True, "results": results,
+                              "stderr": err_tail})
+
+
 ROUTES = [
-    ("GET", r"/api/ssh/pubkey", pubkey_handler),
+    ("GET",  r"/api/ssh/pubkey",    pubkey_handler),
+    ("GET",  r"/api/ssh/targets",   targets_handler),
+    ("POST", r"/api/ssh/propagate", propagate_handler),
 ]
