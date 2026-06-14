@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.8.2
+# JT-PROXENSE v0.8.3
 
 > English version: [README.md](README.md)
 
@@ -487,6 +487,27 @@ curl -k -H "Authorization: PVEAPIToken=monitoring@pve!mon=<TOKEN>" \
 
 Apache License 2.0 — 見 [LICENSE](LICENSE)。
 第三方依賴授權清單：[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+## 免責聲明
+
+本軟體依「現狀」（AS IS）提供，不附帶任何明示或默示之擔保，包括但不限於
+適售性、特定用途適用性及非侵權之擔保。在任何情況下，作者或著作權人均不
+對因使用本軟體或與本軟體相關而產生之任何索賠、損害或其他責任負責。
+
+特別說明：
+
+- **本軟體並非 Proxmox 官方產品**，與 Proxmox Server Solutions GmbH
+  無任何隸屬、背書或支援關係。「Proxmox」與「Proxmox VE」為其各自
+  權利人之商標，此處僅用於描述互通性。
+- JT-PROXENSE 會對您的叢集執行**會改變狀態的操作**（VM/CT 開關機、
+  遷移、備份、主機升級、NTP／儲存／防火牆設定、SSH 金鑰佈署等），
+  誤用可能導致停機或資料遺失。請務必先在非正式環境測試；使用所生之
+  一切後果由您自行承擔。
+- 部分功能需要 jt-proxense 主機到 PVE 節點的**免密碼 root SSH**。
+  是否授予此存取權限由您自行決定並承擔風險，並請妥善保護該主機。
+- 部署與操作本軟體時，您須自行遵循所屬組織之政策及一切適用法律。
+
+使用本軟體即表示您接受上述條款。
 
 ---
 

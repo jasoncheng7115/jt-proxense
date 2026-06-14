@@ -665,6 +665,8 @@ section {
 .foot-links a { color: var(--text-dim); }
 .foot-links a:hover { color: var(--cyan); }
 .foot-meta { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; }
+.foot-disclaimer { margin-top: 14px; max-width: 760px; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--text-muted); }
+.foot-disclaimer a { color: var(--cyan); }
 
 /* ===========================================================
    RESPONSIVE

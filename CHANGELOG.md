@@ -8,6 +8,34 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.3] — 2026-06-14
+
+### Changed
+
+- **The matrix table is now the house standard.** Tasks, Backups and
+  User-management tables all inherit the canonical `.vm-table` look
+  (sticky uppercase cyan header, consistent row height / cell padding,
+  shared hover + selected-row treatment, no per-view zebra striping).
+  The tasks table is sortable by every column; the users table reuses
+  the same surface.
+- **Brand refresh.** Logo mark redrawn — a single bold hexagon ring
+  with an ascending core chevron and a bright core node (was three
+  nested hexagons + crosshair). Wordmark switched to the Share Tech
+  Mono terminal face. Top-bar clock reframed to match the cluster
+  selector exactly (40px, angled clip-path corners, same cyan rim).
+- **README + landing page** now carry an explicit Disclaimer / "as-is,
+  no warranty" notice, a not-affiliated-with-Proxmox statement, and a
+  reminder that the tool performs state-changing operations.
+
+### Fixed
+
+- Tasks split-pane top border looked thicker on one side (the sticky
+  table header painted over the card's top hairline on the left only);
+  the decorative top line is dropped on that card so all four edges are
+  uniform.
+
+---
+
 ## [0.8.2] — 2026-06-13
 
 ### Added

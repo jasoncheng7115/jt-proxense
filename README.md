@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.8.2
+# JT-PROXENSE v0.8.3
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
@@ -494,6 +494,33 @@ This is a privately maintained project. **Pull requests are not accepted.** Open
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 Third-party dependency licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+## Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+In particular:
+
+- **Not an official Proxmox product.** Not affiliated with, endorsed by,
+  or supported by Proxmox Server Solutions GmbH. "Proxmox" and
+  "Proxmox VE" are trademarks of their respective owner, used here only
+  to describe interoperability.
+- JT-PROXENSE performs **state-changing operations** on your clusters
+  (VM/CT power, migration, backup, host upgrade, NTP / storage /
+  firewall config, SSH key distribution, …) that can cause downtime or
+  data loss if misused. Test in a non-production environment first; you
+  are solely responsible for any consequences of use.
+- Several features require **passwordless root SSH** from the
+  jt-proxense host to your PVE nodes. Granting that access is your
+  decision and your risk — secure the host accordingly.
+- You are responsible for compliance with your organisation's policies
+  and any applicable laws when deploying and operating this software.
+
+Use of this software constitutes acceptance of the above.
 
 ---
 
