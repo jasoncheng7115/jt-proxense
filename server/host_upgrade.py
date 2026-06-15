@@ -373,6 +373,32 @@ def _pick_auto_target(cluster, source: str, exclude: set[str]) -> Optional[str]:
     return best[1] if best else None
 
 
+def _node_score(cluster, name: str) -> float:
+    """CPU% × 100 + MEM% — the same load metric _pick_auto_target uses."""
+    info = cluster.cache.nodes.get(name)
+    if info is None:
+        return 0.0
+    cpu = float(getattr(getattr(info, "cpu", None), "usage_percent", 0) or 0)
+    mt = float(getattr(getattr(info, "memory", None), "total_bytes", 0) or 0)
+    mu = float(getattr(getattr(info, "memory", None), "used_bytes", 0) or 0)
+    return cpu * 100 + (mu / mt * 100.0 if mt > 0 else 0)
+
+
+def _eligible_targets(cluster, source: str, exclude: set[str]) -> list[str]:
+    """All online sibling nodes that may receive guests, least-loaded
+    first. Used to SPREAD a host's guests across the cluster instead of
+    dumping them all on one node."""
+    out = []
+    for n, info in cluster.cache.nodes.items():
+        if n == source or n in exclude:
+            continue
+        if (getattr(info, "status", "") or "").lower() != "online":
+            continue
+        out.append(n)
+    out.sort(key=lambda n: _node_score(cluster, n))
+    return out
+
+
 # ─────────────────────────────────────────────────────── core orchestrator
 
 async def _wait_for_task(cluster, node: str, upid: str, max_s: int) -> dict:
@@ -388,18 +414,35 @@ async def _wait_for_task(cluster, node: str, upid: str, max_s: int) -> dict:
     return {"status": "running", "exitstatus": "timeout", "_timeout": True}
 
 
-async def _evacuate_node(cluster, source: str, target: str,
+async def _evacuate_node(cluster, source: str, targets: list[str],
                           node_id: int) -> list[dict]:
+    """Migrate every guest off `source`, SPREADING them across the
+    `targets` pool instead of piling them all onto one node. Each guest
+    goes to the currently-lowest projected-load target; we bump that
+    target's projected load after each assignment so the next guest
+    lands elsewhere. (Manual mode passes a single-element pool, so this
+    collapses to the operator's explicit choice.)"""
     results: list[dict] = []
     vms = _vms_on_node(cluster, source)
-    await _ev(node_id, "info", f"evacuating {len(vms)} guest(s): {source} → {target}")
+    # Seed projected load with each target's real current load.
+    projected = {t: _node_score(cluster, t) for t in targets}
+    await _ev(node_id, "info",
+              f"evacuating {len(vms)} guest(s) off {source} across "
+              f"{len(targets)} target(s): {', '.join(targets)}")
     for vm in vms:
         vmid = int(vm.vmid)
         vm_type = getattr(vm, "type", "qemu")
+        # Pick the least-loaded eligible target for THIS guest.
+        target = min(projected, key=projected.get) if projected else (targets[0] if targets else None)
         try:
             if vm_type == "lxc":
+                # PVE has NO live migration for LXC — a running CT must use
+                # restart-mode (shut down → migrate → start on target).
+                # Passing online=1 triggers the live path and PVE rejects
+                # it ("lxc live migration is currently not implemented").
+                running = (getattr(vm, "status", "") or "").lower() == "running"
                 upid = await cluster.client.ct_migrate(
-                    source, vmid, target=target, online=True, restart=True,
+                    source, vmid, target=target, online=False, restart=running,
                 )
             else:
                 upid = await cluster.client.vm_migrate(
@@ -420,6 +463,11 @@ async def _evacuate_node(cluster, source: str, target: str,
                 "target": target,
             })
             await _ev(node_id, "warn", f"{vm_type}/{vmid} migrate failed: {e}")
+        # Bump the chosen target's projected load so guests spread out.
+        # ~15 points/guest ≈ a moderate VM's CPU+MEM footprint; enough to
+        # round-robin while still favouring genuinely idle nodes.
+        if target in projected:
+            projected[target] += 15
     return results
 
 
@@ -534,27 +582,33 @@ async def _reboot_node(cluster, node: str, node_id: int) -> bool:
     return False
 
 
-async def _restore_node(cluster, target_node: str, original_node: str,
+async def _restore_node(cluster, original_node: str,
                         evacuated: list[dict], node_id: int) -> list[dict]:
+    """Migrate each evacuated guest BACK to `original_node`. Guests were
+    spread across several targets, so each one's source-for-restore is
+    its own recorded `target` (not one shared node)."""
     results: list[dict] = []
-    await _ev(node_id, "info", f"restoring {len(evacuated)} guest(s) "
-                                f"{target_node} → {original_node}")
+    await _ev(node_id, "info", f"restoring {len(evacuated)} guest(s) → {original_node}")
     for e in evacuated:
         if not e.get("ok"):
             continue
         vmid = int(e["vmid"])
         vm_type = e.get("type", "qemu")
+        from_node = e.get("target")
+        if not from_node:
+            continue
         try:
             if vm_type == "lxc":
+                # No LXC live migration — running CTs restore via restart-mode.
                 upid = await cluster.client.ct_migrate(
-                    target_node, vmid, target=original_node,
-                    online=True, restart=True,
+                    from_node, vmid, target=original_node,
+                    online=False, restart=True,
                 )
             else:
                 upid = await cluster.client.vm_migrate(
-                    target_node, vmid, target=original_node, online=True,
+                    from_node, vmid, target=original_node, online=True,
                 )
-            st = await _wait_for_task(cluster, target_node, upid, _MIGRATE_WAIT_S)
+            st = await _wait_for_task(cluster, from_node, upid, _MIGRATE_WAIT_S)
             ok = (st.get("exitstatus") or "") == "OK"
             results.append({
                 "vmid": vmid, "type": vm_type, "ok": ok,
@@ -693,6 +747,9 @@ async def _run_job(job_id: int) -> None:
         opts = job["options"] or {}
         target_mode   = opts.get("target_mode")   or "auto"
         target_manual = opts.get("target_manual") or {}
+        # Nodes the operator marked as "do not migrate guests here" — only
+        # affects auto target selection (manual mode trusts the explicit map).
+        exclude_targets = set(opts.get("exclude_targets") or [])
         migrate_back  = bool(opts.get("migrate_back", True))
         # Ceph safety gate: auto-detect Ceph and (unless the operator opted out)
         # set noout around each reboot + wait for active+clean before the next
@@ -728,7 +785,8 @@ async def _run_job(job_id: int) -> None:
                 continue
             await _run_single_host(cluster, job_id, node_dict,
                                     target_mode, target_manual,
-                                    migrate_back, ceph_gate, in_flight)
+                                    migrate_back, ceph_gate, in_flight,
+                                    exclude_targets)
 
         async with db.connect() as c:
             cur = await c.execute(
@@ -752,27 +810,35 @@ async def _run_job(job_id: int) -> None:
 async def _run_single_host(cluster, job_id: int, n: dict,
                             target_mode: str, target_manual: dict,
                             migrate_back: bool, ceph_gate: bool,
-                            in_flight: set[str]) -> None:
+                            in_flight: set[str],
+                            exclude_targets: set[str] | None = None) -> None:
     node_id = n["id"]
     source = n["node"]
     in_place = (target_mode == "in_place")
     noout_active = False    # did we set ceph noout for this host's reboot?
 
-    # Resolve target node (in_place migrates nothing, so it needs no target)
-    target = n.get("target_node")
-    if not in_place and not target:
+    # Resolve target POOL (in_place migrates nothing, so it needs none).
+    # Auto mode spreads guests across every eligible sibling; manual mode
+    # uses the single operator-chosen target for this source host.
+    targets: list[str] = []
+    if not in_place:
         if target_mode == "manual":
-            target = (target_manual.get(source) or "").strip() or None
-        if not target:
-            target = _pick_auto_target(cluster, source,
-                                        exclude=in_flight | {source})
-        if not target:
+            t = (target_manual.get(source) or "").strip()
+            if t:
+                targets = [t]
+        else:
+            targets = _eligible_targets(
+                cluster, source,
+                exclude=in_flight | {source} | (exclude_targets or set()))
+        if not targets:
             await _set_node_status(node_id, "failed",
                                     error="no suitable target node",
                                     started=True, finished=True)
             await _ev(node_id, "error", "no eligible target — skipping host")
             return
-        await _set_node_target(node_id, target)
+        # Display: single target verbatim, multiple shown as a summary.
+        await _set_node_target(
+            node_id, targets[0] if len(targets) == 1 else f"{len(targets)} nodes")
 
     in_flight.add(source)
     stopped: list[dict] = []
@@ -790,7 +856,7 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                            "in-place: a guest did not shut down cleanly — aborting host")
                 return
         else:
-            evac = await _evacuate_node(cluster, source, target, node_id)
+            evac = await _evacuate_node(cluster, source, targets, node_id)
             await _patch_node_detail(node_id, {"evacuated": evac})
             if any(not e.get("ok") for e in evac):
                 await _set_node_status(node_id, "failed",
@@ -859,7 +925,7 @@ async def _run_single_host(cluster, job_id: int, n: dict,
         elif migrate_back:
             await _set_node_status(node_id, "restoring")
             try:
-                res = await _restore_node(cluster, target, source, evac, node_id)
+                res = await _restore_node(cluster, source, evac, node_id)
             except Exception as e:
                 # A restore crash must not bubble up and abort the whole job —
                 # fail just this host and let the remaining hosts proceed.
@@ -935,10 +1001,19 @@ async def list_jobs(request: web.Request) -> web.Response:
             (cid,),
         )
         rows = await cur.fetchall()
-    return web.json_response({
-        "ok": True,
-        "jobs": [_job_row_to_dict(r) for r in rows],
-    })
+        jobs = [_job_row_to_dict(r) for r in rows]
+        # Annotate each job with how many of its node steps failed/skipped
+        # vs total, so the list can show "done but N failed" instead of a
+        # misleading green DONE when guests didn't actually migrate.
+        for j in jobs:
+            cnt = await c.execute(
+                "SELECT COUNT(*) AS total,"
+                " SUM(CASE WHEN status IN ('failed','skipped') THEN 1 ELSE 0 END) AS failed"
+                " FROM host_upgrade_nodes WHERE job_id = ?", (j["id"],))
+            cr = await cnt.fetchone()
+            j["node_total"] = (cr["total"] if cr else 0) or 0
+            j["node_failed"] = (cr["failed"] if cr else 0) or 0
+    return web.json_response({"ok": True, "jobs": jobs})
 
 
 @role_required("admin")
@@ -995,6 +1070,12 @@ async def create_job(request: web.Request) -> web.Response:
         if not _NODE_RE.match(k) or not _NODE_RE.match(v):
             return web.json_response({"error": "bad_target_manual_name"}, status=400)
 
+    # Nodes to keep guests OFF of during auto target selection.
+    exclude_targets = body.get("exclude_targets") or []
+    if not isinstance(exclude_targets, list) or \
+       any(not _NODE_RE.match(str(n)) for n in exclude_targets):
+        return web.json_response({"error": "bad_exclude_targets"}, status=400)
+
     # in_place = no migration; guests are shut down, the host reboots, then the
     # guests that were running are started again. Migrate-back is meaningless
     # there (nothing left the host), so force it off.
@@ -1002,6 +1083,7 @@ async def create_job(request: web.Request) -> web.Response:
     opts = {
         "target_mode": target_mode,
         "target_manual": target_manual,
+        "exclude_targets": [str(n) for n in exclude_targets],
         "migrate_back": migrate_back,
         # Auto-detected at run time; the operator can opt out here. When on AND
         # the cluster runs Ceph, the runner sets noout around each reboot and

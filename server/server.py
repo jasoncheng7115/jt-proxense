@@ -36,6 +36,7 @@ from . import node_inspect
 from . import log_health
 from . import vm_export
 from . import node_ntp
+from . import node_netinfo
 from . import ssh_setup
 from . import rrd_proxy
 from . import vm_backups
@@ -677,6 +678,11 @@ def create_app() -> web.Application:
 
     # Per-node NTP / chrony config (admin; SSH-based)
     for method, path, handler in node_ntp.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # Per-node NIC / bridge / bond status (viewer; SSH-based, read-only)
+    for method, path, handler in node_netinfo.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

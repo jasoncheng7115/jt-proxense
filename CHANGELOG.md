@@ -8,6 +8,55 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.4] — 2026-06-15
+
+### Added
+
+- **Login-page language switcher.** The server-rendered login page now
+  carries a visible `EN / 中文` toggle (top-right of the card). The
+  choice is persisted to `localStorage` so it carries straight into the
+  React app after sign-in, and a language already chosen inside the app
+  is honoured on the login page even when the browser locale differs and
+  the URL has no `?lang=`.
+- **Node network-info viewer.** Right-click a node → *Network info* opens
+  a styled panel showing physical NIC link state / speed / duplex / MAC
+  plus bridges & bonds with their members and IPv4 — read over SSH,
+  viewer-visible, with manual + 5 s auto-refresh. (`node_netinfo.py` +
+  `NodeNetInfoModal`.)
+- **Bundled sci-fi monospace.** Nova Mono is now vendored in-repo (woff2
+  + OFL) and drives table/value text, replacing the previous web-mono
+  stack.
+
+### Changed
+
+- **Left sidebar widened** so "DASHBOARD" no longer truncates.
+- **Top-bar clock** given a simpler telemetry-pulse icon, even
+  horizontal padding, and a frame matching the cluster selector; the
+  logo + wordmark are vertically centered together (the version label is
+  excluded from that alignment).
+- **Favicon** updated to the refreshed logo mark.
+
+### Fixed
+
+- **Host upgrade — LXC evacuation.** Containers now evacuate and restore
+  via restart-mode migration (stop → migrate → start); PVE has no LXC
+  live migration, so the previous online attempt failed outright.
+- **Host upgrade — load spreading.** Evacuation now distributes guests
+  across multiple least-loaded targets instead of piling every guest on
+  a single node, and the wizard can exclude specific nodes as
+  destinations.
+- **Host upgrade — job list status.** A finished job whose run had
+  failed/skipped nodes now shows a red **FAILED** badge with the failed
+  count instead of a misleading **DONE**.
+- **Host upgrade — dialogs.** Aborting a job or confirming a reboot no
+  longer blanks the screen (the confirm body was being passed an object
+  instead of a string).
+- **Red-label readability.** Danger text/badges use a dedicated brighter
+  colour (`--danger-text`) so they're legible on the dark surface; the
+  upgrade FAILED badge is a solid-red fill with white text.
+
+---
+
 ## [0.8.3] — 2026-06-14
 
 ### Changed

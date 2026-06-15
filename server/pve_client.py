@@ -972,10 +972,13 @@ class PVEClient:
 
     async def ct_migrate(self, node: str, vmid: int, target: str,
                          online: bool = False, restart: bool = False) -> str:
-        """LXC migrate. PVE supports offline migration always, online via
-        restart=1 (which stops + starts on target)."""
+        """LXC migrate. PVE has no live migration for LXC: a stopped CT
+        migrates offline; a running CT needs restart=1 (stop → migrate →
+        start on target). `online=1` is NOT a valid LXC option — PVE
+        rejects it with "lxc live migration is currently not implemented",
+        so it's intentionally never sent (param kept for call-site
+        compatibility)."""
         data = {"target": target}
-        if online: data["online"] = 1
         if restart: data["restart"] = 1
         return await self._request(
             "POST", f"/nodes/{node}/lxc/{vmid}/migrate", data=data,

@@ -165,10 +165,30 @@ _TEMPLATE = """<!DOCTYPE html>
             font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
             letter-spacing: .04em;
         }
+        .lang-switch {
+            position: absolute; top: 16px; right: 16px;
+            display: flex; gap: 2px;
+            font-family: var(--font-mono); font-size: 11px;
+        }
+        .lang-switch a {
+            padding: 3px 9px; color: var(--text-dim); text-decoration: none;
+            border: 1px solid transparent; border-radius: 4px;
+            letter-spacing: .06em; cursor: pointer;
+            transition: color .15s, border-color .15s, background .15s;
+        }
+        .lang-switch a:hover { color: var(--cyan); }
+        .lang-switch a.active {
+            color: var(--cyan); border-color: var(--border);
+            background: rgba(0,240,255,.08);
+        }
     </style>
 </head>
 <body>
     <form class="card" id="loginForm" autocomplete="on">
+        <div class="lang-switch">
+            <a href="?lang=en" data-lang="en" class="{{CLS_EN}}">EN</a>
+            <a href="?lang=zh-TW" data-lang="zh-TW" class="{{CLS_ZH}}">中文</a>
+        </div>
         <h1>JT-PROXENSE</h1>
         <div class="sub" id="step-label">{{T_SUBTITLE}}</div>
 
@@ -199,6 +219,28 @@ _TEMPLATE = """<!DOCTYPE html>
 
 <script>
 const I18N = {{I18N_JSON}};
+const CUR_LANG = "{{LANG}}";
+
+// Honour the SPA's saved language on the login page too: if the user
+// previously chose a language in the app (localStorage), reflect it here
+// even when the URL has no ?lang= and the browser locale differs.
+(function () {
+    try {
+        const params = new URLSearchParams(location.search);
+        const saved = localStorage.getItem('language');
+        if (!params.has('lang') && (saved === 'en' || saved === 'zh-TW') && saved !== CUR_LANG) {
+            location.replace('?lang=' + encodeURIComponent(saved));
+        }
+    } catch (e) {}
+})();
+
+// Persist the choice so it carries into the React app after login.
+document.querySelectorAll('.lang-switch a').forEach(function (a) {
+    a.addEventListener('click', function () {
+        try { localStorage.setItem('language', a.dataset.lang); } catch (e) {}
+    });
+});
+
 const form = document.getElementById('loginForm');
 const errBox = document.getElementById('err');
 const btn = document.getElementById('submit');
@@ -307,6 +349,8 @@ async def login_page_handler(request: web.Request) -> web.Response:
     s = _I18N[lang]
     html = (_TEMPLATE
             .replace("{{LANG}}", lang)
+            .replace("{{CLS_EN}}", "active" if lang == "en" else "")
+            .replace("{{CLS_ZH}}", "active" if lang == "zh-TW" else "")
             .replace("{{I18N_JSON}}", json.dumps(s, ensure_ascii=False))
             .replace("{{T_TITLE}}", s["title"])
             .replace("{{T_SUBTITLE}}", s["subtitle"])
