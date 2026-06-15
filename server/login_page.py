@@ -75,14 +75,24 @@ _TEMPLATE = """<!DOCTYPE html>
             --cyan: #00f0ff; --cyan-soft: rgba(0,240,255,.18);
             --magenta: #bf00ff; --text: #e6f6ff; --text-dim: #95a8c4;
             --border: rgba(0,240,255,.16); --red: #ff3860;
-            --font-display: "Orbitron", system-ui, sans-serif;
-            --font-body: "Rajdhani", system-ui, sans-serif;
-            --font-mono: "Share Tech Mono", ui-monospace, monospace;
+            --font-display: "Orbitron", "Plix", system-ui, sans-serif;
+            --font-body: "Rajdhani", "Plix", system-ui, sans-serif;
+            --font-mono: "Share Tech Mono", "Plix", ui-monospace, monospace;
         }
         @font-face { font-family: Orbitron; src: url(/fonts/orbitron-700.woff2) format('woff2'); font-weight: 700; }
         @font-face { font-family: Rajdhani; src: url(/fonts/rajdhani-400.woff2) format('woff2'); font-weight: 400; }
         @font-face { font-family: Rajdhani; src: url(/fonts/rajdhani-500.woff2) format('woff2'); font-weight: 500; }
         @font-face { font-family: 'Share Tech Mono'; src: url(/fonts/share-tech-mono-400.woff2) format('woff2'); }
+        /* Plix 普力士 (IBM Plex Sans CJK merge, OFL-1.1) — sci-fi CJK face,
+           subset to the login page's glyphs. unicode-range keeps Latin on
+           Orbitron / Share Tech Mono; only CJK resolves to Plix. Light for
+           body weights, Regular for headings/bold — matches the SPA. */
+        @font-face { font-family: 'Plix'; src: url(/fonts/plix-login-light.woff2) format('woff2');
+                     font-weight: 100 500; font-display: swap;
+                     unicode-range: U+2E80-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF; }
+        @font-face { font-family: 'Plix'; src: url(/fonts/plix-login-regular.woff2) format('woff2');
+                     font-weight: 501 900; font-display: swap;
+                     unicode-range: U+2E80-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF; }
         * { box-sizing: border-box; }
         html, body { margin: 0; padding: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-body); }
         body {
@@ -167,11 +177,13 @@ _TEMPLATE = """<!DOCTYPE html>
         }
         .lang-switch {
             position: absolute; top: 16px; right: 16px;
-            display: flex; gap: 2px;
+            display: flex; align-items: center; gap: 2px;
             font-family: var(--font-mono); font-size: 11px;
         }
         .lang-switch a {
-            padding: 3px 9px; color: var(--text-dim); text-decoration: none;
+            display: inline-flex; align-items: center; justify-content: center;
+            height: 22px; padding: 0 9px; line-height: 1;
+            color: var(--text-dim); text-decoration: none;
             border: 1px solid transparent; border-radius: 4px;
             letter-spacing: .06em; cursor: pointer;
             transition: color .15s, border-color .15s, background .15s;

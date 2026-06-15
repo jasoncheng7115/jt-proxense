@@ -13,11 +13,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **Login-page language switcher.** The server-rendered login page now
-  carries a visible `EN / 中文` toggle (top-right of the card). The
-  choice is persisted to `localStorage` so it carries straight into the
-  React app after sign-in, and a language already chosen inside the app
-  is honoured on the login page even when the browser locale differs and
-  the URL has no `?lang=`.
+  carries a visible `EN / 中文` toggle (top-right of the card), its two
+  labels vertically aligned in equal-height boxes. The choice is
+  persisted to `localStorage` so it carries straight into the React app
+  after sign-in, and a language already chosen inside the app is honoured
+  on the login page even when the browser locale differs and the URL has
+  no `?lang=`. The page's Chinese text now renders in the bundled Plix
+  (IBM Plex Sans CJK, OFL-1.1) sci-fi face — subset to ~11 KB for the
+  login glyphs — so CJK matches the app instead of the system fallback.
 - **Node network-info viewer.** Right-click a node → *Network info* opens
   a styled panel showing physical NIC link state / speed / duplex / MAC
   plus bridges & bonds with their members and IPv4 — read over SSH,
