@@ -54,6 +54,7 @@ from . import pve_users_admin
 from . import cluster_locks
 from . import audit_forwarder_admin
 from . import ha_view
+from . import corosync_view
 from . import pools_view
 from . import cluster_notes
 from . import api_tokens
@@ -643,6 +644,11 @@ def create_app() -> web.Application:
 
     # v0.3.15 HA + replication read-only viewers
     for method, path, handler in ha_view.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # Corosync cluster health + ring performance viewer (viewer+)
+    for method, path, handler in corosync_view.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

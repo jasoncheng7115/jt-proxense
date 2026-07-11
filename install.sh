@@ -105,18 +105,35 @@ fi
 case "$PM" in
     apt)    DEBIAN_FRONTEND=noninteractive apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-pip python3-venv git curl ca-certificates >/dev/null ;;
-    dnf|yum) "$PM" install -y -q python3 python3-pip git curl ca-certificates >/dev/null ;;
+    dnf|yum) "$PM" install -y -q python3 python3-pip git curl ca-certificates >/dev/null
+            # RHEL/Rocky/Alma 9 default python3 is 3.9 (< our 3.10 floor); pull
+            # a modern interpreter from AppStream. Best-effort: newest first.
+            for v in 3.12 3.11; do
+                "$PM" install -y -q "python$v" "python$v-pip" >/dev/null 2>&1 && break
+            done ;;
     pacman) pacman -Sy --noconfirm --needed python python-pip git curl ca-certificates >/dev/null ;;
-    zypper) zypper --non-interactive install -y python3 python3-pip git curl ca-certificates >/dev/null ;;
+    zypper) zypper --non-interactive install -y python3 python3-pip git curl ca-certificates >/dev/null
+            # openSUSE Leap default python3 can be < 3.10; pull a modern one.
+            for v in 312 311; do
+                zypper --non-interactive install -y "python$v" "python$v-pip" >/dev/null 2>&1 && break
+            done ;;
 esac
 
-# Verify python >= 3.10
-PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PY_MAJ=${PY_VER%.*}; PY_MIN=${PY_VER#*.}
-if [ "$PY_MAJ" -lt 3 ] || { [ "$PY_MAJ" -eq 3 ] && [ "$PY_MIN" -lt 10 ]; }; then
-    die "Python 3.10+ required, found ${PY_VER}"
+# Pick the newest available interpreter >= 3.10 (RHEL/SUSE keep the old
+# default as `python3` even after installing python3.11/3.12).
+PY_BIN=""
+for cand in python3.13 python3.12 python3.11 python3.10 python3; do
+    command -v "$cand" >/dev/null 2>&1 || continue
+    v=$("$cand" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null) || continue
+    maj=${v%.*}; min=${v#*.}
+    if [ "$maj" -eq 3 ] && [ "$min" -ge 10 ]; then PY_BIN="$cand"; PY_VER="$v"; break; fi
+done
+if [ -z "$PY_BIN" ]; then
+    die "Python 3.10+ required (found $(python3 -V 2>&1)). On RHEL/Rocky/Alma run: sudo $PM install python3.11 python3.11-pip"
 fi
-ok "python ${PY_VER}, git $(git --version | awk '{print $3}') ready"
+# Ensure pip exists for the chosen interpreter.
+"$PY_BIN" -m pip --version >/dev/null 2>&1 || "$PY_BIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
+ok "python ${PY_VER} (${PY_BIN}), git $(git --version | awk '{print $3}') ready"
 
 # ---------- 3. service user ----------
 say "[3/7] Service user '${SERVICE_USER}'..."
@@ -158,7 +175,7 @@ PIP_OPTS="--quiet --root-user-action=ignore"
 # "externally managed" and refuse system-wide pip. This host is a dedicated
 # jt-proxense appliance, so permit it where that marker is present. Guarded so
 # older pip (which lacks the flag) is untouched.
-if python3 - <<'PYEOF' 2>/dev/null
+if "$PY_BIN" - <<'PYEOF' 2>/dev/null
 import os, sys, sysconfig
 sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)
 PYEOF
@@ -166,13 +183,13 @@ then
     PIP_OPTS="$PIP_OPTS --break-system-packages"
     warn "PEP 668 environment — installing deps with --break-system-packages"
 fi
-python3 -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
-python3 -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt"
+"$PY_BIN" -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
+"$PY_BIN" -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt"
 ok "dependencies installed"
 
 # Smoke test imports — every runtime dep listed here.
 # Adding a new runtime dep? Update this line AND requirements.txt (SOP §7.1).
-python3 -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2, pyotp, qrcode, pam" \
+"$PY_BIN" -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2, pyotp, qrcode, pam, cryptography, asyncssh, pyte" \
     || die "Smoke test failed — a runtime module did not import. Check requirements.txt."
 ok "import smoke test passed"
 
@@ -212,8 +229,14 @@ fi
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "$INSTALL_DIR"
 ok "ownership set to ${SERVICE_USER}:${SERVICE_USER}"
 
-# Install systemd unit
+# Install systemd unit. The shipped unit runs `/usr/bin/python3`; on RHEL/SUSE
+# that's the old 3.9 default, so repoint ExecStart at the interpreter we chose.
 install -m 0644 "$INSTALL_DIR/packaging/${SERVICE_NAME}.service" "$SERVICE_FILE"
+PY_PATH=$(command -v "$PY_BIN")
+if [ -n "$PY_PATH" ] && [ "$PY_PATH" != "/usr/bin/python3" ]; then
+    sed -i -E "s#(ExecStart=)[^ ]*/python3([[:space:]])#\1${PY_PATH}\2#" "$SERVICE_FILE"
+    ok "service interpreter: ${PY_PATH}"
+fi
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 ok "systemd unit installed and enabled"

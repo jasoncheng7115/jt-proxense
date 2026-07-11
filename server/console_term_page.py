@@ -195,6 +195,11 @@ let fitAddon = null;
 let socket = null;
 let authed = false;
 let activeToken = new URLSearchParams(location.search).get('ct') || '';
+// Preserve the console kind (e.g. 'serial' for a QEMU serial console) so
+// reconnect re-mints the SAME session type. Without this, ensureToken()
+// re-minted a default (noVNC) session for a QEMU guest and the terminal
+// never reconnected.
+const KIND = (new URLSearchParams(location.search).get('kind') || '').trim();
 
 function setStatus(state, msg) {
     statusEl.className = 'pill ' + state;
@@ -204,10 +209,12 @@ function setStatus(state, msg) {
 
 async function ensureToken() {
     if (activeToken) return activeToken;
+    const prepareBody = {cluster_id: CLUSTER, node: NODE, vmid: VMID};
+    if (KIND === 'serial') prepareBody.kind = 'serial';
     const r = await fetch('/api/console/prepare', {
         method: 'POST', credentials: 'same-origin',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({cluster_id: CLUSTER, node: NODE, vmid: VMID}),
+        body: JSON.stringify(prepareBody),
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.console_token) { activeToken = d.console_token; return activeToken; }

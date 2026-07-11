@@ -32,6 +32,11 @@ ldap3>=2.9.0
 # (PVE passwords used by the noVNC console; never written to config.yaml).
 cryptography>=41.0.0
 
+# v0.5.x: LXC console thumbnails (matrix "thumb" view). lxc_thumb.py feeds
+# the CT termproxy byte stream through pyte (a vt100 emulator) to render a
+# text-mode preview. Without it, every CT thumbnail shows "NO SIGNAL".
+pyte>=0.8.1
+
 # SSL handling
 certifi>=2024.0.0
 

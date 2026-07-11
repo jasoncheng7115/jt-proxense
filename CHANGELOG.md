@@ -8,6 +8,66 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.5] — 2026-07-11
+
+### Added
+
+- **Corosync health + ring-performance viewer** on the Health page: quorum
+  state, expected/total votes, transport, ring id, and a per-node table with
+  online state, per-link connection status and ring latency (µs). Quorum
+  loss / node-offline / link-down / high-latency also feed the findings
+  tally. API quorum + membership always; link status & latency need SSH to
+  the nodes (`corosync_view.py`, cached + single-flight).
+- **Matrix: VM / CT type tags** on every grid tile (cyan VM, violet CT) and
+  a **cell-width slider** in the toolbar.
+- **Snapshot modal** action icons; **alert-threshold sliders** (CPU / memory
+  / disk / IO-wait) paired with the number inputs in Settings.
+
+### Changed
+
+- **Create flows are modals now** — User-management "new user" and
+  Backup-schedule "add job" open a centered modal instead of an inline row
+  of fields.
+- **Dashboard CPU/MEM bars** restyled to the segmented-gauge look; **Ceph
+  OSD latency dots** glide to new positions on update instead of snapping.
+- **Settings polish** — enlarged add-cluster form, brighter labels, version
+  hidden under the sidebar wordmark; **VM-hardware modal** text enlarged and
+  brightened.
+- **Landing page** — 17 fresh screenshots (IPs / emails / tokens blurred),
+  feature sections extended through v0.8, logo + favicon aligned to the app
+  brand mark.
+
+### Fixed
+
+- **Consoles now open reliably.** The console tab is opened synchronously on
+  click; it was previously created *after* the `/api/console/prepare` await,
+  so browsers blocked it as a popup and nothing appeared (prepare returned
+  200 but no tab). Applies to noVNC and serial-xterm on Matrix and Radar; the
+  xterm reconnect also keeps the `serial` kind.
+- **CT console thumbnails were broken on every install** — `pyte` was never
+  declared in `requirements.txt`, so LXC text thumbnails failed with
+  "NO SIGNAL". Added.
+- **Matrix grid performance** — warning/danger tiles ran an infinite
+  multi-layer `box-shadow` pulse that forced a full repaint every frame and
+  pinned the CPU with 100+ guests; replaced with a static glow plus a
+  GPU-cheap opacity blink for danger (auto-paused when the tab is hidden).
+- **Radar** — canvas went elliptical after collapsing the sidebar (now a
+  `ResizeObserver` re-syncs the backing store); hover tooltip could render
+  off-screen (materialize animation left a stale transform).
+- **Ceph OSD tooltips** clipped at card edges → portaled to `<body>` and
+  viewport-clamped. **Storage treemap** detail popup offset fixed the same way.
+- **Export to OVA / Hyper-V** is VM-only again (was surfacing on some CTs).
+- **Toolbar** active-button text glow removed (blurred the labels); control
+  groups share one height.
+
+### Security
+
+- `pyte` added to declared dependencies (was import-at-runtime only).
+- Landing-page screenshots run through in-browser redaction of IPs, emails
+  and API-token UUIDs before capture.
+
+---
+
 ## [0.8.4] — 2026-06-15
 
 ### Added
