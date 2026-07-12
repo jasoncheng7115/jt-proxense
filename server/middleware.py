@@ -108,15 +108,49 @@ async def request_id_middleware(request: web.Request, handler):
     return response
 
 
-# Cyberpunk landing page + the SPA assets need a permissive CSP only for fonts
-# (we already inline the page CSS + JS). Everything is same-origin: no external
-# scripts, fonts, or images. Tighten further in v0.3+ as we add real CSPs for
-# the React routes.
+# Content-Security-Policy. Everything is same-origin: the SPA loads its bundle
+# from /assets, fonts from /fonts, talks to the API + WebSocket on the same
+# origin. script-src uses a PER-REQUEST NONCE (no 'unsafe-inline') — every
+# inline <script> we emit (the SPA index self-heal + the server-rendered
+# login / console / account / … pages) stamps the same nonce via
+# request["csp_nonce"] / csp_nonce(request). style-src keeps 'unsafe-inline'
+# because the React components emit inline <style> at runtime (client-side,
+# can't be nonced); styles can't execute JS so the residual risk is low.
+def _build_csp(nonce: str) -> str:
+    return (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "object-src 'none'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self'; "
+        # 'self' already covers same-origin ws:// / wss:// under CSP3.
+        "connect-src 'self'; "
+        "form-action 'self'"
+    )
+
+
+def csp_nonce(request: web.Request) -> str:
+    """The per-request CSP nonce for inline <script nonce="..."> tags."""
+    return request.get("csp_nonce", "")
+
+
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    # Cross-origin isolation: keep the app in its own browsing-context group and
+    # forbid other origins from embedding our resources (defence-in-depth vs
+    # Spectre-style side channels and resource theft). Same-origin only, so
+    # nothing legitimately loaded is cross-origin.
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    # Don't leak the aiohttp/Python version.
+    "Server": "jt-proxense",
 }
 
 
@@ -129,18 +163,19 @@ def _is_https(request: web.Request) -> bool:
 
 @web.middleware
 async def security_headers_middleware(request: web.Request, handler):
-    """Stamp common security headers on every response.
+    """Stamp common security headers (incl. a nonce-based CSP) on every response.
 
-    CSP is intentionally NOT set here — the React SPA uses inline styles and
-    the cyberpunk pages use inline <style>+<script>. Setting a strict CSP
-    would break them; loosening it would defeat the point. v0.3 will move
-    inline pieces into linked assets so a proper CSP becomes feasible.
+    A fresh CSP nonce is generated per request and exposed as
+    request["csp_nonce"] so the handlers that emit inline <script> can stamp
+    <script nonce="..."> — that lets script-src drop 'unsafe-inline'.
 
     HSTS is added only when the request was served over HTTPS (direct or
     via X-Forwarded-Proto). Sending Strict-Transport-Security over HTTP
     is meaningless and wastes bytes.
     """
-    extra = {}
+    nonce = secrets.token_urlsafe(16)
+    request["csp_nonce"] = nonce
+    extra = {"Content-Security-Policy": _build_csp(nonce)}
     if _is_https(request):
         extra["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     try:
@@ -150,11 +185,27 @@ async def security_headers_middleware(request: web.Request, handler):
             e.headers.setdefault(k, v)
         for k, v in extra.items():
             e.headers.setdefault(k, v)
+        e.headers["Server"] = "jt-proxense"
         raise
     for k, v in _SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)
     for k, v in extra.items():
         response.headers.setdefault(k, v)
+    # aiohttp stamps its own "Server: Python/x aiohttp/y"; overwrite it (a
+    # plain setdefault above won't win against a header aiohttp already set).
+    response.headers["Server"] = "jt-proxense"
+    # Stamp the CSP nonce onto every inline <script> in HTML responses (SPA
+    # index + all server-rendered pages), so script-src can stay nonce-based
+    # with no 'unsafe-inline'. Only plain web.Response bodies are rewritten
+    # (FileResponse/StreamResponse stream and have no in-memory body).
+    if (isinstance(response, web.Response) and response.body is not None
+            and "text/html" in response.headers.get("Content-Type", "")):
+        try:
+            body = response.text
+            if body and "<script>" in body:
+                response.text = body.replace("<script>", f'<script nonce="{nonce}">')
+        except (UnicodeDecodeError, TypeError):
+            pass
     return response
 
 

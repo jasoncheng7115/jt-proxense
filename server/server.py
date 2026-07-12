@@ -424,12 +424,24 @@ _SPA_HEADERS = {
 
 
 # Static file handler (SPA)
+def _serve_index(request: web.Request) -> web.Response:
+    """Serve index.html with the per-request CSP nonce stamped on its single
+    inline <script> (the self-heal cache-buster), so script-src can be
+    nonce-based with no 'unsafe-inline'. The external module bundle is
+    <script src=...> and needs no nonce (covered by 'self')."""
+    index_path = DIST_DIR / "index.html"
+    if not index_path.exists():
+        return web.Response(text="Frontend not built. Run: npm run build", status=404)
+    # Return as a text Response (not FileResponse) so the security middleware
+    # can stamp the CSP nonce onto its inline <script>.
+    html = index_path.read_text(encoding="utf-8")
+    return web.Response(text=html, content_type="text/html", charset="utf-8",
+                        headers=_SPA_HEADERS)
+
+
 async def index_handler(request: web.Request) -> web.Response:
     """Serve index.html for SPA"""
-    index_path = DIST_DIR / "index.html"
-    if index_path.exists():
-        return web.FileResponse(index_path, headers=_SPA_HEADERS)
-    return web.Response(text="Frontend not built. Run: npm run build", status=404)
+    return _serve_index(request)
 
 
 async def assets_handler(request: web.Request) -> web.Response:
@@ -479,12 +491,12 @@ async def static_handler(request: web.Request) -> web.Response:
             headers={"Cache-Control": "no-cache, must-revalidate"},
         )
 
-    # SPA fallback — must use the same no-store headers as index_handler.
-    # Chrome heuristic-caches FileResponse otherwise, pinning users to a
-    # stale HTML that references deleted asset bundle hashes.
+    # SPA fallback — must use the same no-store headers + nonce injection as
+    # index_handler. Chrome heuristic-caches FileResponse otherwise, pinning
+    # users to a stale HTML that references deleted asset bundle hashes.
     index_path = DIST_DIR / "index.html"
     if index_path.exists():
-        return web.FileResponse(index_path, headers=_SPA_HEADERS)
+        return _serve_index(request)
 
     return web.Response(text="Not found", status=404)
 

@@ -8,6 +8,33 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.7] — 2026-07-12
+
+### Security
+
+- **Content-Security-Policy added, nonce-based.** Every response now carries a
+  CSP; `script-src` uses a fresh per-request nonce (`'self' 'nonce-…'`, **no
+  `'unsafe-inline'`**) stamped onto every inline `<script>` (the SPA shell +
+  all server-rendered pages) by the security middleware. `default-src 'self'`,
+  `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`,
+  `connect-src 'self'` (covers the same-origin WebSocket). `style-src` keeps
+  `'unsafe-inline'` — the React components emit runtime inline `<style>` that
+  can't be nonced; low risk (CSS can't execute JS).
+- **Cross-origin isolation:** added `Cross-Origin-Opener-Policy: same-origin`,
+  `Cross-Origin-Resource-Policy: same-origin`, `Cross-Origin-Embedder-Policy:
+  require-corp` (ZAP "Insufficient Site Isolation Against Spectre" now passes).
+- **Server header no longer leaks** the aiohttp/Python version (now
+  `Server: jt-proxense`).
+- **DAST gate added to the release process:** an OWASP ZAP baseline scan
+  against a throwaway local instance is now part of `RELEASE_CHECKLIST.md`
+  (must be free of High/Medium each release). This release: **0 High, 0
+  Medium**; the only residual is `style-src 'unsafe-inline'` (Low, accepted).
+  Manual auth/RBAC pentest confirmed: viewer→admin endpoints all 403,
+  unauthenticated→API all 401, session cookie `HttpOnly` + `SameSite=Lax`
+  (+ `Secure` over HTTPS), no IDOR / privilege escalation.
+
+---
+
 ## [0.8.6] — 2026-07-12
 
 ### Fixed

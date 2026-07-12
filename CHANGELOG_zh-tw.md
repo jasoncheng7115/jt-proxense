@@ -8,6 +8,30 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.8.7] — 2026-07-12
+
+### 安全
+
+- **加入 Content-Security-Policy，採 nonce。** 每個回應都帶 CSP；`script-src`
+  使用每請求的 nonce（`'self' 'nonce-…'`，**無 `'unsafe-inline'`**），由安全
+  middleware 蓋到每個 inline `<script>`（SPA 外殼 + 所有伺服器渲染頁）。
+  `default-src 'self'`、`object-src 'none'`、`frame-ancestors 'none'`、
+  `base-uri 'self'`、`connect-src 'self'`（同源 WebSocket 也涵蓋）。`style-src`
+  保留 `'unsafe-inline'` —— React 元件在 client 端動態產生 inline `<style>`，
+  無法上 nonce；風險低（CSS 不能執行 JS）。
+- **跨源隔離：** 加入 `Cross-Origin-Opener-Policy`、`Cross-Origin-Resource-Policy`
+  （皆 same-origin）與 `Cross-Origin-Embedder-Policy: require-corp`（ZAP 的
+  「Insufficient Site Isolation Against Spectre」現在通過）。
+- **Server header 不再洩漏** aiohttp/Python 版本（改為 `Server: jt-proxense`）。
+- **發佈流程加入 DAST 關卡：** 每次發佈需對拋棄式本機實例跑 OWASP ZAP
+  baseline 掃描（須無 High/Medium），已寫進 `RELEASE_CHECKLIST.md`。本版：
+  **0 High、0 Medium**；唯一殘留為 `style-src 'unsafe-inline'`（Low，接受）。
+  手動認證/RBAC 滲透確認：viewer 打 admin 端點全 403、未認證打 API 全 401、
+  session cookie `HttpOnly` + `SameSite=Lax`（HTTPS 時加 `Secure`），無 IDOR /
+  權限提升。
+
+---
+
 ## [0.8.6] — 2026-07-12
 
 ### 修正
