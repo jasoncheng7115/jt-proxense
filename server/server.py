@@ -444,12 +444,31 @@ async def index_handler(request: web.Request) -> web.Response:
     return _serve_index(request)
 
 
+def _resolve_within(base: Path, filename: str):
+    """Resolve base/filename and return it ONLY if it stays inside `base`.
+
+    The routes use `{filename:.*}`, and aiohttp URL-decodes %2f / %2e%2e AFTER
+    path normalization — so an encoded `../` reaches the handler literally.
+    Without this check, `/assets/..%2f..%2fconfig.yaml` (and worse:
+    master.key, the SQLite DB, /etc/passwd) would be served unauthenticated.
+    Returns None on any escape / bad path.
+    """
+    base = base.resolve()
+    try:
+        target = (base / filename).resolve()
+    except (ValueError, OSError, RuntimeError):
+        return None
+    if target == base or target.is_relative_to(base):
+        return target
+    return None
+
+
 async def assets_handler(request: web.Request) -> web.Response:
     """Serve static assets from /assets/ directory"""
     filename = request.match_info.get("filename", "")
-    file_path = DIST_DIR / "assets" / filename
+    file_path = _resolve_within(DIST_DIR / "assets", filename)
 
-    if file_path.exists() and file_path.is_file():
+    if file_path is not None and file_path.is_file():
         # Set appropriate cache headers for hashed assets
         return web.FileResponse(
             file_path,
@@ -462,9 +481,9 @@ async def assets_handler(request: web.Request) -> web.Response:
 async def fonts_handler(request: web.Request) -> web.Response:
     """Serve font files from /fonts/ directory"""
     filename = request.match_info.get("filename", "")
-    file_path = DIST_DIR / "fonts" / filename
+    file_path = _resolve_within(DIST_DIR / "fonts", filename)
 
-    if file_path.exists() and file_path.is_file():
+    if file_path is not None and file_path.is_file():
         # Set appropriate cache headers for fonts
         content_type = "font/woff2" if filename.endswith(".woff2") else "text/css"
         return web.FileResponse(
@@ -481,9 +500,9 @@ async def fonts_handler(request: web.Request) -> web.Response:
 async def static_handler(request: web.Request) -> web.Response:
     """Serve static files with SPA fallback"""
     filename = request.match_info.get("filename", "")
-    file_path = DIST_DIR / filename
+    file_path = _resolve_within(DIST_DIR, filename)
 
-    if file_path.exists() and file_path.is_file():
+    if file_path is not None and file_path.is_file():
         # Top-level files like favicon.svg can rotate too, so also discourage
         # heuristic caching here (these are not hash-versioned).
         return web.FileResponse(

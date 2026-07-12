@@ -8,6 +8,40 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.8] — 2026-07-12
+
+### Security
+
+- **CRITICAL — unauthenticated arbitrary file read fixed (path traversal).**
+  The static-asset handlers (`/assets/{f}`, `/fonts/{f}`, and the SPA
+  catch-all `/{f}`) matched on `{filename:.*}` and joined the value onto the
+  dist directory. aiohttp normalises a literal `../` in the path, but a
+  **URL-encoded** `..%2f..%2f` survives routing and reaches the handler
+  decoded, so a request such as `GET /assets/..%2f..%2fconfig.yaml` escaped
+  the served root and returned any file the daemon could read — **no auth
+  required**. Confirmed to leak `config.yaml` (PVE API tokens), the Fernet
+  `master.key` (decrypts the entire secret store), the SQLite DB (password
+  hashes + live session tokens), server source, and `/etc/passwd`. Fixed
+  with a `_resolve_within()` containment check that `.resolve()`s the joined
+  path and serves it **only** if it stays inside the intended base directory
+  (`Path.is_relative_to`); anything escaping now returns 404. Discovered by
+  in-house penetration testing; found and closed the same day, and the
+  running production instance was hot-patched before this release.
+- **SSRF guard hostname-bypass fixed (notification webhooks).**
+  `_validate_webhook_url` only inspected the URL when the host was a literal
+  IP, so a hostname that *resolves* to a blocked address (e.g. `localhost`,
+  or an attacker-controlled name pointing at `127.0.0.1` / a link-local
+  address) slipped through. The guard now resolves the host via
+  `getaddrinfo` and rejects the URL if **any** resolved address is loopback
+  or link-local, in addition to the existing literal-IP check.
+- **DAST gate wired into the release process.** Every version now runs an
+  OWASP ZAP baseline scan (throwaway local target, never production) that
+  must report **0 High / 0 Medium** before release — see
+  `RELEASE_CHECKLIST.md` §3.6. This release additionally underwent a manual
+  penetration pass (RBAC boundary probing, SSRF, path traversal, SSH command
+  injection) — the two findings above are its result; SSH sinks were
+  confirmed safe (`shlex.quote` + `..` rejection throughout).
+
 ## [0.8.7] — 2026-07-12
 
 ### Security

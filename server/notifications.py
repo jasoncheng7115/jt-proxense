@@ -91,12 +91,37 @@ def _validate_webhook_url(url: str) -> None:
     host = parsed.hostname or ""
     if not host:
         raise ValueError("webhook url must have a host")
+
+    def _blocked(ip_obj) -> bool:
+        return ip_obj.is_loopback or ip_obj.is_link_local
+
+    # Literal IP → check directly.
     try:
         ip = ipaddress.ip_address(host)
-    except ValueError:
-        return  # hostname (not a literal IP) — DNS-rebinding is out of scope here
-    if ip.is_loopback or ip.is_link_local:
-        raise ValueError("webhook url may not target loopback/link-local addresses")
+        if _blocked(ip):
+            raise ValueError("webhook url may not target loopback/link-local addresses")
+        return
+    except ValueError as e:
+        if "loopback" in str(e):
+            raise
+    # Hostname → resolve and check EVERY resolved address. This closes the
+    # trivial 'localhost' bypass and static names pointing at 127.0.0.1 /
+    # 169.254.169.254 (cloud metadata). Full DNS-rebinding protection would
+    # also re-check at send time, but this blocks the common cases.
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return  # unresolvable now — let the actual send fail closed
+    for info in infos:
+        addr = info[4][0].split("%")[0]  # strip IPv6 scope id
+        try:
+            if _blocked(ipaddress.ip_address(addr)):
+                raise ValueError(
+                    "webhook url may not target loopback/link-local addresses")
+        except ValueError as e:
+            if "loopback" in str(e):
+                raise
 
 
 # Config keys whose values are secrets and must be masked in API responses.

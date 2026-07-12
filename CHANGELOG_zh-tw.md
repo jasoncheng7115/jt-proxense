@@ -8,6 +8,32 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.8.8] — 2026-07-12
+
+### 安全
+
+- **重大 —— 修正未經身分驗證的任意檔案讀取（路徑穿越）。** 靜態資源處理器
+  （`/assets/{f}`、`/fonts/{f}`，以及 SPA 萬用路由 `/{f}`）以
+  `{filename:.*}` 比對並把值接到 dist 目錄後面。aiohttp 會正規化路徑中字面的
+  `../`，但 **URL 編碼** 的 `..%2f..%2f` 會躲過路由、以解碼後的形式抵達處理器，
+  因此像 `GET /assets/..%2f..%2fconfig.yaml` 這樣的請求能逃出服務根目錄、
+  回傳 daemon 讀得到的任何檔案 —— **完全免驗證**。已證實可外洩 `config.yaml`
+  （PVE API token）、Fernet `master.key`（可解密整個 secret store）、SQLite
+  資料庫（密碼雜湊 + 有效 session token）、伺服器原始碼，以及 `/etc/passwd`。
+  以 `_resolve_within()` 圍堵檢查修正：對接好的路徑 `.resolve()` 後，**僅在**
+  仍位於預期基底目錄內（`Path.is_relative_to`）時才回傳，逃逸者一律回 404。
+  由內部滲透測試發現，當日修補完成，正式站在本次發佈前已先行熱修。
+- **修正 SSRF 防護的主機名繞過（通知 webhook）。** `_validate_webhook_url`
+  原本只在 host 為字面 IP 時檢查，因此一個**解析**到被封鎖位址的主機名
+  （例如 `localhost`，或攻擊者控制、指向 `127.0.0.1` / link-local 的名稱）
+  能溜過去。現在防護會以 `getaddrinfo` 解析主機名，只要**任一**解析結果為
+  loopback 或 link-local 即拒絕，字面 IP 檢查照舊保留。
+- **DAST 檢測納入發佈流程。** 每個版本現在都要跑 OWASP ZAP baseline 掃描
+  （用完即丟的本機目標，絕不掃正式站），須回報 **0 High / 0 Medium** 才能發佈
+  —— 見 `RELEASE_CHECKLIST.md` §3.6。本版並額外做了一輪手動滲透測試（RBAC
+  邊界探測、SSRF、路徑穿越、SSH 指令注入），上述兩項發現即為其成果；SSH 端點
+  經確認安全（全程 `shlex.quote` + 拒絕 `..`）。
+
 ## [0.8.7] — 2026-07-12
 
 ### 安全
