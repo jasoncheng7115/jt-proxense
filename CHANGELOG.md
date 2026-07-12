@@ -8,6 +8,29 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.6] — 2026-07-12
+
+### Fixed
+
+- **Same-cluster migration line never drew.** In the matrix grid, a live
+  migration should draw a glowing source→destination line to the incoming
+  "ghost" cell on the target node. The `incomingMirror` guard — meant only
+  for cross-cluster mirror migrations — also matched a VM's *own* ghost in a
+  same-cluster migrate (because `targetClusterId === vm.cluster_id`), so it
+  hid the SOURCE cell; with no source cell, the line could never be computed.
+  Now the guard only applies when source and target clusters actually differ,
+  so the migration line + travelling particles render for ordinary
+  same-cluster migrations.
+
+### Docs
+
+- Refreshed the landing-page matrix screenshots: the grid shot now shows a
+  live migration line plus several concurrent backup jobs, and the thumbnail
+  shot shows content-rich guest previews (Windows desktops + terminal
+  consoles). All still redacted for IPs / emails / tokens.
+
+---
+
 ## [0.8.5] — 2026-07-11
 
 ### Added
