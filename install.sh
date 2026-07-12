@@ -196,8 +196,24 @@ ok "import smoke test passed"
 # ---------- 6. config.yaml + state dir + ownership + systemd ----------
 say "[6/7] Configuration, state directory, ownership, systemd unit..."
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
-    cp "$INSTALL_DIR/config.example.yaml" "$INSTALL_DIR/config.yaml"
-    ok "created config.yaml from example (edit it before starting!)"
+    # Start CLEAN — no placeholder clusters. PVE/ESXi connections are added
+    # from the web UI (Settings → Clusters), which persists them here and
+    # hot-reloads. Copying the example used to leave a dummy cluster that
+    # failed to connect on first login and made it look like you *had* to
+    # hand-edit this file. config.example.yaml stays as the annotated reference.
+    cat > "$INSTALL_DIR/config.yaml" <<YAML
+# JT-PROXENSE configuration.
+# You do NOT need to edit this file to add PVE clusters — sign in and use
+# Settings -> Clusters in the web UI (persisted + hot-reloaded automatically).
+# A fully annotated reference of every option lives in config.example.yaml.
+server:
+  host: "0.0.0.0"
+  http_port: ${HTTP_PORT}
+
+# PVE / ESXi connections. Empty = none yet; add them from the web UI.
+clusters: []
+YAML
+    ok "created a clean config.yaml (add clusters in the web UI — no editing needed)"
 else
     ok "config.yaml already exists — left untouched"
 fi
@@ -311,8 +327,10 @@ cat <<EOF
    ║                Installation complete                      ║
    ╚═══════════════════════════════════════════════════════════╝
 
-   Edit your PVE clusters:
-       sudo -u ${SERVICE_USER} \$EDITOR ${INSTALL_DIR}/config.yaml
+   Add your PVE clusters — no file editing needed:
+       Sign in, then go to  Settings -> Clusters  and add a connection
+       (host + user + API token). It's saved and hot-reloaded automatically.
+       (Advanced: config.example.yaml documents every option if you prefer YAML.)
 
    Service control:
        sudo systemctl start   ${SERVICE_NAME}

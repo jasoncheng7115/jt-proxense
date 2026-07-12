@@ -22,14 +22,14 @@
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
 ```
 
-安裝程式會建立 `jt-proxense` 系統使用者、安裝 Python 依賴、佈署 systemd unit 並啟動服務。預設網址：`http://<your-server>:8098/`。
+安裝程式會建立 `jt-proxense` 系統使用者、安裝 Python 依賴、佈署 systemd unit、bootstrap 一個 `admin` 使用者（會印出一次性密碼，請複製起來）並啟動服務。預設網址：`http://<your-server>:8098/`。
 
-對外開放前先編輯叢集設定：
+**在 WebUI 新增你的 PVE 叢集 — 免改設定檔。** 以 `admin` 登入後，進
+**設定 → 叢集** 新增連線（host + 使用者 + API Token），會自動寫回
+`config.yaml` 並熱重載；沒有任何叢集時服務也能正常啟動。
 
-```bash
-sudo -u jt-proxense $EDITOR /opt/jt-proxense/config.yaml
-sudo systemctl restart jt-proxense
-```
+<sub>偏好 YAML？`config.example.yaml` 有完整選項說明，
+`sudo -u jt-proxense $EDITOR /opt/jt-proxense/config.yaml` + `systemctl restart jt-proxense` 一樣可用。</sub>
 
 ## 更新
 

@@ -22,14 +22,15 @@ Landing page: <https://jasoncheng7115.github.io/jt-proxense/>
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
 ```
 
-The installer creates a `jt-proxense` system user, installs Python deps, drops a systemd unit, and starts the service. Default URL: `http://<your-server>:8098/`.
+The installer creates a `jt-proxense` system user, installs Python deps, drops a systemd unit, bootstraps an `admin` user (it prints a one-time password — copy it), and starts the service. Default URL: `http://<your-server>:8098/`.
 
-Edit clusters before exposing it:
+**Add your PVE clusters in the web UI — no config-file editing.** Sign in as
+`admin`, then go to **Settings → Clusters** and add a connection (host + user +
+API token). It's persisted to `config.yaml` and hot-reloaded automatically; the
+service starts fine with zero clusters configured.
 
-```bash
-sudo -u jt-proxense $EDITOR /opt/jt-proxense/config.yaml
-sudo systemctl restart jt-proxense
-```
+<sub>Prefer YAML? `config.example.yaml` documents every option, and
+`sudo -u jt-proxense $EDITOR /opt/jt-proxense/config.yaml` + `systemctl restart jt-proxense` still works.</sub>
 
 ## Update
 

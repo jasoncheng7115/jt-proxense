@@ -28,6 +28,13 @@ versioning follows [Semantic Versioning](https://semver.org/).
   live migration line plus several concurrent backup jobs, and the thumbnail
   shot shows content-rich guest previews (Windows desktops + terminal
   consoles). All still redacted for IPs / emails / tokens.
+- **Onboarding: no config-file editing to add clusters.** A fresh install now
+  writes a clean `config.yaml` (empty `clusters: []`, correct port) instead of
+  copying the example — which used to leave a dummy `192.168.1.100` cluster
+  that failed on first login and implied you had to hand-edit YAML. The
+  installer message, closing summary, README (both langs) and landing pages
+  now point at **Settings → Clusters** in the web UI (persisted + hot-reloaded).
+  `config.example.yaml` stays as the annotated reference.
 
 ---
 
