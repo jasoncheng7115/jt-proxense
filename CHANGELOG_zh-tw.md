@@ -8,6 +8,27 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.8.9] — 2026-07-12
+
+### 修正
+
+- **Radar 視圖在 HiDPI/Retina 螢幕與 2× 截圖下模糊。** 異常雷達的 `<canvas>`
+  backing store 只用容器的 CSS 像素、忽略 `devicePixelRatio`，因此在 2× 螢幕
+  ——或 2× 的 Playwright landing 擷取——下，canvas bitmap 被放大而糊掉，周圍
+  DOM 卻仍銳利。現在 backing store 改為 `寬 × 高 × devicePixelRatio`，繪圖
+  上下文再以 DPR 縮放（`setTransform`），幾何、環/角度標籤與掃描線維持原設計
+  尺寸，但在任何像素比下都清晰。滑鼠命中測試與 tooltip 定位不變（於 device
+  空間運算、下游再轉為 CSS 座標）。
+
+### 安全
+
+- 無伺服器面變更——僅前端 canvas 繪製。v0.8.8 的 OWASP ZAP baseline
+  （0 High / 0 Medium）與手動滲透測試持續涵蓋本版；ZAP baseline 重跑確認
+  0 High / 0 Medium。
+- 測試強化：v0.8.8 的 webhook SSRF 防護新增專屬回歸測試（字面 loopback／
+  link-local 拒絕、公網 IP 放行），webhook 扇出測試不再依賴 loopback 目標可
+  解析——防護不會再默默退化，測試套件也變得可重現。
+
 ## [0.8.8] — 2026-07-12
 
 ### 安全

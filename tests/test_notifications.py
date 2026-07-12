@@ -63,6 +63,22 @@ def test_unknown_channel_type(db_path):
         notifications.create_channel("c", "telegram", {})
 
 
+def test_validate_webhook_url_blocks_loopback(db_path):
+    """SSRF guard: reject literal loopback / link-local webhook targets, allow a
+    public literal IP. Uses literal IPs only so the assertions are deterministic
+    (no DNS) — the hostname-resolution path is exercised implicitly by the
+    monkeypatched fan-out tests."""
+    for bad in ("http://127.0.0.1/hook",
+                "http://[::1]/hook",
+                "http://169.254.169.254/latest/meta-data"):
+        with pytest.raises(ValueError, match="loopback/link-local"):
+            notifications.create_channel("blk", "webhook", {"url": bad})
+    # A public literal IP must pass validation (channel is created).
+    cid = notifications.create_channel("ok", "webhook",
+                                       {"url": "http://93.184.216.34/hook"})
+    assert cid is not None
+
+
 def test_update_channel(db_path):
     notifications.create_channel("c", "webhook", {"url": "http://a"})
     assert notifications.update_channel("c", enabled=False) is True
@@ -160,9 +176,13 @@ def test_match_cluster_filter(db_path):
 # ---------------------------------------------------------------- end-to-end webhook fan-out
 
 @pytest.mark.asyncio
-async def test_dispatch_fires_webhook_on_matching_audit(db_path):
+async def test_dispatch_fires_webhook_on_matching_audit(db_path, monkeypatch):
     """End-to-end: configure a webhook channel + rule, then call audit.write
     and verify the webhook is hit. Use a tiny aiohttp server as the receiver."""
+    # The SSRF guard (correctly) rejects loopback webhook URLs; this test needs
+    # a real local receiver, so neutralise the guard — it has its own coverage
+    # in test_validate_webhook_url_blocks_loopback.
+    monkeypatch.setattr(notifications, "_validate_webhook_url", lambda url: None)
     received: list[dict] = []
     received_event = asyncio.Event()
 
@@ -208,8 +228,9 @@ async def test_dispatch_fires_webhook_on_matching_audit(db_path):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_skips_non_matching_rule(db_path):
+async def test_dispatch_skips_non_matching_rule(db_path, monkeypatch):
     """Rule pattern doesn't match → no fire."""
+    monkeypatch.setattr(notifications, "_validate_webhook_url", lambda url: None)
     fired = asyncio.Event()
 
     async def handle(request):
@@ -255,8 +276,9 @@ async def test_dispatch_silent_when_no_rules(db_path):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_skips_disabled_channel(db_path):
+async def test_dispatch_skips_disabled_channel(db_path, monkeypatch):
     """A rule routed to a disabled channel: no send."""
+    monkeypatch.setattr(notifications, "_validate_webhook_url", lambda url: None)
     fired = asyncio.Event()
 
     async def handle(request):

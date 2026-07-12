@@ -8,6 +8,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.9] — 2026-07-12
+
+### Fixed
+
+- **Radar view rendered blurry on HiDPI / Retina displays and in 2×
+  screenshot capture.** The anomaly-radar `<canvas>` sized its backing store
+  to the container's CSS pixels only, ignoring `devicePixelRatio`, so on a 2×
+  display — or the 2× Playwright landing-page capture — the canvas bitmap was
+  upscaled and smeared while the surrounding DOM stayed sharp. The backing
+  store is now `width × height × devicePixelRatio` and the drawing context is
+  scaled by DPR (`setTransform`), so geometry, ring/degree labels and the
+  sweep keep their authored sizes but render crisp at any pixel ratio. Mouse
+  hit-testing and tooltip placement are unchanged (they work in device space
+  and convert to CSS coordinates downstream).
+
+### Security
+
+- No server-surface change — client-side canvas rendering only. The v0.8.8
+  OWASP ZAP baseline (0 High / 0 Medium) and manual pentest continue to cover
+  this release; ZAP baseline re-run confirmed 0 High / 0 Medium.
+- Test hardening: the v0.8.8 webhook SSRF guard now has a dedicated regression
+  test (literal loopback / link-local rejected, public IP allowed), and the
+  webhook fan-out tests no longer depend on a loopback target resolving — so
+  the guard can't silently regress and the suite is deterministic.
+
 ## [0.8.8] — 2026-07-12
 
 ### Security
