@@ -8,6 +8,27 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.11] — 2026-07-15
+
+### Added
+- **Optional `bwlimit` (KiB/s) on VM migration.** The migrate API and PVE client
+  now accept a per-migration bandwidth throttle, so a live migration can be
+  capped instead of saturating the migration network.
+
+### Changed
+- **Matrix draws the source→target line for HA-managed migrations too.**
+  Previously only plain `qmigrate`/`vzmigrate` drew the connecting line, so an
+  HA-managed guest (`hamigrate`) showed only a cell badge and no line. HA
+  migrations are real moves and now draw the line (deduped by vmid so a
+  hamigrate + its qmigrate subtask don't double-draw).
+- **Landing page feature cards are fixed to 3-per-row on desktop** (auto-fit was
+  giving 4 and squeezing the text-heavy cards); steps down to 2 then 1.
+
+### Docs
+- Demo video expanded and corrected: the matrix **migration line** is now on
+  camera, plus a **Storage** view and a live **language-switch** finale; caption
+  fixes (監控與控管 → 監測與控制, radar → 細節卡片).
+
 ## [0.8.10] — 2026-07-14
 
 ### Fixed

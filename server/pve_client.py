@@ -693,19 +693,23 @@ class PVEClient:
 
     async def vm_migrate(self, node: str, vmid: int, target: str,
                          online: bool = True, with_local_disks: bool = False,
-                         migration_network: str | None = None) -> str:
+                         migration_network: str | None = None,
+                         bwlimit: int | None = None) -> str:
         """Migrate a VM to another node within the same cluster. Returns task UPID.
 
         `online=True` does live migration (requires shared storage or with_local_disks).
         `migration_network` optionally pins the data transfer onto a specific
         CIDR — the operator's high-bandwidth migration network. PVE looks up
         which interface on each node carries that subnet.
+        `bwlimit` throttles the transfer in KiB/s (0/None = cluster default).
         """
         data = {"target": target, "online": 1 if online else 0}
         if with_local_disks:
             data["with-local-disks"] = 1
         if migration_network:
             data["migration_network"] = migration_network
+        if bwlimit:
+            data["bwlimit"] = bwlimit
         return await self._request(
             "POST", f"/nodes/{node}/qemu/{vmid}/migrate", data=data,
         )

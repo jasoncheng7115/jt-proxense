@@ -1,4 +1,4 @@
 # JT-PROXENSE Server
 # Proxmox VE Monitoring System
 
-__version__ = "0.8.10"
+__version__ = "0.8.11"

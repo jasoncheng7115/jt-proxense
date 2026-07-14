@@ -300,6 +300,14 @@ async def vm_migrate_handler(request: web.Request) -> web.Response:
     target = body.get("target_node") or ""
     online = bool(body.get("online", True))
     with_local = bool(body.get("with_local_disks", False))
+    # Optional migration throttle (KiB/s). Positive int or ignored.
+    bwlimit = body.get("bwlimit")
+    try:
+        bwlimit = int(bwlimit) if bwlimit is not None else None
+        if bwlimit is not None and bwlimit <= 0:
+            bwlimit = None
+    except (TypeError, ValueError):
+        bwlimit = None
     if not target:
         return web.json_response({"error": "missing_target_node"}, status=400)
 
@@ -318,7 +326,7 @@ async def vm_migrate_handler(request: web.Request) -> web.Response:
     try:
         upid = await cluster.client.vm_migrate(
             vm["node"], vmid, target=target,
-            online=online, with_local_disks=with_local,
+            online=online, with_local_disks=with_local, bwlimit=bwlimit,
         )
     except Exception as e:
         await audit.write(

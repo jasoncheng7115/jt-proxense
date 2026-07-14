@@ -33,8 +33,8 @@ class _FakeClient:
     async def vm_reboot(self, node, vmid):   return self._record("vm_reboot", node, vmid)
     async def vm_suspend(self, node, vmid):  return self._record("vm_suspend", node, vmid)
     async def vm_resume(self, node, vmid):   return self._record("vm_resume", node, vmid)
-    async def vm_migrate(self, node, vmid, target, online=True, with_local_disks=False):
-        self.calls.append(("vm_migrate", node, vmid, target, online, with_local_disks))
+    async def vm_migrate(self, node, vmid, target, online=True, with_local_disks=False, bwlimit=None):
+        self.calls.append(("vm_migrate", node, vmid, target, online, with_local_disks, bwlimit))
         return f"UPID:fake:0001:migrate-{vmid}"
     # CT methods
     async def ct_start(self, node, vmid):    return self._record("ct_start", node, vmid)
@@ -323,7 +323,19 @@ async def test_migrate_dispatches_to_pve(fake_cluster, aiohttp_client):
     assert r.status == 200
     body = await r.json()
     assert body["target_node"] == "node3"
-    assert ("vm_migrate", "node1", 100, "node3", True, True) in fake_cluster.client.calls
+    assert ("vm_migrate", "node1", 100, "node3", True, True, None) in fake_cluster.client.calls
+
+
+@pytest.mark.asyncio
+async def test_migrate_passes_bwlimit(fake_cluster, aiohttp_client):
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post(
+        "/api/clusters/cluster1/vms/100/migrate",
+        json={"target_node": "node3", "online": True, "bwlimit": 40000},
+    )
+    assert r.status == 200
+    assert ("vm_migrate", "node1", 100, "node3", True, False, 40000) in fake_cluster.client.calls
 
 
 # ---------------------------------------------------------------- bulk

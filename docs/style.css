@@ -496,9 +496,13 @@ section {
    =========================================================== */
 .feat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    /* Fixed 3-up on desktop (auto-fit gave 4 and squeezed the text-heavy cards);
+       steps down to 2 then 1 on narrower screens. */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 18px;
 }
+@media (max-width: 900px) { .feat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .feat-grid { grid-template-columns: 1fr; } }
 .feat-card {
     position: relative;
     padding: 26px 24px;
