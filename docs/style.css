@@ -410,6 +410,11 @@ section {
     font-size: 14px;
     color: var(--text);
     overflow-x: auto;
+    /* Long install one-liners (unbreakable URLs) used to blow the box past the
+       viewport on phones. Wrap instead — the copy button still copies the full
+       command, so visual wrapping costs nothing. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     line-height: 1.6;
 }
 .code-block .prompt { color: var(--magenta); user-select: none; margin-right: 6px; }

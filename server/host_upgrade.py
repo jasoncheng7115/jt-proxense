@@ -399,6 +399,66 @@ def _eligible_targets(cluster, source: str, exclude: set[str]) -> list[str]:
     return out
 
 
+# ── Absolute memory-headroom guard (the OOM lesson from the demo incident) ──
+# _pick_auto_target / _node_score above balance by RELATIVE load (CPU%+MEM%):
+# that spreads guests but never checks whether a target has enough FREE RAM for
+# a specific guest. Evacuating a whole node's guests onto the survivors can
+# overcommit — worst case a swapless / HA target OOMs and (with HA) softdog-
+# fences itself. These add an ABSOLUTE check: never place a guest on a target
+# that can't fit it, keep a per-node reserve free, and abort the whole host
+# BEFORE migrating anything if the pool can't hold the load.
+_MEM_RESERVE_MIN_BYTES = 4 * 1024 ** 3   # keep at least this much free per target
+_MEM_RESERVE_FRAC = 0.05                 # …or 5% of the node's RAM, whichever is larger
+
+
+def _target_free_budget(cluster, name: str) -> float:
+    """Bytes a target can accept guests into = free RAM minus a safety reserve
+    kept for the host itself (max of 4 GiB or 5% of node RAM)."""
+    info = cluster.cache.nodes.get(name)
+    if info is None:
+        return 0.0
+    mem = getattr(info, "memory", None)
+    total = float(getattr(mem, "total_bytes", 0) or 0)
+    used = float(getattr(mem, "used_bytes", 0) or 0)
+    reserve = max(_MEM_RESERVE_MIN_BYTES, total * _MEM_RESERVE_FRAC)
+    return max(0.0, (total - used) - reserve)
+
+
+def _guest_mem_bytes(vm) -> float:
+    """RAM a migration will need on the target ≈ the guest's CONFIGURED memory
+    (maxmem): a live-migrated VM allocates its full configured RAM on the
+    target, a restart-migrated CT the same. Floored at 512 MiB so a missing /
+    zero reading can never make a guest look free."""
+    mem = getattr(vm, "memory", None)
+    total = float(getattr(mem, "total_bytes", 0) or 0)
+    used = float(getattr(mem, "used_bytes", 0) or 0)
+    return max(total, used, 512 * 1024 ** 2)
+
+
+def _plan_evacuation(free_budget: dict, guests: list) -> tuple:
+    """Pure placement planner. `free_budget` maps target -> free bytes; `guests`
+    is a list of (vmid, mem_bytes). Places the biggest guests first onto the
+    roomiest target that still fits them — this spreads load AND guarantees no
+    target is overcommitted, even when the aggregate free RAM looks sufficient
+    but no single node can hold a large guest (fragmentation). Returns
+    (assignments, shortfall): assignments is a list of (vmid, target); shortfall
+    is None on success, or a human-readable reason for the first guest that
+    could not be placed (caller must then abort without rebooting)."""
+    free = dict(free_budget)
+    assignments = []
+    for vmid, mem in sorted(guests, key=lambda g: g[1], reverse=True):
+        fits = {t: f for t, f in free.items() if f >= mem}
+        if not fits:
+            biggest = max(free.values()) if free else 0.0
+            return assignments, (
+                f"guest {vmid} needs {mem / 1024 ** 3:.1f} GiB but the roomiest "
+                f"target only has {biggest / 1024 ** 3:.1f} GiB free")
+        target = max(fits, key=fits.get)
+        assignments.append((vmid, target))
+        free[target] -= mem
+    return assignments, None
+
+
 # ─────────────────────────────────────────────────────── core orchestrator
 
 async def _wait_for_task(cluster, node: str, upid: str, max_s: int) -> dict:
@@ -416,24 +476,38 @@ async def _wait_for_task(cluster, node: str, upid: str, max_s: int) -> dict:
 
 async def _evacuate_node(cluster, source: str, targets: list[str],
                           node_id: int) -> list[dict]:
-    """Migrate every guest off `source`, SPREADING them across the
-    `targets` pool instead of piling them all onto one node. Each guest
-    goes to the currently-lowest projected-load target; we bump that
-    target's projected load after each assignment so the next guest
-    lands elsewhere. (Manual mode passes a single-element pool, so this
-    collapses to the operator's explicit choice.)"""
+    """Migrate every guest off `source`, placed by an ABSOLUTE memory-headroom
+    planner so no target is ever overcommitted (the demo-incident OOM lesson).
+    If the target pool can't hold the load — in aggregate OR because no single
+    node can fit a large guest — abort BEFORE migrating anything; the caller
+    then fails the host without rebooting it. (Manual mode passes a single-
+    element pool, so the planner just verifies that one target has room.)"""
     results: list[dict] = []
     vms = _vms_on_node(cluster, source)
-    # Seed projected load with each target's real current load.
-    projected = {t: _node_score(cluster, t) for t in targets}
+    if not vms:
+        return results
+    vms_by_id = {int(v.vmid): v for v in vms}
+    free_budget = {t: _target_free_budget(cluster, t) for t in targets}
+    guests = [(int(v.vmid), _guest_mem_bytes(v)) for v in vms]
+    demand = sum(m for _, m in guests)
+    capacity = sum(max(0.0, f) for f in free_budget.values())
+
+    plan, shortfall = _plan_evacuation(free_budget, guests)
+    if shortfall is not None:
+        await _ev(node_id, "error",
+                   f"insufficient memory headroom to evacuate {source}: {shortfall} "
+                   f"(need {demand / 1024 ** 3:.1f} GiB, pool free "
+                   f"{capacity / 1024 ** 3:.1f} GiB) — not migrating any guest")
+        return [{"vmid": 0, "type": "", "ok": False,
+                 "detail": f"insufficient memory headroom: {shortfall}"}]
+
     await _ev(node_id, "info",
               f"evacuating {len(vms)} guest(s) off {source} across "
-              f"{len(targets)} target(s): {', '.join(targets)}")
-    for vm in vms:
-        vmid = int(vm.vmid)
+              f"{len(targets)} target(s): need {demand / 1024 ** 3:.1f} GiB, "
+              f"pool free {capacity / 1024 ** 3:.1f} GiB")
+    for vmid, target in plan:
+        vm = vms_by_id[vmid]
         vm_type = getattr(vm, "type", "qemu")
-        # Pick the least-loaded eligible target for THIS guest.
-        target = min(projected, key=projected.get) if projected else (targets[0] if targets else None)
         try:
             if vm_type == "lxc":
                 # PVE has NO live migration for LXC — a running CT must use
@@ -463,11 +537,6 @@ async def _evacuate_node(cluster, source: str, targets: list[str],
                 "target": target,
             })
             await _ev(node_id, "warn", f"{vm_type}/{vmid} migrate failed: {e}")
-        # Bump the chosen target's projected load so guests spread out.
-        # ~15 points/guest ≈ a moderate VM's CPU+MEM footprint; enough to
-        # round-robin while still favouring genuinely idle nodes.
-        if target in projected:
-            projected[target] += 15
     return results
 
 

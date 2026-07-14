@@ -8,6 +8,37 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.10] — 2026-07-14
+
+### Fixed
+- **Anomaly radar rendered blurry for everyone.** The radar `<canvas>` was left
+  at its default 300×150 backing store and CSS-stretched ~6× to fill its
+  container, so the radar looked soft while the surrounding UI stayed crisp. It
+  now sizes its backing store to `container × devicePixelRatio` on every draw,
+  independent of ResizeObserver timing.
+- **Traditional-Chinese (Taiwan) terminology.** Swept mainland usages to Taiwan
+  usage across the UI: 視圖→檢視, 告警→警示, 刷新→重新整理, 點擊→點選; landing
+  page 彈窗→彈出視窗.
+- **Landing page: install commands overflowed on mobile.** Long
+  `curl … | sudo bash` one-liners now wrap inside their box instead of running
+  off the right edge of the screen.
+
+### Changed
+- **Host-upgrade evacuation now enforces absolute memory headroom.** Node
+  evacuation previously balanced targets by *relative* load only (CPU%+MEM%),
+  which could overcommit a target's RAM and OOM it — worst case a swapless / HA
+  target self-fences. It now checks each target's *free bytes*, reserves
+  per-node headroom (max 4 GiB or 5%), never places a guest a node can't fit,
+  and aborts the host (without rebooting) if the pool can't hold the load —
+  including the fragmentation case where aggregate free RAM is sufficient but no
+  single node can fit a large guest.
+
+### Docs
+- New 60 fps demo video (with a real cursor) walking the matrix grid / table /
+  thumbnail views, the right-click context menu, and radar hover-to-card;
+  refreshed landing-page screenshots including a crisp radar plus new
+  context-menu and noVNC-console shots.
+
 ## [0.8.9] — 2026-07-12
 
 ### Fixed

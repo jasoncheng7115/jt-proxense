@@ -90,6 +90,86 @@ def test_ceph_clean_ignores_health_warn_string():
     assert hu._ceph_clean_state(st)[0] is True
 
 
+# ─────────────────────────────────────── memory-headroom guard (OOM lesson)
+# Evacuation used to balance by relative load only, so it could overcommit a
+# target's RAM and OOM it (the host-110 demo incident). These pin the absolute
+# free-RAM guard: reserve headroom, never place a guest a node can't fit, and
+# refuse the whole evacuation (rather than overcommit) when it won't fit.
+
+import types
+
+GIB = 1024 ** 3
+
+
+def _fake_cluster(nodes):
+    return types.SimpleNamespace(cache=types.SimpleNamespace(nodes=nodes))
+
+
+def _fake_node(total, used):
+    return types.SimpleNamespace(
+        memory=types.SimpleNamespace(total_bytes=total, used_bytes=used))
+
+
+def _fake_vm(total, used=0):
+    return types.SimpleNamespace(
+        memory=types.SimpleNamespace(total_bytes=total, used_bytes=used))
+
+
+def test_target_free_budget_reserves_headroom():
+    # free 50 GiB, reserve = max(4, 5% of 100 = 5) = 5 → 45 GiB usable
+    cl = _fake_cluster({"n1": _fake_node(100 * GIB, 50 * GIB)})
+    assert hu._target_free_budget(cl, "n1") == pytest.approx(45 * GIB)
+
+
+def test_target_free_budget_never_negative():
+    # free 1 GiB, reserve 4 GiB → clamped to 0, never negative
+    cl = _fake_cluster({"n1": _fake_node(32 * GIB, 31 * GIB)})
+    assert hu._target_free_budget(cl, "n1") == 0.0
+
+
+def test_guest_mem_uses_configured_ram():
+    assert hu._guest_mem_bytes(_fake_vm(8 * GIB, 2 * GIB)) == 8 * GIB
+
+
+def test_guest_mem_has_floor():
+    # a zero/missing reading must never let a guest look free
+    assert hu._guest_mem_bytes(_fake_vm(0, 0)) == 512 * 1024 * 1024
+
+
+def test_plan_fits_and_never_overcommits():
+    free = {"a": 10 * GIB, "b": 10 * GIB}
+    guests = [(1, 4 * GIB), (2, 4 * GIB), (3, 4 * GIB)]
+    plan, shortfall = hu._plan_evacuation(free, guests)
+    assert shortfall is None and len(plan) == 3
+    load = {}
+    for vmid, t in plan:
+        load[t] = load.get(t, 0) + dict(guests)[vmid]
+    assert all(load[t] <= free[t] for t in load)      # no target overcommitted
+
+
+def test_plan_shortfall_when_demand_exceeds_capacity():
+    free = {"a": 5 * GIB, "b": 5 * GIB}                  # 10 GiB total
+    guests = [(1, 4 * GIB), (2, 4 * GIB), (3, 4 * GIB)]   # 12 GiB demand
+    _plan, shortfall = hu._plan_evacuation(free, guests)
+    assert shortfall is not None
+
+
+def test_plan_fragmentation_no_single_target_fits():
+    # THE key case: 12 GiB free in aggregate, but no single node can hold an
+    # 8 GiB guest → must refuse. A percentage-only check missed exactly this.
+    free = {"a": 6 * GIB, "b": 6 * GIB}
+    plan, shortfall = hu._plan_evacuation(free, [(1, 8 * GIB)])
+    assert shortfall is not None
+    assert plan == []                                  # nothing placed before bailing
+
+
+def test_plan_big_guest_lands_where_it_fits():
+    free = {"small": 5 * GIB, "big": 20 * GIB}
+    plan, shortfall = hu._plan_evacuation(free, [(1, 8 * GIB), (2, 2 * GIB)])
+    assert shortfall is None
+    assert dict(plan)[1] == "big"                       # 8 GiB guest can only go 'big'
+
+
 # ─────────────────────────────────────── DB terminal-state persistence
 
 async def _make_node(status: str = "queued") -> int:
