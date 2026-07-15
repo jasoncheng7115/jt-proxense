@@ -208,3 +208,39 @@ async def test_session_sliding_window_extends(db_path):
     await asyncio.sleep(0.05)  # ensure clock advanced
     s2 = await auth.get_session(s1.id)
     assert s2.expires_at >= s1.expires_at
+
+
+# ─────────────────────── last-admin / sentinel guards (v0.8.11 lockout fix)
+
+def test_is_sentinel_hash():
+    assert auth.is_sentinel_hash("*PAM*") is True
+    assert auth.is_sentinel_hash("*LDAP*") is True
+    assert auth.is_sentinel_hash("*anything*") is True
+    assert auth.is_sentinel_hash(auth.hash_password("real-pw-123")) is False
+    assert auth.is_sentinel_hash("") is False
+    assert auth.is_sentinel_hash(None) is False
+
+
+def test_count_enabled_global_admins(db_path):
+    assert auth.count_enabled_global_admins() == 0
+    auth.create_user("a1", "p123456789"); auth.grant_role("a1", "*", "admin")
+    auth.create_user("a2", "p123456789"); auth.grant_role("a2", "*", "admin")
+    assert auth.count_enabled_global_admins() == 2
+    # a cluster-scoped admin does NOT count as a global admin
+    auth.create_user("ca", "p123456789"); auth.grant_role("ca", "cluster1", "admin")
+    assert auth.count_enabled_global_admins() == 2
+    # disabling one drops the count
+    auth.set_enabled("a2", False)
+    assert auth.count_enabled_global_admins() == 1
+
+
+def test_is_global_admin(db_path):
+    auth.create_user("gadm", "p123456789"); auth.grant_role("gadm", "*", "admin")
+    auth.create_user("op", "p123456789"); auth.grant_role("op", "*", "operator")
+    auth.create_user("cadm", "p123456789"); auth.grant_role("cadm", "cluster1", "admin")
+    assert auth.is_global_admin("gadm") is True
+    assert auth.is_global_admin("op") is False           # not admin
+    assert auth.is_global_admin("cadm") is False          # cluster-scoped, not global
+    assert auth.is_global_admin("nobody") is False        # missing
+    auth.set_enabled("gadm", False)
+    assert auth.is_global_admin("gadm") is False           # disabled admin doesn't count

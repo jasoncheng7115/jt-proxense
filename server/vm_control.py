@@ -334,7 +334,7 @@ async def vm_migrate_handler(request: web.Request) -> web.Response:
             target=f"{cluster_id}/{vm['node']}->{target}/vm/{vmid}",
             cluster_id=cluster_id, result=audit.result_error(e),
             request_id=request_id,
-            params={"target": target, "online": online, "with_local_disks": with_local},
+            params={"target": target, "online": online, "with_local_disks": with_local, "bwlimit": bwlimit},
         )
         return web.json_response(
             {"error": "pve_request_failed", "detail": str(e)}, status=502,
@@ -343,7 +343,7 @@ async def vm_migrate_handler(request: web.Request) -> web.Response:
         user=user, source_ip=src_ip, action="vm.migrate",
         target=f"{cluster_id}/{vm['node']}->{target}/vm/{vmid}",
         cluster_id=cluster_id, result="ok", request_id=request_id,
-        params={"target": target, "online": online, "with_local_disks": with_local},
+        params={"target": target, "online": online, "with_local_disks": with_local, "bwlimit": bwlimit},
     )
     return web.json_response({"ok": True, "upid": upid, "vm": vm, "target_node": target})
 

@@ -275,11 +275,12 @@ async def change_password_handler(request: web.Request) -> web.Response:
     if not user_row:
         return web.json_response({"error": "user_not_found"}, status=404)
 
-    # PAM-managed: reject — they should change their system password instead
-    if user_row["password_hash"] == "*PAM*":
+    # Federated (PAM/LDAP sentinel): reject — they change their password with
+    # the upstream backend, not here (a local hash would fork the credential).
+    if auth.is_sentinel_hash(user_row["password_hash"]):
         return web.json_response({
-            "error": "pam_managed",
-            "message": "Use your system's passwd tool — this account is PAM-managed.",
+            "error": "federated_account",
+            "message": "This account is managed by PAM/LDAP — change your password there.",
         }, status=400)
 
     if not auth.verify_password(current, user_row["password_hash"]):

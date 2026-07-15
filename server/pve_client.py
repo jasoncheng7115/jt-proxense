@@ -940,17 +940,16 @@ class PVEClient:
             "POST", f"/nodes/{node}/lxc/{vmid}/vncproxy", data=data,
         )
 
-    async def get_task_status(self, node: str, upid: str) -> dict:
-        """Poll the status of a long-running task by its UPID."""
-        return await self._request(
-            "GET", f"/nodes/{node}/tasks/{upid}/status",
-        )
-
     async def stop_task(self, node: str, upid: str) -> dict:
         """DELETE /nodes/{node}/tasks/{upid} — kills a running task. Idempotent
-        on already-finished tasks (PVE returns 200 with no error)."""
+        on already-finished tasks (PVE returns 200 with no error). The UPID is
+        URL-encoded (it contains ':' and could otherwise shape the request);
+        matches the encoding the read paths already use.
+        (There is a single get_task_status below — the earlier duplicate that
+        interpolated the UPID raw was removed.)"""
+        from urllib.parse import quote
         return await self._request(
-            "DELETE", f"/nodes/{node}/tasks/{upid}",
+            "DELETE", f"/nodes/{node}/tasks/{quote(upid, safe='')}",
         )
 
     # ----- LXC container lifecycle (v0.3+ writes; mirror of vm_*) -----
@@ -1671,11 +1670,13 @@ class PVEClient:
     # Task APIs
 
     async def get_cluster_tasks(self, running: bool = False, limit: int = 50) -> list:
-        """Get cluster tasks"""
+        """Get cluster tasks (most-recent first). Passes `limit` to PVE so the
+        list isn't silently capped at PVE's small default page (~50) — without
+        it, filtering by an older vmid/user in the UI returned 'no results'
+        even when matching tasks existed."""
         try:
-            # Note: older PVE versions don't support running/limit params
-            # Fetch without params for compatibility
-            tasks = await self._request("GET", "/cluster/tasks")
+            params = {"limit": limit} if limit else None
+            tasks = await self._request("GET", "/cluster/tasks", params=params)
             if running:
                 # Filter running tasks manually
                 # Running tasks have no endtime or endtime=0, and status not 'stopped'

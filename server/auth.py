@@ -256,6 +256,38 @@ def role_for(user_id: int, cluster_id: str,
     return max(matches, key=lambda r: _ROLE_RANK.get(r, 0))
 
 
+def is_sentinel_hash(encoded: Optional[str]) -> bool:
+    """True for the placeholder password_hash of a federated (PAM/LDAP) account.
+    Sentinels ('*PAM*', '*LDAP*', or any '*'-prefixed marker) are NOT valid
+    Argon2 hashes and must never authenticate locally or be treated as a real
+    password. Centralised so login eligibility and self-service change-password
+    agree on what counts as federated."""
+    return bool(encoded) and encoded.startswith("*")
+
+
+def is_global_admin(username: str) -> bool:
+    """True iff `username` exists, is enabled, and holds a GLOBAL (cluster '*')
+    admin role."""
+    u = get_user_by_username(username)
+    if not u or not u.get("enabled", 1):
+        return False
+    return any(r["cluster_id"] == "*" and r["role"] == "admin"
+               for r in get_roles(u["id"]))
+
+
+def count_enabled_global_admins() -> int:
+    """How many enabled users currently hold a global admin role. Used to stop
+    the last admin from being deleted / disabled / demoted through the web UI
+    (which would leave the instance manageable only via the CLI back door)."""
+    with db.connect_sync() as c:
+        row = c.execute(
+            "SELECT COUNT(DISTINCT u.id) AS n FROM users u "
+            "JOIN roles r ON r.user_id = u.id "
+            "WHERE u.enabled = 1 AND r.cluster_id = '*' AND r.role = 'admin'"
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+
 # ---------------------------------------------------------------- rate limit
 
 def is_rate_limited(source_ip: str) -> bool:
@@ -342,9 +374,10 @@ async def login(username: str, password: str, *, source_ip: str, user_agent: str
             _l.getLogger(__name__).warning("ldap role-grant failed for %s: %s", username, e)
     else:
         # local backend — ALWAYS run a password verification (against a dummy
-        # hash when the user is missing/disabled/PAM-sentinel) so the response
-        # time is the same whether or not the username exists.
-        eligible = bool(user and user["enabled"] and user["password_hash"] != "*PAM*")
+        # hash when the user is missing/disabled/federated-sentinel) so the
+        # response time is the same whether or not the username exists.
+        eligible = bool(user and user["enabled"]
+                        and not is_sentinel_hash(user["password_hash"]))
         stored = user["password_hash"] if eligible else _dummy_hash()
         pw_ok = verify_password(password, stored)
         if not eligible or not pw_ok:

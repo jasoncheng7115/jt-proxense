@@ -20,6 +20,7 @@ Every action is audited. The role-grant payload mirrors the CLI:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from aiohttp import web
@@ -32,6 +33,10 @@ from .middleware import role_required
 
 
 logger = logging.getLogger(__name__)
+
+# Local usernames: conservative allow-list so a crafted value (whitespace,
+# 10KB blob, sentinel-looking '*...') can't shadow a login or break lookups.
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._@\-]{1,64}$")
 
 
 def _audit(request: web.Request) -> tuple[str, str, str]:
@@ -75,6 +80,8 @@ async def create_user_handler(request: web.Request) -> web.Response:
     password = (body.get("password") or "").strip()
     if not username or not password:
         return web.json_response({"error": "username_password_required"}, status=400)
+    if not _USERNAME_RE.match(username):
+        return web.json_response({"error": "invalid_username"}, status=400)
     if len(password) < 8:
         return web.json_response({"error": "password_too_short"}, status=400)
     actor, ip, rid = _audit(request)
@@ -97,10 +104,12 @@ async def create_user_handler(request: web.Request) -> web.Response:
 async def delete_user_handler(request: web.Request) -> web.Response:
     username = request.match_info["username"]
     actor, ip, rid = _audit(request)
-    if username == actor:
+    if username.lower() == actor.lower():
         return web.json_response(
             {"error": "cannot_delete_self"}, status=400,
         )
+    if auth.is_global_admin(username) and auth.count_enabled_global_admins() <= 1:
+        return web.json_response({"error": "cannot_remove_last_admin"}, status=400)
     ok = auth.delete_user(username)
     await audit.write(
         user=actor, source_ip=ip, action="admin.user.delete",
@@ -123,6 +132,16 @@ async def set_password_handler(request: web.Request) -> web.Response:
     if len(new_pw) < 8:
         return web.json_response({"error": "password_too_short"}, status=400)
     actor, ip, rid = _audit(request)
+    # Don't silently convert a federated (PAM/LDAP) account into a local one:
+    # setting a real hash on a sentinel row would let it bypass the upstream
+    # backend's auth / disable / group→role mapping.
+    target0 = auth.get_user_by_username(username)
+    if target0 and auth.is_sentinel_hash(target0.get("password_hash")):
+        await audit.write(
+            user=actor, source_ip=ip, action="admin.user.set_password",
+            target=username, result="federated_account", request_id=rid,
+        )
+        return web.json_response({"error": "federated_account"}, status=409)
     ok = auth.set_password(username, new_pw, must_change_pw=must_change)
     if ok:
         # Force the target user offline everywhere — an admin reset usually
@@ -156,7 +175,25 @@ async def set_enabled_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "bad_json"}, status=400)
     enabled = bool(body.get("enabled", True))
     actor, ip, rid = _audit(request)
+    if not enabled:
+        if username.lower() == actor.lower():
+            return web.json_response({"error": "cannot_disable_self"}, status=400)
+        if auth.is_global_admin(username) and auth.count_enabled_global_admins() <= 1:
+            return web.json_response({"error": "cannot_remove_last_admin"}, status=400)
     ok = auth.set_enabled(username, enabled)
+    if ok and not enabled:
+        # A disabled account must not keep live sessions — the middleware
+        # re-checks `enabled`, but revoke for parity with password reset and to
+        # cover already-upgraded WS connections.
+        target = auth.get_user_by_username(username)
+        if target:
+            try:
+                async with db.connect() as c:
+                    await c.execute("DELETE FROM sessions WHERE user_id=?",
+                                    (target["id"],))
+                    await c.commit()
+            except Exception as e:
+                logger.warning("session revoke after disable failed: %s", e)
     await audit.write(
         user=actor, source_ip=ip, action="admin.user.set_enabled",
         target=username, result="ok" if ok else "not_found", request_id=rid,
@@ -180,6 +217,13 @@ async def grant_role_handler(request: web.Request) -> web.Response:
     if role not in ("viewer", "operator", "admin"):
         return web.json_response({"error": "invalid_role"}, status=400)
     actor, ip, rid = _audit(request)
+    # Replacing a user's GLOBAL admin grant with a lesser role is a demotion —
+    # guard against self-lockout and demoting the last admin.
+    if cluster_id == "*" and role != "admin" and auth.is_global_admin(username):
+        if username.lower() == actor.lower():
+            return web.json_response({"error": "cannot_demote_self"}, status=400)
+        if auth.count_enabled_global_admins() <= 1:
+            return web.json_response({"error": "cannot_remove_last_admin"}, status=400)
     try:
         auth.grant_role(username, cluster_id, role, vm_pattern=vm_pattern)
     except Exception as e:
@@ -203,6 +247,12 @@ async def revoke_role_handler(request: web.Request) -> web.Response:
     cluster_id = (request.query.get("cluster_id") or "*").strip()
     vm_pattern = (request.query.get("vm_pattern") or "*").strip()
     actor, ip, rid = _audit(request)
+    # Revoking a user's global admin grant is a demotion → same lockout guard.
+    if cluster_id == "*" and vm_pattern == "*" and auth.is_global_admin(username):
+        if username.lower() == actor.lower():
+            return web.json_response({"error": "cannot_demote_self"}, status=400)
+        if auth.count_enabled_global_admins() <= 1:
+            return web.json_response({"error": "cannot_remove_last_admin"}, status=400)
     ok = auth.revoke_role(username, cluster_id, vm_pattern=vm_pattern)
     await audit.write(
         user=actor, source_ip=ip, action="admin.user.revoke_role",

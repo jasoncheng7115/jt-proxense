@@ -411,9 +411,14 @@ _MEM_RESERVE_MIN_BYTES = 4 * 1024 ** 3   # keep at least this much free per targ
 _MEM_RESERVE_FRAC = 0.05                 # …or 5% of the node's RAM, whichever is larger
 
 
-def _target_free_budget(cluster, name: str) -> float:
+def _target_free_budget(cluster, name: str, committed: Optional[dict] = None) -> float:
     """Bytes a target can accept guests into = free RAM minus a safety reserve
-    kept for the host itself (max of 4 GiB or 5% of node RAM)."""
+    (max of 4 GiB or 5% of node RAM), minus any RAM already committed to this
+    target by EARLIER hosts in the same multi-host job. The poll cache may not
+    yet reflect guests just migrated onto a target, so we subtract our own
+    running tally (`committed`) to avoid overcommitting the survivors across a
+    sweep. Over-subtracting only ever makes us abort sooner (safe), never
+    overcommit."""
     info = cluster.cache.nodes.get(name)
     if info is None:
         return 0.0
@@ -421,7 +426,8 @@ def _target_free_budget(cluster, name: str) -> float:
     total = float(getattr(mem, "total_bytes", 0) or 0)
     used = float(getattr(mem, "used_bytes", 0) or 0)
     reserve = max(_MEM_RESERVE_MIN_BYTES, total * _MEM_RESERVE_FRAC)
-    return max(0.0, (total - used) - reserve)
+    already = float((committed or {}).get(name, 0.0))
+    return max(0.0, (total - used) - reserve - already)
 
 
 def _guest_mem_bytes(vm) -> float:
@@ -475,19 +481,22 @@ async def _wait_for_task(cluster, node: str, upid: str, max_s: int) -> dict:
 
 
 async def _evacuate_node(cluster, source: str, targets: list[str],
-                          node_id: int) -> list[dict]:
+                          node_id: int, committed: Optional[dict] = None) -> list[dict]:
     """Migrate every guest off `source`, placed by an ABSOLUTE memory-headroom
     planner so no target is ever overcommitted (the demo-incident OOM lesson).
     If the target pool can't hold the load — in aggregate OR because no single
     node can fit a large guest — abort BEFORE migrating anything; the caller
     then fails the host without rebooting it. (Manual mode passes a single-
-    element pool, so the planner just verifies that one target has room.)"""
+    element pool, so the planner just verifies that one target has room.)
+    `committed` (optional) is the job-level per-target RAM tally that carries
+    across hosts; each successful placement is added to it so the next host's
+    plan sees the guests this host just moved."""
     results: list[dict] = []
     vms = _vms_on_node(cluster, source)
     if not vms:
         return results
     vms_by_id = {int(v.vmid): v for v in vms}
-    free_budget = {t: _target_free_budget(cluster, t) for t in targets}
+    free_budget = {t: _target_free_budget(cluster, t, committed) for t in targets}
     guests = [(int(v.vmid), _guest_mem_bytes(v)) for v in vms]
     demand = sum(m for _, m in guests)
     capacity = sum(max(0.0, f) for f in free_budget.values())
@@ -524,6 +533,9 @@ async def _evacuate_node(cluster, source: str, targets: list[str],
                 )
             st = await _wait_for_task(cluster, source, upid, _MIGRATE_WAIT_S)
             ok = (st.get("exitstatus") or "") == "OK"
+            if ok and committed is not None:
+                # Carry this guest's RAM onto the target for the next host's plan.
+                committed[target] = committed.get(target, 0.0) + _guest_mem_bytes(vm)
             results.append({
                 "vmid": vmid, "type": vm_type, "ok": ok,
                 "upid": upid, "exitstatus": st.get("exitstatus"),
@@ -592,8 +604,16 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
                            f"(likely an interactive prompt) — failing this host")
                 return False, "apt timed out (possible interactive prompt)", False
             rc = proc.returncode or 0
-            rr = await conn.run("test -e /var/run/reboot-required", check=False)
-            reboot_req = rr.exit_status == 0
+            # The reboot-required probe must NOT be able to fail an otherwise-
+            # successful upgrade: a transient SSH hiccup here previously fell
+            # through to the outer except and marked the whole host failed.
+            try:
+                rr = await conn.run("test -e /var/run/reboot-required", check=False)
+                reboot_req = rr.exit_status == 0
+            except Exception as probe_e:
+                await _ev(node_id, "warn",
+                           f"reboot-required probe failed ({probe_e}); assuming no reboot")
+                reboot_req = False
         last_tail = "\n".join(tail[-30:])
         await _patch_node_detail(node_id, {
             "apt_out_tail": last_tail,
@@ -785,6 +805,16 @@ class _JobControl:
 
 _control = _JobControl()
 
+# Retain references to the fire-and-forget job tasks — a bare create_task() whose
+# result is dropped can be garbage-collected mid-run. Discard on completion.
+_JOB_TASKS: set = set()
+
+
+def _spawn_job(job_id: int) -> None:
+    t = asyncio.create_task(_run_job(job_id))
+    _JOB_TASKS.add(t)
+    t.add_done_callback(_JOB_TASKS.discard)
+
 
 async def _run_job(job_id: int) -> None:
     try:
@@ -830,6 +860,10 @@ async def _run_job(job_id: int) -> None:
             logger.info("upgrade job %d: Ceph detected — rebalance gate ON", job_id)
 
         in_flight: set[str] = set()
+        # Per-target RAM committed by hosts already evacuated in THIS job, so each
+        # subsequent host's headroom plan accounts for guests it can't yet see in
+        # the poll cache (prevents multi-host overcommit of the survivors).
+        committed_mem: dict = {}
 
         for nrow in nrows:
             if _control.is_aborted(job_id):
@@ -855,7 +889,7 @@ async def _run_job(job_id: int) -> None:
             await _run_single_host(cluster, job_id, node_dict,
                                     target_mode, target_manual,
                                     migrate_back, ceph_gate, in_flight,
-                                    exclude_targets)
+                                    exclude_targets, committed_mem)
 
         async with db.connect() as c:
             cur = await c.execute(
@@ -880,7 +914,8 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                             target_mode: str, target_manual: dict,
                             migrate_back: bool, ceph_gate: bool,
                             in_flight: set[str],
-                            exclude_targets: set[str] | None = None) -> None:
+                            exclude_targets: set[str] | None = None,
+                            committed_mem: Optional[dict] = None) -> None:
     node_id = n["id"]
     source = n["node"]
     in_place = (target_mode == "in_place")
@@ -911,6 +946,7 @@ async def _run_single_host(cluster, job_id: int, n: dict,
 
     in_flight.add(source)
     stopped: list[dict] = []
+    evac: list[dict] = []   # evacuation results (empty in in_place mode)
     try:
         # 1. evacuate guests — or, in_place, gracefully shut them down
         await _set_node_status(node_id, "evacuating", started=True)
@@ -923,14 +959,29 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                                         finished=True)
                 await _ev(node_id, "warn",
                            "in-place: a guest did not shut down cleanly — aborting host")
+                # Don't leave the guests we DID stop powered off — restart them so
+                # an aborted in-place run doesn't take down part of the workload.
+                ok_stopped = [g for g in stopped if g.get("ok")]
+                if ok_stopped:
+                    await _start_node_guests(cluster, source, ok_stopped, node_id)
                 return
         else:
-            evac = await _evacuate_node(cluster, source, targets, node_id)
+            evac = await _evacuate_node(cluster, source, targets, node_id, committed_mem)
             await _patch_node_detail(node_id, {"evacuated": evac})
             if any(not e.get("ok") for e in evac):
                 await _set_node_status(node_id, "failed",
                                         error="one or more guests failed to migrate",
                                         finished=True)
+                # Guests that DID migrate are now on the targets — tell the
+                # operator so they can be migrated back manually (we don't reboot).
+                moved = [e for e in evac if e.get("ok")]
+                if moved:
+                    await _ev(node_id, "warn",
+                               f"{len(moved)} guest(s) already moved to targets are "
+                               f"stranded there (host not rebooted) — migrate back "
+                               f"manually: " + ", ".join(
+                                   f"{e.get('type','vm')}/{e['vmid']}→{e.get('target')}"
+                                   for e in moved))
                 return
 
         # 2. apt dist-upgrade
@@ -977,6 +1028,16 @@ async def _run_single_host(cluster, job_id: int, n: dict,
                 await _set_node_status(node_id, "failed",
                                         error="reboot did not complete in time",
                                         finished=True)
+                # The guests were already evacuated to targets and we will NOT
+                # migrate them back onto a node that failed to reboot — warn so
+                # the operator knows they're stranded and must recover manually.
+                moved = [e for e in (evac or []) if e.get("ok")]
+                if moved:
+                    await _ev(node_id, "warn",
+                               f"{len(moved)} guest(s) remain on target nodes after the "
+                               f"reboot failed — recover the host, then migrate back: "
+                               + ", ".join(f"{e.get('type','vm')}/{e['vmid']}→{e.get('target')}"
+                                           for e in moved))
                 return
             # Node + OSDs are back up — release noout so recovery of any writes
             # made during downtime can proceed, then we wait for it below.
@@ -1204,7 +1265,7 @@ async def start_job(request: web.Request) -> web.Response:
         target=f"{out['cluster_id']}/job-{job_id}", cluster_id=out["cluster_id"],
         result="ok", request_id=rid,
     )
-    asyncio.create_task(_run_job(job_id))
+    _spawn_job(job_id)
     return web.json_response({"ok": True})
 
 
@@ -1272,7 +1333,7 @@ async def resume_running_jobs_on_startup() -> None:
         return
     for r in rows:
         logger.info("resuming host_upgrade job %d", r["id"])
-        asyncio.create_task(_run_job(r["id"]))
+        _spawn_job(r["id"])
 
 
 ROUTES = [

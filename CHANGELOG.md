@@ -8,6 +8,36 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.12] — 2026-07-15
+
+### Fixed
+- **User management: last-admin / self-lockout protection.** Deleting, disabling,
+  or demoting the last enabled global admin (or disabling/demoting yourself) is
+  now rejected — the web UI can no longer be left manageable only via the CLI.
+- **Federated (PAM/LDAP) account handling.** Local login and self-service
+  change-password now recognise every `*`-sentinel (not just `*PAM*`); an admin
+  password reset on a PAM/LDAP account is rejected instead of silently forking a
+  local credential. Disabling a user now also revokes their sessions. New local
+  usernames are validated against an allow-list.
+- **Tasks: the cluster task list was silently capped at ~50.** `get_cluster_tasks`
+  now passes `limit` to PVE, so filtering by an older vmid/user returns results.
+  `stop_task` URL-encodes the UPID (matching the read paths); a duplicate
+  `get_task_status` was removed; timestamp/offset parsing is guarded.
+- **Migration line for HA-managed guests.** The matrix now resolves the correct
+  source node for `hamigrate` tasks (was the CRM node), so HA migrations draw the
+  source→target line and label the failure toast correctly. `bwlimit` is recorded
+  in the migrate audit entry.
+
+### Changed
+- **Host upgrade robustness.** Evacuation now carries a per-target RAM tally
+  across hosts in a job (no multi-host overcommit); a transient reboot-required
+  probe error no longer fails a successful upgrade; post-evacuate failures (incl.
+  reboot timeout) warn about guests stranded on target nodes; an aborted in-place
+  run restarts the guests it had shut down.
+- **UI consistency.** The Host Upgrade job table adopts the canonical `.vm-table`
+  look; upgrade and task status enums are now localized (zh-TW no longer shows raw
+  `awaiting_reboot` etc.); removed dead native-`<select>` CSS in Tasks.
+
 ## [0.8.11] — 2026-07-15
 
 ### Added

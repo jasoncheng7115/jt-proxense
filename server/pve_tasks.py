@@ -72,10 +72,14 @@ async def _fetch_cluster_tasks(cluster_id: str, force: bool = False) -> list[dic
     # the SPA happens to use ms throughout (matches Date.now()).
     for t in tasks:
         t["_status"] = _classify_status(t)
-        if t.get("starttime"):
-            t["starttime_ms"] = int(t["starttime"]) * 1000
-        if t.get("endtime"):
-            t["endtime_ms"] = int(t["endtime"]) * 1000
+        # PVE returns UNIX seconds; guard int() against a non-numeric value
+        # (unbounded external input) so one bad row can't 500 the whole list.
+        for src, dst in (("starttime", "starttime_ms"), ("endtime", "endtime_ms")):
+            if t.get(src) is not None:
+                try:
+                    t[dst] = int(t[src]) * 1000
+                except (TypeError, ValueError):
+                    pass
     _cache[cluster_id] = (now, tasks)
     return tasks
 
@@ -131,7 +135,7 @@ async def task_log_handler(request: web.Request) -> web.Response:
     node = request.match_info["node"]
     upid = request.match_info["upid"]
     try:
-        start = int(request.query.get("start") or "0")
+        start = max(0, int(request.query.get("start") or "0"))
         limit = max(1, min(int(request.query.get("limit") or "500"), 5000))
     except ValueError:
         return web.json_response({"error": "bad_params"}, status=400)
