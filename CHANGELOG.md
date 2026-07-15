@@ -8,6 +8,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.13] — 2026-07-15
+
+### Fixed
+- **Regression (v0.8.12): every cluster task poll 400'd.** `/cluster/tasks` does
+  not accept a `limit` query parameter — the v0.8.12 change to pass one made PVE
+  reject every request ("property is not defined in schema"), emptying the Tasks
+  view and the matrix task overlay. Reverted to client-side slicing; per-node
+  task queries (which *do* accept `limit`) are unaffected.
+- **Host upgrade job status was never marked `failed`.** A job whose every node
+  failed (and any partial job with no successful node) now finishes as `failed`
+  instead of `done`, so the summary no longer misreports a fully-failed run as
+  successful.
+
+### Security
+- **Step-up re-auth for 2FA backup-code re-issue.** Minting new 2FA backup codes
+  for another user is a 2FA-bypass primitive; the admin now re-enters their own
+  password to confirm (verified server-side; federated/sentinel admins are
+  exempt as they have no local password). The audit trail records failed
+  confirmations.
+
+### Changed
+- **2FA backup codes are shown in a dedicated reveal modal** (copy button,
+  one-shot "not shown again" note) instead of a plain alert.
+
 ## [0.8.12] — 2026-07-15
 
 ### Fixed

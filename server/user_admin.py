@@ -282,9 +282,27 @@ async def disable_totp_handler(request: web.Request) -> web.Response:
 async def regen_totp_backup_codes_handler(request: web.Request) -> web.Response:
     """POST /api/admin/users/{username}/totp/backup-codes — re-issue
     TOTP backup codes for a user. Returns the new plaintext codes ONCE;
-    admin must hand them to the user securely."""
+    admin must hand them to the user securely.
+
+    Minting backup codes is a 2FA-bypass primitive, so it requires a step-up:
+    the acting admin must re-enter their OWN password (local admins). A
+    federated (PAM/LDAP) admin has no local hash to verify against, so the
+    step-up is skipped for them (they authenticated upstream)."""
     username = request.match_info["username"]
     actor, ip, rid = _audit(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    actor_row = auth.get_user_by_username(actor)
+    if actor_row and not auth.is_sentinel_hash(actor_row.get("password_hash")):
+        if not auth.verify_password(str(body.get("admin_password") or ""),
+                                    actor_row["password_hash"]):
+            await audit.write(
+                user=actor, source_ip=ip, action="admin.user.totp_regen_backup",
+                target=username, result="reauth_failed", request_id=rid,
+            )
+            return web.json_response({"error": "admin_reauth_required"}, status=403)
     codes = totp_mod.regenerate_backup_codes(username)
     if not codes:
         await audit.write(

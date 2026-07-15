@@ -1670,13 +1670,15 @@ class PVEClient:
     # Task APIs
 
     async def get_cluster_tasks(self, running: bool = False, limit: int = 50) -> list:
-        """Get cluster tasks (most-recent first). Passes `limit` to PVE so the
-        list isn't silently capped at PVE's small default page (~50) — without
-        it, filtering by an older vmid/user in the UI returned 'no results'
-        even when matching tasks existed."""
+        """Get cluster tasks (most-recent first).
+
+        NOTE: PVE's `/cluster/tasks` endpoint does NOT accept a `limit` (or any)
+        query parameter — passing one makes PVE 400 with "property is not defined
+        in schema". The endpoint returns a fixed recent-task window maintained by
+        pvestatd; we slice it client-side. (Only the per-node `/nodes/{node}/tasks`
+        endpoint accepts limit/start/vmid/source.)"""
         try:
-            params = {"limit": limit} if limit else None
-            tasks = await self._request("GET", "/cluster/tasks", params=params)
+            tasks = await self._request("GET", "/cluster/tasks")
             if running:
                 # Filter running tasks manually
                 # Running tasks have no endtime or endtime=0, and status not 'stopped'

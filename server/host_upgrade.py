@@ -902,7 +902,21 @@ async def _run_job(job_id: int) -> None:
         if (still and still["c"]) and _control.is_aborted(job_id):
             await _set_job_status(job_id, "aborted", finished=True)
         else:
-            await _set_job_status(job_id, "done", finished=True)
+            # Don't label an all-failed sweep 'done'. If at least one host
+            # succeeded it's still 'done' (the UI shows the per-host failure
+            # count); only a sweep where every host failed becomes 'failed'.
+            async with db.connect() as c:
+                cur = await c.execute(
+                    "SELECT SUM(status = 'done') AS ok, "
+                    "SUM(status = 'failed') AS bad "
+                    "FROM host_upgrade_nodes WHERE job_id = ?",
+                    (job_id,),
+                )
+                counts = await cur.fetchone()
+            done_n = int((counts and counts["ok"]) or 0)
+            failed_n = int((counts and counts["bad"]) or 0)
+            final = "failed" if (failed_n and not done_n) else "done"
+            await _set_job_status(job_id, final, finished=True)
         _control.aborts.discard(job_id)
         logger.info("upgrade job %d finished", job_id)
     except Exception as e:
