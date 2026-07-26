@@ -708,7 +708,7 @@ function sendKeyAction(name) {
         case 'prtsc': rfb.sendKey(KEYSYM.Print,      'PrintScreen'); break;
         case 'cab':   sendCtrlAltKey(KEYSYM.BackSpace, 'Backspace'); break;
         default:
-            const m = /^caf(\d{1,2})$/.exec(name);
+            const m = /^caf(\\d{1,2})$/.exec(name);
             if (m) {
                 const n = parseInt(m[1], 10);
                 if (n >= 1 && n <= 12) {
@@ -891,7 +891,7 @@ if (ocrBtn) {
                 for (const line of lines) {
                     let bar = 0, total = 0;
                     for (const ch of line) {
-                        if (/\s/.test(ch)) continue;
+                        if (/\\s/.test(ch)) continue;
                         total++;
                         if (barChars.includes(ch)) bar++;
                     }

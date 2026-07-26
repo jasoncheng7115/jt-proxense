@@ -634,17 +634,19 @@ def test_every_device_argument_passes_through_the_by_id_guard():
             f"{fn.__name__} accepts a device without _norm_device"
 
 
-def test_ssh_connect_has_a_bounded_timeout():
+def test_ssh_connect_is_bounded_via_the_shared_helper():
     """asyncssh.connect() has no timeout of its own.
 
-    Without an explicit bound, a request against an unreachable node pins an
-    aiohttp handler until the OS abandons the TCP handshake — minutes. The full
-    security gate caught this: a probe against an unroutable TEST-NET address
-    never came back.
+    Without a bound, a request against an unreachable node pins an aiohttp
+    handler until the OS abandons the TCP handshake — minutes. The security gate
+    caught this: a probe against an unroutable TEST-NET address never came back.
+    The bound now lives in ssh_util (see tests/test_ssh_util.py) so all nine
+    outbound-SSH call sites inherit it; zfs_admin must route through it and
+    translate the timeout into its own error code.
     """
     src = inspect.getsource(z._connect)
-    assert "wait_for" in src, "_connect must bound the connection attempt"
-    assert "CONNECT_TIMEOUT" in src
+    assert "ssh_util.connect(" in src, "must not hand-roll a connection"
+    assert "SshTimeout" in src, "timeout must map to a precise ZfsError"
     assert z.CONNECT_TIMEOUT <= 30
 
 

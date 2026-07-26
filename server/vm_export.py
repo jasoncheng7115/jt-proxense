@@ -49,6 +49,7 @@ from typing import Any, Optional
 from aiohttp import web
 
 from . import audit
+from . import ssh_util
 from . import db
 from .cluster_manager import cluster_manager
 from .middleware import role_required
@@ -104,18 +105,15 @@ def _actor(request: web.Request) -> tuple[str, str, str]:
 
 
 def _ssh_for(cluster, node: str) -> tuple[str, str, int]:
-    health = cluster.client.get_health_status() or {}
-    info = health.get(node) or {}
-    host = info.get("host") or node
-    user = getattr(cluster.config, "ssh_user", None) or "root"
-    port = int(getattr(cluster.config, "ssh_port", None) or 22)
-    return host, user, port
+    # Single source of truth in ssh_util — this used to be five byte-identical
+    # copies, which is how the missing connect timeout stayed missing.
+    return ssh_util.target_for(cluster, node)
 
 
 async def _ssh_connect(cluster, node: str):
     import asyncssh
     host, user, port = _ssh_for(cluster, node)
-    return await asyncssh.connect(host, port=port, username=user, known_hosts=None)
+    return await ssh_util.connect(host, user, port)
 
 
 def _require_cluster(cid: str):

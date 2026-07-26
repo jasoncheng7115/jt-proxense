@@ -21,6 +21,7 @@ from aiohttp import web
 
 from . import audit
 from .cluster_manager import cluster_manager
+from . import ssh_util
 from .middleware import role_required
 
 logger = logging.getLogger(__name__)
@@ -131,13 +132,13 @@ async def propagate_handler(request: web.Request) -> web.Response:
             f"else echo \"FAIL {h}\"; fi")
     script = "\n".join(script_lines)
 
-    user_ssh = getattr(cluster.config, "ssh_user", None) or "root"
-    port = int(getattr(cluster.config, "ssh_port", None) or 22)
+    # Credentials policy lives in ssh_util; the health map is used wholesale
+    # here (enumerate fan-out targets + validate the seed), which is why this
+    # does not go through target_for().
+    user_ssh, port = ssh_util.user_port_for(cluster)
     results = []
     try:
-        import asyncssh
-        async with asyncssh.connect(seed_host, port=port, username=user_ssh,
-                                    known_hosts=None) as conn:
+        async with await ssh_util.connect(seed_host, user_ssh, port) as conn:
             r = await conn.run(script, check=False, timeout=90)
             for line in (r.stdout or "").splitlines():
                 line = line.strip()

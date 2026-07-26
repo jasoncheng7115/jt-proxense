@@ -32,6 +32,7 @@ import time
 from aiohttp import web
 
 from .cluster_manager import cluster_manager
+from . import ssh_util
 from .middleware import role_required
 
 logger = logging.getLogger(__name__)
@@ -156,9 +157,7 @@ def _parse_nodelist(lines: list[str]) -> dict:
 
 
 async def _ssh_corosync(host: str, user: str, port: int) -> dict:
-    import asyncssh
-    async with asyncssh.connect(host, port=port, username=user,
-                                known_hosts=None) as conn:
+    async with await ssh_util.connect(host, user, port) as conn:
         r = await conn.run(_SCRIPT, check=False, timeout=20)
         out = r.stdout or ""
     sections = _split_sections(out)
@@ -199,8 +198,7 @@ async def _collect(cluster) -> dict:
                 ssh_host = r.get("ip") or r.get("name")
 
     # --- 2. SSH best-effort: quorum votes + link status + latency ---
-    user = getattr(cluster.config, "ssh_user", None) or "root"
-    port = int(getattr(cluster.config, "ssh_port", None) or 22)
+    user, port = ssh_util.user_port_for(cluster)
     ssh_ok = False
     ssh_err = None
     ssh: dict = {}

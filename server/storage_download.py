@@ -32,6 +32,7 @@ from aiohttp import web
 
 from . import audit
 from .cluster_manager import cluster_manager
+from . import ssh_util
 from .middleware import role_required
 
 
@@ -48,12 +49,12 @@ def _audit_actor(request: web.Request) -> tuple[str, str, str]:
 
 
 def _ssh_user_for(cluster) -> str:
-    """Resolve the SSH user from cluster.config.ssh_user; default root."""
-    return getattr(cluster.config, "ssh_user", None) or "root"
+    """SSH user for this cluster — policy lives in ssh_util."""
+    return ssh_util.user_port_for(cluster)[0]
 
 
 def _ssh_port_for(cluster) -> int:
-    return int(getattr(cluster.config, "ssh_port", None) or 22)
+    return ssh_util.user_port_for(cluster)[1]
 
 
 @role_required("viewer")
@@ -111,10 +112,7 @@ async def download_handler(request: web.Request) -> web.StreamResponse:
 
     file_path: Optional[str] = None
     try:
-        async with asyncssh.connect(
-            ssh_host, port=ssh_port, username=ssh_user,
-            known_hosts=None,  # Operator-trusted hosts; no host-key pinning yet
-        ) as conn:
+        async with await ssh_util.connect(ssh_host, ssh_user, ssh_port) as conn:
             r = await conn.run(path_cmd, check=False)
             if r.exit_status != 0:
                 stderr = (r.stderr or "").strip()[:300]

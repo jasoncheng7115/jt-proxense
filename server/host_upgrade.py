@@ -47,6 +47,7 @@ from typing import Optional
 from aiohttp import web
 
 from . import audit, db
+from . import ssh_util
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -336,12 +337,9 @@ async def _wait_ceph_clean(cluster, job_id: int, node_id: int) -> bool:
 # ─────────────────────────────────────────────────────── helpers
 
 def _ssh_for(cluster, node: str) -> tuple[str, str, int]:
-    health = cluster.client.get_health_status() or {}
-    info = health.get(node) or {}
-    host = info.get("host") or node
-    user = getattr(cluster.config, "ssh_user", None) or "root"
-    port = int(getattr(cluster.config, "ssh_port", None) or 22)
-    return host, user, port
+    # Single source of truth in ssh_util — this used to be five byte-identical
+    # copies, which is how the missing connect timeout stayed missing.
+    return ssh_util.target_for(cluster, node)
 
 
 def _vms_on_node(cluster, node: str) -> list:
@@ -565,9 +563,7 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
     await _ev(node_id, "info", f"ssh {user}@{host}:{port}  $ {APT_CMD}")
     tail: list[str] = []
     try:
-        async with asyncssh.connect(
-            host, port=port, username=user, known_hosts=None,
-        ) as conn:
+        async with await ssh_util.connect(host, user, port) as conn:
             # stdin=DEVNULL: any process that still tries to read a prompt gets
             # immediate EOF and proceeds/fails fast, instead of blocking on an
             # open pipe with no TTY to answer.
@@ -644,9 +640,7 @@ async def _reboot_node(cluster, node: str, node_id: int) -> bool:
         pass
     await _ev(node_id, "info", f"reboot requested on {host}")
     try:
-        async with asyncssh.connect(
-            host, port=port, username=user, known_hosts=None,
-        ) as conn:
+        async with await ssh_util.connect(host, user, port) as conn:
             try:
                 await conn.run("systemctl reboot --no-wall", check=False)
             except Exception:

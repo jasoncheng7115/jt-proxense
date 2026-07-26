@@ -72,6 +72,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
   the kernel keeps resilvering, but our watcher did not.
 
 ### Fixed
+- **All outbound SSH now goes through one module** (`ssh_util.py`). Nine call
+  sites across eight modules had grown their own copy of resolve-node-then-
+  connect, five of them byte-identical, so the connect-timeout fix had to be
+  applied nine times and had been applied nowhere. Node resolution, the
+  credentials policy and the bounded handshake now live in one place, and a
+  test fails the build if a module calls `asyncssh.connect` directly.
+  Also escaped two regexes in the console page template that Python 3.12 will
+  start warning about (emitted JavaScript unchanged).
 - **SSH connections are now time-bounded.** `asyncssh.connect()` has no timeout
   of its own, so a ZFS request against an unreachable node pinned an aiohttp
   handler until the OS abandoned the TCP handshake. Bounded at 12s with a
