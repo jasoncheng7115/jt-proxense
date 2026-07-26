@@ -72,6 +72,11 @@ versioning follows [Semantic Versioning](https://semver.org/).
   the kernel keeps resilvering, but our watcher did not.
 
 ### Fixed
+- **SSH connections are now time-bounded.** `asyncssh.connect()` has no timeout
+  of its own, so a ZFS request against an unreachable node pinned an aiohttp
+  handler until the OS abandoned the TCP handshake. Bounded at 12s with a
+  precise error. (The other SSH modules share the pattern and are queued for
+  the same treatment.)
 - **The operator CLI could act on a different database than the daemon.**
   `bin/jt-proxense` took the DB path from `$JTPROXENSE_DB_PATH` or a
   compiled-in default and never consulted `auth.db_path` in config.yaml, so on

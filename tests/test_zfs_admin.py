@@ -632,3 +632,24 @@ def test_every_device_argument_passes_through_the_by_id_guard():
         src = inspect.getsource(fn)
         assert ("_norm_device(" in src or "_norm_devices(" in src), \
             f"{fn.__name__} accepts a device without _norm_device"
+
+
+def test_ssh_connect_has_a_bounded_timeout():
+    """asyncssh.connect() has no timeout of its own.
+
+    Without an explicit bound, a request against an unreachable node pins an
+    aiohttp handler until the OS abandons the TCP handshake — minutes. The full
+    security gate caught this: a probe against an unroutable TEST-NET address
+    never came back.
+    """
+    src = inspect.getsource(z._connect)
+    assert "wait_for" in src, "_connect must bound the connection attempt"
+    assert "CONNECT_TIMEOUT" in src
+    assert z.CONNECT_TIMEOUT <= 30
+
+
+def test_run_does_not_rewrap_precise_errors():
+    src = inspect.getsource(z._run)
+    assert "except ZfsError:" in src, (
+        "a precise ZfsError (e.g. connect timeout) must not be flattened into a "
+        "generic ssh_failed with a str() detail")

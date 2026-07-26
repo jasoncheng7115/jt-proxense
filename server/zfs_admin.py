@@ -78,6 +78,10 @@ _NO_REDUNDANCY = ("stripe",)
 
 SSH_TIMEOUT = 30
 LONG_TIMEOUT = 120
+# asyncssh.connect() has no timeout of its own, so an unreachable node blocks
+# until the OS gives up on the TCP handshake — minutes, during which an aiohttp
+# handler and a browser request are both pinned. Bound it ourselves.
+CONNECT_TIMEOUT = 12
 
 
 class ZfsError(Exception):
@@ -160,7 +164,16 @@ def _require_cluster(cid: str):
 async def _connect(cluster, node: str):
     import asyncssh
     host, user, port = _ssh_for(cluster, node)
-    return await asyncssh.connect(host, port=port, username=user, known_hosts=None)
+    try:
+        return await asyncio.wait_for(
+            asyncssh.connect(host, port=port, username=user, known_hosts=None),
+            timeout=CONNECT_TIMEOUT)
+    except asyncio.TimeoutError:
+        raise ZfsError(
+            "ssh_failed",
+            f"connecting to {host}:{port} timed out after {CONNECT_TIMEOUT}s "
+            "— node unreachable, or the SSH port is filtered",
+            status=502)
 
 
 async def _run(cluster, node: str, cmd: str, *, timeout: int = SSH_TIMEOUT
@@ -174,7 +187,9 @@ async def _run(cluster, node: str, cmd: str, *, timeout: int = SSH_TIMEOUT
         async with await _connect(cluster, node) as conn:
             r = await conn.run(cmd, check=False, timeout=timeout)
             return int(r.exit_status or 0), (r.stdout or ""), (r.stderr or "")
-    except Exception as e:  # connection / auth / timeout
+    except ZfsError:
+        raise                      # already precise (e.g. connect timeout)
+    except Exception as e:          # auth failure / command timeout / transport
         raise ZfsError("ssh_failed", str(e), status=502)
 
 

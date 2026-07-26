@@ -61,6 +61,10 @@ JT-PROXENSE 所有重要變動紀錄於此。
   已經隨舊行程結束。
 
 ### 修正
+- **SSH 連線加上逾時上限。** `asyncssh.connect()` 本身沒有逾時,因此對無法連通的
+  節點發出 ZFS 請求時,會一直占住一個 aiohttp handler 直到作業系統放棄 TCP
+  三方交握。現已限制在 12 秒並回報明確錯誤。(其餘 SSH 模組是相同寫法,已列入
+  後續處理。)
 - **操作者 CLI 可能操作到與服務不同的資料庫。** `bin/jt-proxense` 只從
   `$JTPROXENSE_DB_PATH` 或編譯內建的預設值取得資料庫路徑,完全不看 config.yaml
   的 `auth.db_path`。因此在自訂路徑的部署上,`reset-password` 會對「沒人讀取的
