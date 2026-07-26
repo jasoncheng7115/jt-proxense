@@ -8,6 +8,98 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.0] — 2026-07-25
+
+### Added
+- **ZFS pool lifecycle management** (`zfs_admin.py` + `ZFSManager` view, admin) —
+  the half of ZFS the stock PVE WebUI never covers: it can *create* a pool and
+  then leaves you at the CLI forever. New ZFS page (sidebar `Z`, `/zfs`):
+  - **Visual topology map** — pool → vdev group → individual disk chips, with
+    data / special / log / cache / spare laid out as labelled rows. Per-disk
+    state LED, read/write/checksum error badges, slow-I/O flag and a `boot`
+    marker for partition-backed members, so a 22-disk two-raidz2 pool is
+    legible at a glance.
+  - **Replace a disk**, including the **boot-disk path**: a PVE root pool lives
+    on a partition beside an ESP, so a plain `zpool replace` there yields a pool
+    that resilvers perfectly and a disk that cannot boot. Boot layouts are
+    detected and get the partition-clone + `proxmox-boot-tool` flow instead.
+  - **Add vdevs**: extra data capacity, LOG/SLOG, CACHE (L2ARC), SPECIAL
+    (metadata), hot spares — plus RAIDZ online expansion (`zpool attach` onto an
+    existing raidz group, not `add`, which would silently create a second vdev).
+  - **Multi-vdev pool builder** — build e.g. 22 disks as two raidz2-of-11 in one
+    reviewed action, with log/cache/special groups in the same pass.
+  - **Safety rails.** Every ZFS handler now converts errors into a JSON
+    envelope — previously any maintenance call on a node without passwordless
+    SSH raised out of the coroutine and answered 500 with a traceback, which
+    also silenced the SSH-setup helper that keys off `error=ssh_failed`.
+    `zpool attach` joined offline/detach/remove in requiring an explicit
+    second request; a scrub is refused while a resilver is already running
+    (it would compete for the disks being rebuilt); and a replacement smaller
+    than the member it takes over is rejected up front rather than after the
+    operator has committed.
+  - **Pools and disk inventory are separate tabs**, and physical media sizes
+    are base-10 as the manufacturer labels them (a "256 GB" SSD now reads
+    256 GB, not 238.5; a 1.92 TB drive reads 1.92 TB, not 1.7). Pool capacity
+    stays base-2 to match `zpool list` but is labelled honestly as GiB/TiB.
+    Type sizes follow the house scale instead of shrinking below it.
+  - **Reads go through the PVE API, not SSH.** `/disks/zfs`, `/disks/zfs/{pool}`
+    and `/disks/list` cover the pool list, the full vdev tree and the disk
+    inventory (PVE already classifies media as hdd/ssd/nvme and supplies a
+    by-id link), so the topology view works on a stock cluster with no
+    passwordless SSH and performs no writes on the node. SSH is required only
+    for the operations PVE exposes no API for — replace, add vdev, scrub,
+    trim, raidz expansion — and asking for one of those now opens a helper
+    with the key to authorise instead of failing with a raw error.
+  - **Graphical, not textual** — every affordance carries a mark: class icons
+    per vdev row (data / special / log / cache / spare), state glyphs instead
+    of bare words, icon buttons, per-vdev allocation bars, a relative-size bar
+    per disk and a stacked HDD/SSD/NVMe composition chart for the node. Fault
+    tolerance is drawn as pips — filled = redundancy still available, hollow =
+    already spent — so a raidz2 group that has lost one member reads as "one
+    failure left" at a glance rather than as the design figure "parity 2".
+  - **Media-aware disk marks** — HDD / SSD / NVMe are classified the way PVE
+    itself classifies them (transport + rotational, since `rotational` alone
+    cannot separate an NVMe from a SATA SSD) and shown as colour-coded icons
+    in the inventory, the pickers and the topology chips, with the SATA/SAS
+    transport alongside.
+  - **Scrub / TRIM** with live progress, and per-disk offline/online/clear/
+    attach/detach/remove.
+  - **Blast radius** — pool → PVE storages → the guests whose disks live there,
+    answering "what dies with this pool?" before anyone touches a disk.
+- **Long ZFS operations are tracked in SQLite** (migration `009_zfs_jobs.sql`)
+  so a multi-hour resilver survives a daemon restart. Rows found `running` at
+  startup are marked `orphaned` for human review rather than reported as done —
+  the kernel keeps resilvering, but our watcher did not.
+
+### Fixed
+- **The operator CLI could act on a different database than the daemon.**
+  `bin/jt-proxense` took the DB path from `$JTPROXENSE_DB_PATH` or a
+  compiled-in default and never consulted `auth.db_path` in config.yaml, so on
+  a deployment with a non-default path `reset-password` reported success
+  against a database nobody reads, `user list` came back empty, and
+  `export-config` bundled the wrong DB — precisely when the CLI is the way
+  back in after an auth misconfig. Precedence is now
+  `$JTPROXENSE_DB_PATH` > config.yaml > default.
+
+### Security
+- Every ZFS mutation is admin-gated and audited (including pre-flight refusals).
+  Device arguments must resolve under `/dev/disk/by-id`; `/dev/sdX`, `by-path`
+  and traversal attempts are rejected outright, because kernel names reorder
+  across reboots and one wrong argument means resilvering a healthy disk. All
+  tokens are allow-list validated *and* shell-quoted.
+- **Preview-first execution**: mutations run ZFS's own `-n` dry run and surface
+  its verdict verbatim; the real command only runs after an explicit confirm
+  with the pool name typed back. ZFS's refusals (mismatched replication levels,
+  e.g. a 2-way mirror added to a raidz2 pool) become visible warnings with an
+  opt-in force, instead of being silently forced or silently wrong.
+- The disk inventory excludes ZFS zvols (`zd*`) and device-mapper / loop / MD
+  / zram nodes. `lsblk` reports zvols as `type=disk`, so without this filter a
+  wizard could offer a volume that lives *inside* a pool as a member of a new
+  pool — a pool within a pool.
+- Irreversibility is stated up front: raidz/draid top-level vdevs can never be
+  removed, special/log removal is blocked once any raidz exists, added capacity
+  is not rebalanced, and `ashift` is permanent.
+
 ## [0.8.13] — 2026-07-15
 
 ### Fixed

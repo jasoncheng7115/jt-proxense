@@ -412,8 +412,12 @@ section {
     overflow-x: auto;
     /* Long install one-liners (unbreakable URLs) used to blow the box past the
        viewport on phones. Wrap instead — the copy button still copies the full
-       command, so visual wrapping costs nothing. */
-    white-space: pre-wrap;
+       command, so visual wrapping costs nothing. Use `normal` (not `pre-wrap`):
+       the source markup puts the command on its own indented line, so pre-wrap
+       rendered the surrounding newlines as blank lines padding the box top and
+       bottom. `normal` collapses that whitespace; `overflow-wrap: anywhere`
+       still breaks the unbreakable URL to keep it inside the box. */
+    white-space: normal;
     overflow-wrap: anywhere;
     line-height: 1.6;
 }
@@ -674,7 +678,11 @@ section {
 .foot-links a { color: var(--text-dim); }
 .foot-links a:hover { color: var(--cyan); }
 .foot-meta { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; }
-.foot-disclaimer { margin-top: 14px; max-width: 760px; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--text-muted); }
+/* max-width without auto margins pinned this 760px box to the left of the
+   centred container, so the (inherited) centre-aligned text looked off-centre
+   against the copyright line above. Centre the box; justify the text so both
+   edges line up cleanly instead of the ragged centred-CJK pyramid. */
+.foot-disclaimer { margin: 14px auto 0; max-width: 760px; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--text-muted); text-align: justify; text-align-last: center; }
 .foot-disclaimer a { color: var(--cyan); }
 
 /* ===========================================================

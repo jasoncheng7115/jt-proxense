@@ -1,0 +1,8 @@
+--- add -n 正常(mirror 2-way,會警告不一致)---
+invalid vdev specification
+use '-f' to override the following errors:
+mismatched replication level: pool uses 3-way mirror and new vdev uses 2-way mirror
+--- add -n 單碟無備援(最危險,必攔)---
+invalid vdev specification
+use '-f' to override the following errors:
+mismatched replication level: pool uses mirror and new vdev is file

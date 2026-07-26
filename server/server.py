@@ -50,6 +50,7 @@ from . import ceph_admin
 from . import network_admin
 from . import maintenance
 from . import host_upgrade
+from . import zfs_admin
 from . import pve_users_admin
 from . import cluster_locks
 from . import audit_forwarder_admin
@@ -763,6 +764,11 @@ def create_app() -> web.Application:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
+    # v0.9 ZFS pool lifecycle — replace / add / log / cache / special / builder
+    for method, path, handler in zfs_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
     # v0.4 PVE users / groups / ACL (admin)
     for method, path, handler in pve_users_admin.ROUTES:
         route = app.router.add_route(method, path, handler)
@@ -954,6 +960,11 @@ async def start_server():
     # etc.). Each job's state is fully driven from SQLite so this just
     # re-launches the per-job runner.
     asyncio.create_task(host_upgrade.resume_running_jobs_on_startup())
+
+    # ZFS jobs are NOT resumed: a resilver keeps running inside the kernel
+    # regardless of us, but our watcher died with the old process, so the row
+    # is flagged 'orphaned' for human review instead of silently reported done.
+    asyncio.create_task(zfs_admin.mark_orphans_on_startup())
 
     # Export jobs: mark conversions orphaned by the restart as failed,
     # then run the 24 h output-retention reaper.

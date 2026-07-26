@@ -40,7 +40,35 @@ sys.path.insert(0, str(_ROOT))
 from server import auth, db  # noqa: E402
 
 CONFIG_PATH = Path(os.environ.get("JTPROXENSE_CONFIG", "/opt/jt-proxense/config.yaml"))
-DB_PATH = Path(os.environ.get("JTPROXENSE_DB_PATH", "/var/lib/jt-proxense/jt-proxense.db"))
+_DEFAULT_DB = "/var/lib/jt-proxense/jt-proxense.db"
+
+
+def _resolve_db_path() -> Path:
+    """Honour config.yaml's auth.db_path, not just the compiled-in default.
+
+    This CLI exists so an operator locked out by an auth misconfig can get back
+    in — pointing it at a different database than the daemon uses defeats it
+    exactly when it matters. Previously a non-default `auth.db_path` was ignored
+    here, so `reset-password` reported success against a database nobody reads
+    and `user list` came back empty. Precedence: $JTPROXENSE_DB_PATH (explicit
+    operator override) > config.yaml auth.db_path > default.
+    """
+    env = os.environ.get("JTPROXENSE_DB_PATH")
+    if env:
+        return Path(env)
+    try:
+        import yaml
+        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+        p = ((cfg.get("auth") or {}).get("db_path") or "").strip()
+        if p:
+            return Path(p)
+    except Exception:
+        pass          # unreadable/absent config -> fall back to the default
+    return Path(_DEFAULT_DB)
+
+
+DB_PATH = _resolve_db_path()
 
 
 def _cli_actor() -> str:

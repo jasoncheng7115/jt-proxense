@@ -438,6 +438,29 @@ class PVEClient:
             logger.warning("list_node_disks %s: %s", node, e)
             return []
 
+    async def zfs_list(self, node: str) -> list:
+        """`/nodes/{node}/disks/zfs` — pools with size / alloc / free / frag /
+        dedup / health. No SSH needed, unlike the `zpool` CLI."""
+        try:
+            return await self._request("GET", f"/nodes/{node}/disks/zfs")
+        except Exception as e:
+            logger.debug("zfs_list %s: %s", node, e)
+            return []
+
+    async def zfs_detail(self, node: str, pool: str) -> dict:
+        """`/nodes/{node}/disks/zfs/{pool}` — the vdev tree.
+
+        PVE parses `zpool status` server-side and returns nested `children`
+        with `leaf`, `state` and read/write/cksum counters, plus `scan`,
+        `status`, `action` and `errors` as free text. This is how the whole
+        read-only half of ZFS management works WITHOUT passwordless SSH.
+        """
+        try:
+            return await self._request("GET", f"/nodes/{node}/disks/zfs/{pool}") or {}
+        except Exception as e:
+            logger.debug("zfs_detail %s/%s: %s", node, pool, e)
+            return {}
+
     async def disk_smart(self, node: str, disk: str, *, healthonly: bool = False) -> dict:
         """`/nodes/{node}/disks/smart?disk=<dev>` — full SMART attribute dump
         (or just health if healthonly=True). Disk path is e.g. '/dev/sda';
