@@ -544,10 +544,46 @@ def test_dry_run_helper_refuses_without_confirm():
     assert '"dry_run": True' in src
 
 
+BASE_ADD = ["zpool", "add", "tank", "mirror", "/dev/disk/by-id/a",
+            "/dev/disk/by-id/b"]
+
+
 def test_force_is_never_implicit():
     """-f may only appear when the caller explicitly asked for force."""
-    src = inspect.getsource(z._dry_then_run)
-    assert "if force:" in src and 'base.insert(1, "-f")' in src
+    assert " -f" not in z.zpool_cmd(BASE_ADD)
+    assert " -f" in z.zpool_cmd(BASE_ADD, force=True)
+
+
+def test_flags_go_after_the_subcommand():
+    """zpool has NO global options.
+
+    `zpool -n add ...` answers "unrecognized command '-n'" and exits 2, so the
+    original ordering made every dry run fail and vdev-add / raidz-expand /
+    pool-create always reported "ZFS refused this" — three endpoints dead on
+    arrival. The previous version of this test asserted on the source text
+    (`base.insert(1, "-f")`) and therefore pinned the bug in place; assert on
+    the produced command instead.
+    """
+    assert z.zpool_cmd(BASE_ADD, dry_flag="-n").startswith("zpool add -n ")
+    assert z.zpool_cmd(BASE_ADD, force=True, dry_flag="-n").startswith(
+        "zpool add -n -f ")
+    assert z.zpool_cmd(BASE_ADD, force=True).startswith("zpool add -f ")
+    # never a flag before the subcommand
+    for cmd in (z.zpool_cmd(BASE_ADD, dry_flag="-n"),
+                z.zpool_cmd(BASE_ADD, force=True),
+                z.zpool_cmd(["zpool", "create", "tank", "/dev/disk/by-id/a"],
+                            dry_flag="-n")):
+        assert not cmd.split()[1].startswith("-"), cmd
+
+
+def test_zpool_cmd_quotes_every_token():
+    cmd = z.zpool_cmd(["zpool", "add", "tank; rm -rf /", "/dev/disk/by-id/a"])
+    assert "'tank; rm -rf /'" in cmd
+
+
+def test_zpool_cmd_rejects_a_bare_program():
+    with pytest.raises(z.ZfsError):
+        z.zpool_cmd(["zpool"])
 
 
 def test_special_vdev_without_redundancy_is_refused():
@@ -578,33 +614,22 @@ def test_replace_refuses_a_device_not_in_the_pool():
     assert "old_not_in_pool" in inspect.getsource(z.replace_handler)
 
 
-def test_command_fstrings_only_interpolate_quoted_values():
-    """Any f-string that builds a shell command must quote every value it splices.
+def test_commands_reaching_the_shell_only_splice_quoted_values():
+    """Check the real boundary: what gets handed to _run().
 
-    A plain string check is not enough — the boot-disk replace legitimately uses
-    an f-string whose every hole is shlex.quote()d. So walk the AST and demand
-    that each interpolation is either shlex.quote(...) or one of a small set of
-    provably-constrained expressions (documented inline).
+    An earlier version scanned every f-string whose text mentioned a command
+    word, which flagged error messages like "could not parse zpool status JSON:
+    {e}" and had to be whittled down with heuristics. The shell only ever sees
+    the command argument of _run(), so inspect exactly that.
     """
     src = inspect.getsource(z)
     tree = ast.parse(src)
-    CMD_WORDS = ("zpool ", "zfs ", "sgdisk", "proxmox-boot-tool", "lsblk",
-                 "blockdev", "partprobe")
-    # Values that cannot carry shell metacharacters by construction:
-    #   zpart  - digits captured by re.search(r"-part(\d+)$", ...)
-    #   force  - renders either "-f " or "" from a bool
-    SAFE_EXPR = {"zpart"}
+    SAFE_NAMES = {"zpart"}          # digits captured by re.search(r"-part(\d+)$")
     offenders = []
-    for node in ast.walk(tree):
+
+    def check(node, where):
         if not isinstance(node, ast.JoinedStr):
-            continue
-        literal = "".join(v.value for v in node.values
-                          if isinstance(v, ast.Constant) and isinstance(v.value, str))
-        # Must BE a command, not merely mention one: an error message such as
-        # "could not parse zpool status JSON: {e}" contains a command word but
-        # never reaches a shell.
-        if not literal.lstrip().startswith(CMD_WORDS):
-            continue
+            return
         for v in node.values:
             if not isinstance(v, ast.FormattedValue):
                 continue
@@ -612,15 +637,24 @@ def test_command_fstrings_only_interpolate_quoted_values():
             if isinstance(e, ast.Call):
                 f = e.func
                 nm = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
-                if nm == "quote":
+                if nm in ("quote", "zpool_cmd"):
                     continue
-            if isinstance(e, ast.Name) and e.id in SAFE_EXPR:
+            if isinstance(e, ast.Name) and e.id in SAFE_NAMES:
                 continue
-            # a bool-driven flag such as ('-f ' if force else '')
             if isinstance(e, ast.IfExp) and all(
                     isinstance(b, ast.Constant) for b in (e.body, e.orelse)):
                 continue
-            offenders.append(ast.dump(e)[:120])
+            offenders.append(f"{where}: {ast.dump(e)[:100]}")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fname = (node.func.attr if isinstance(node.func, ast.Attribute)
+                 else getattr(node.func, "id", ""))
+        if fname == "_run" and len(node.args) >= 3:
+            check(node.args[2], f"_run@{node.lineno}")
+        elif fname == "run" and node.args:
+            check(node.args[0], f"conn.run@{node.lineno}")
     assert not offenders, "unquoted interpolation into a shell command:\n" + \
         "\n".join(offenders)
 
@@ -655,3 +689,146 @@ def test_run_does_not_rewrap_precise_errors():
     assert "except ZfsError:" in src, (
         "a precise ZfsError (e.g. connect timeout) must not be flattened into a "
         "generic ssh_failed with a str() detail")
+
+
+# ============================================ blast radius / error counting
+#
+# Both of these shipped broken and both failed SILENTLY, which is what makes
+# them worth pinning: nothing errored, the answer was just wrong in the
+# reassuring direction.
+
+class _VMStatus:
+    def __init__(self, value): self.value = value
+
+
+class _DiskConfig:
+    """Mirrors server.models.DiskConfig — a dataclass, NOT a dict."""
+    def __init__(self, storage, device="scsi0"):
+        self.storage = storage
+        self.device = device
+
+
+class _VMMetrics:
+    """Mirrors server.models.VMMetrics — a dataclass, NOT a dict."""
+    def __init__(self, vmid, name, node, disks, status="running", type_="qemu"):
+        self.vmid, self.name, self.node = vmid, name, node
+        self.disks = disks
+        self.status = _VMStatus(status)
+        self.type = type_
+
+
+def _blast_guests(vms, node, names):
+    """Exercise the guest-matching logic the handler uses."""
+    def _get(obj, attr, default=None):
+        if isinstance(obj, dict):
+            return obj.get(attr, default)
+        return getattr(obj, attr, default)
+
+    out = []
+    for v in (vms.values() if isinstance(vms, dict) else (vms or [])):
+        if _get(v, "node") != node:
+            continue
+        hit = [d for d in (_get(v, "disks") or []) if _get(d, "storage") in names]
+        if hit:
+            st = _get(v, "status")
+            out.append({"vmid": _get(v, "vmid"), "name": _get(v, "name"),
+                        "status": getattr(st, "value", st),
+                        "disks": sorted({_get(d, "storage") for d in hit})})
+    return out
+
+
+def test_blast_radius_reads_dataclass_guests():
+    """cluster.cache.vms holds VMMetrics dataclasses, not dicts.
+
+    The first version tested `isinstance(v, dict)` and skipped every guest, so
+    "what dies with this pool?" answered "nothing" for every pool — the most
+    dangerous way for this feature to be wrong, because it reassures the
+    operator right before they pull a disk.
+    """
+    vms = {"host-108/100": _VMMetrics(100, "erp1", "host-108",
+                                      [_DiskConfig("tank-vm")])}
+    got = _blast_guests(vms, "host-108", {"tank-vm"})
+    assert len(got) == 1
+    assert got[0]["vmid"] == 100 and got[0]["name"] == "erp1"
+    assert got[0]["status"] == "running", "VMStatus enum must be unwrapped"
+
+
+def test_blast_radius_still_reads_plain_dicts():
+    vms = [{"vmid": 7, "name": "d", "node": "n1", "status": "stopped",
+            "disks": [{"storage": "tank-vm"}]}]
+    got = _blast_guests(vms, "n1", {"tank-vm"})
+    assert got and got[0]["vmid"] == 7
+
+
+def test_blast_radius_ignores_other_nodes_and_storages():
+    vms = {
+        "a/1": _VMMetrics(1, "here", "n1", [_DiskConfig("tank-vm")]),
+        "b/2": _VMMetrics(2, "elsewhere", "n2", [_DiskConfig("tank-vm")]),
+        "c/3": _VMMetrics(3, "other-storage", "n1", [_DiskConfig("nas")]),
+    }
+    got = _blast_guests(vms, "n1", {"tank-vm"})
+    assert [g["vmid"] for g in got] == [1]
+
+
+@pytest.mark.parametrize("text,want", [
+    ("No known data errors", 0),
+    ("", 0),
+    (None, 0),
+    ("2 data errors, use '-v' for a list", 2),
+    ("17 data errors, use '-v' for a list", 17),
+    ("Permanent errors have been detected in the following files:", 1),
+])
+def test_api_error_count(text, want):
+    """`0 if clean else 0` — both branches zero — hid every pool error on the
+    API read path, which is the default path."""
+    assert z._api_error_count(text) == want
+
+
+def test_api_pool_with_errors_reports_them():
+    listing = [{"name": "tank", "size": 1000, "alloc": 500, "health": "ONLINE"}]
+    det = {"tank": {"name": "tank", "state": "ONLINE", "children": [],
+                    "errors": "3 data errors, use '-v' for a list"}}
+    pool = z.parse_pools_api(listing, det)[0]
+    assert pool["error_count"] == 3
+
+
+# ------------------------------------------- status-read failure handling
+
+def test_status_reader_refuses_to_guess_when_zpool_fails():
+    """`zpool status -j` does not exist before OpenZFS 2.2 (PVE 8.0 shipped
+    2.1.x). Ignoring the exit code meant empty stdout parsed to [], and callers
+    concluded "that disk is not in the pool" or "no scan is running" — confident
+    lies about a node we could not read.
+    """
+    src = inspect.getsource(z._status_pools)
+    assert "if rc != 0:" in src
+    assert "zpool_status_failed" in src
+    for fn in (z._find_vdev, z._scan_in_flight, z._watch_scan):
+        body = inspect.getsource(fn)
+        assert "_status_pools" in body, f"{fn.__name__} bypasses the guarded reader"
+        assert "parse_pools(out" not in body, f"{fn.__name__} still parses raw output"
+
+
+def test_replace_records_an_audit_even_when_ssh_dies():
+    """A partially executed destructive boot-disk script must not vanish."""
+    src = inspect.getsource(z.replace_handler)
+    assert "except ZfsError as e:" in src
+    assert '"partial": True' in src
+    assert '_job_finish(job_id, "failed"' in src
+
+
+def test_dry_then_run_audits_a_failed_execution():
+    src = inspect.getsource(z._dry_then_run)
+    assert "except ZfsError as e:" in src and '"partial": True' in src
+
+
+def test_replacement_clean_check_is_not_inverted():
+    """`zpool labelclear -n` on a CLEAN disk prints a path ("failed to read
+    label from /dev/..."); a disk with a stale label prints nothing. Matching a
+    bare "/" therefore refused every clean disk and pushed the operator toward
+    --force, which also disables the too-small guard.
+    """
+    src = inspect.getsource(z.replace_handler)
+    assert "---MARK---" in src, "lsblk and labelclear output must be judged apart"
+    assert "unlabeled|failed to read label" in src
+    assert '"_raid_member|/"' not in src and "|/)" not in src

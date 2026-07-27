@@ -30,8 +30,8 @@ class _FakeClient:
         return self._health
 
 
-def _cluster(health=None, ssh_user=None, ssh_port=None):
-    cfg = types.SimpleNamespace()
+def _cluster(health=None, ssh_user=None, ssh_port=None, nodes=None):
+    cfg = types.SimpleNamespace(nodes=nodes or [])
     if ssh_user is not None:
         cfg.ssh_user = ssh_user
     if ssh_port is not None:
@@ -39,14 +39,46 @@ def _cluster(health=None, ssh_user=None, ssh_port=None):
     return types.SimpleNamespace(client=_FakeClient(health or {}), config=cfg)
 
 
-def test_target_uses_health_map_address():
-    c = _cluster({"host-108": {"host": "192.0.2.8"}})
-    assert ssh_util.target_for(c, "host-108") == ("192.0.2.8", "root", 22)
+def test_health_map_is_keyed_by_host_port_not_node_name():
+    """Guards the assumption that made the original lookup dead code.
+
+    PveClient.node_health is keyed "{host}:{port}". The first version of
+    target_for did `health.get(node)` with a PVE node NAME, which can never
+    match — so the address the poller had just proven reachable was ignored and
+    every SSH connection silently depended on the short name resolving. The
+    original test fed a name-keyed map and therefore validated the same wrong
+    assumption instead of catching it.
+    """
+    c = _cluster({"192.0.2.8:8006": {"host": "192.0.2.8"}})
+    # An IP-keyed entry cannot be matched to a node name — fall through to DNS.
+    assert ssh_util.target_for(c, "host-108")[0] == "host-108"
 
 
-def test_target_falls_back_to_node_name_when_health_is_cold():
-    """A cold poller must not stop SSH working — DNS can resolve the node name."""
-    assert ssh_util.target_for(_cluster({}), "host-109")[0] == "host-109"
+def test_configured_endpoint_for_this_node_is_preferred():
+    """We already talk to that endpoint, so we know it resolves."""
+    c = _cluster(nodes=[types.SimpleNamespace(host="host-108.jason.tools")])
+    assert ssh_util.target_for(c, "host-108")[0] == "host-108.jason.tools"
+
+
+def test_health_entry_matching_by_short_name_is_used():
+    c = _cluster({"host-109.lan:8006": {"host": "host-109.lan"}})
+    assert ssh_util.target_for(c, "host-109")[0] == "host-109.lan"
+
+
+def test_unknown_node_falls_back_to_dns():
+    assert ssh_util.target_for(_cluster({}), "host-114")[0] == "host-114"
+
+
+def test_resolution_never_raises_on_odd_shapes():
+    """Config nodes may be dicts, and a broken client must not break SSH."""
+    c = _cluster(nodes=[{"host": "host-108.lan"}, {"nope": 1}])
+    assert ssh_util.target_for(c, "host-108")[0] == "host-108.lan"
+
+    class Broken:
+        def get_health_status(self):
+            raise RuntimeError("poller down")
+    b = types.SimpleNamespace(client=Broken(), config=types.SimpleNamespace(nodes=[]))
+    assert ssh_util.target_for(b, "host-1")[0] == "host-1"
 
 
 def test_target_honours_cluster_ssh_overrides():

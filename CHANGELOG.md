@@ -94,6 +94,34 @@ versioning follows [Semantic Versioning](https://semver.org/).
   back in after an auth misconfig. Precedence is now
   `$JTPROXENSE_DB_PATH` > config.yaml > default.
 
+### Fixed (post-release review)
+- **vdev add, RAIDZ expansion and pool create never worked.** `zpool` takes no
+  global options, so the dry run was issued as `zpool -n add …` — "unrecognized
+  command '-n'" — and all three endpoints answered "ZFS refused this" with a
+  usage dump. Flags now follow the subcommand.
+- **The replacement-disk pre-flight was inverted.** `zpool labelclear -n` prints
+  a path for a *clean* disk and nothing for one carrying a label, so a bare `/`
+  match refused every blank disk and steered the operator into `--force`, which
+  also disables the too-small guard.
+- **A failed `zpool status -j` was read as fact.** The exit code was ignored, so
+  on a node where the command fails (no `-j` before OpenZFS 2.2) an empty parse
+  became "that disk is not in the pool" and silently disabled the
+  don't-scrub-during-a-resilver guard.
+- **draid vdevs reported parity 1** because their names carry geometry
+  (`draid2:4d:11c:1s-0`) and the parser only matched raidz-shaped names —
+  understating fault tolerance on the screen read before pulling a disk.
+- **A dropped SSH transport mid-replace left no audit record** and a job row
+  stuck at `running`, on the most destructive endpoint in the module.
+- **SSH host resolution never used the health map** (keyed `host:port`, queried
+  by node name), so every connection relied on the short name resolving.
+- **Frontend:** a dry run is now bound to the exact request it previewed —
+  changing the disk selection or ticking force after previewing left Execute
+  enabled, so the operator could confirm one command and run another; the
+  blast-radius modal rendered a failed request as "nothing depends on this
+  pool"; a non-JSON error enabled Execute with a blank preview; a network
+  error left every action button disabled until reload; and switching cluster
+  from the top bar left the page fetching the previous cluster.
+
 ### Security
 - Every ZFS mutation is admin-gated and audited (including pre-flight refusals).
   Device arguments must resolve under `/dev/disk/by-id`; `/dev/sdX`, `by-path`

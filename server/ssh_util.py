@@ -53,14 +53,48 @@ def user_port_for(cluster) -> tuple[str, int]:
 def target_for(cluster, node: str) -> tuple[str, str, int]:
     """Resolve a PVE node name to (host, user, port).
 
-    The node's reachable address comes from the poller's health map; falling
-    back to the bare node name lets DNS do the work when the map is cold.
+    Prefer an address we know is reachable, and fall back to the bare node name
+    so DNS can do the work when nothing else is known.
+
+    Careful with the health map: it is keyed by "{host}:{port}" (see
+    PveClient.node_health), NOT by PVE node name. The original code did
+    `health.get(node)`, which could never match — so the address the poller had
+    just proved reachable was ignored and every SSH connection relied on the
+    node's short name resolving. It happens to work where DNS is configured and
+    fails with a 12s timeout where it is not.
     """
-    health = cluster.client.get_health_status() or {}
-    info = health.get(node) or {}
-    host = info.get("host") or node
     user, port = user_port_for(cluster)
+    host = _resolve_host(cluster, node)
     return host, user, port
+
+
+def _resolve_host(cluster, node: str) -> str:
+    """Best address for a PVE node name.
+
+    There is no name->IP map in the cached data: `cache.nodes` holds NodeMetrics,
+    which carries no address field at all, and `client.node_health` is keyed by
+    "{host}:{port}" of the CONFIGURED API endpoints — which in a multi-node
+    cluster is usually a subset of the members. So:
+
+      1. a configured endpoint whose hostname is this node (exact, or short form
+         of an FQDN) — we already talk to it, so we know it resolves;
+      2. otherwise the bare node name, and let DNS / etc/hosts do the work,
+         which is what PVE itself assumes.
+
+    Anything cleverer would need /cluster/status, which we do not cache today.
+    """
+    for n in (getattr(cluster.config, "nodes", None) or []):
+        h = getattr(n, "host", None) or (n.get("host") if isinstance(n, dict) else None)
+        if h and str(h).split(".")[0] == node:
+            return str(h)
+    try:
+        for key in (cluster.client.get_health_status() or {}):
+            host = str(key).rsplit(":", 1)[0]
+            if host.split(".")[0] == node:
+                return host
+    except Exception:
+        pass
+    return node
 
 
 async def connect(host: str, user: str, port: int = DEFAULT_PORT, *,

@@ -265,7 +265,11 @@ def _raidz_level(vtype: str, name: str) -> tuple[str, int | None]:
     t = (vtype or "").lower()
     if not t.startswith(("raidz", "draid")):
         return vtype, None
-    m = re.match(r"^(raidz|draid)(\d)?(?:-\d+)?$", (name or "").lower())
+    # draid top-level vdevs are named with their geometry, e.g.
+    # "draid2:4d:11c:1s-0" — an anchored raidz-style pattern misses them and
+    # falls through to "level 1", understating fault tolerance on exactly the
+    # screen an operator reads before pulling a disk.
+    m = re.match(r"^(raidz|draid)(\d)?(?::|-|$)", (name or "").lower())
     if m and m.group(2):
         return f"{m.group(1)}{m.group(2)}", int(m.group(2))
     # A bare "raidz-0" / "draid-0" name means level 1.
@@ -629,6 +633,22 @@ def _api_scan(text: str | None) -> dict | None:
     }
 
 
+def _api_error_count(text: str | None) -> int:
+    """Turn the API's free-text `errors` line into a count.
+
+    zpool says either "No known data errors", "<n> data errors, use '-v' ..."
+    or "Permanent errors have been detected in the following files:". An earlier
+    version wrote `0 if <clean> else 0` — both branches zero — so a pool with
+    real errors always displayed a clean header on the API read path, which is
+    now the default. Report at least 1 whenever the line is not the clean one.
+    """
+    t = (text or "").strip()
+    if not t or t.lower().startswith("no known data errors"):
+        return 0
+    m = re.search(r"(\d+)\s+data errors", t)
+    return int(m.group(1)) if m else 1
+
+
 def parse_pools_api(listing: list, details: dict[str, dict],
                     *, root_pool: str | None = None) -> list[dict]:
     """Normalise the PVE API's pool list + per-pool detail into OUR shape,
@@ -663,8 +683,7 @@ def parse_pools_api(listing: list, details: dict[str, dict],
             "name": name,
             "state": det.get("state") or entry.get("health") or "UNKNOWN",
             "guid": None,
-            "error_count": 0 if (det.get("errors") or "").lower().startswith(
-                "no known data errors") else 0,
+            "error_count": _api_error_count(det.get("errors")),
             "status_text": (det.get("status") or "").strip() or None,
             "action_text": (det.get("action") or "").strip() or None,
             "size": size,
@@ -882,20 +901,36 @@ async def consumers_handler(request: web.Request) -> web.Response:
     names = {s["storage"] for s in storages if s.get("storage")}
 
     # Which guests have a disk on those storages (on this node)?
+    #
+    # cluster.cache.vms holds VMMetrics DATACLASSES keyed "node/vmid", and each
+    # .disks entry is a DiskConfig dataclass — not dicts. An earlier version
+    # tested `isinstance(v, dict)` and skipped everything, so this answered
+    # "no guests" for every pool. That is the worst possible failure here: the
+    # operator asks "what dies with this pool?" before pulling a disk and is
+    # told "nothing". Read through an accessor that copes with either shape.
+    def _get(obj, attr, default=None):
+        if isinstance(obj, dict):
+            return obj.get(attr, default)
+        return getattr(obj, attr, default)
+
     guests: list[dict] = []
     cache = getattr(cluster, "cache", None)
     vms = (getattr(cache, "vms", None) or {}) if cache else {}
-    for v in (vms.values() if isinstance(vms, dict) else vms) or []:
-        if not isinstance(v, dict):
+    for v in (vms.values() if isinstance(vms, dict) else (vms or [])):
+        if _get(v, "node") != node:
             continue
-        if v.get("node") != node:
-            continue
-        hit = [d for d in (v.get("disks") or [])
-               if (d.get("storage") in names)]
+        hit = [d for d in (_get(v, "disks") or [])
+               if _get(d, "storage") in names]
         if hit:
-            guests.append({"vmid": v.get("vmid"), "name": v.get("name"),
-                           "type": v.get("type"), "status": v.get("status"),
-                           "disks": [d.get("storage") for d in hit]})
+            status = _get(v, "status")
+            guests.append({
+                "vmid": _get(v, "vmid"),
+                "name": _get(v, "name"),
+                "type": _get(v, "type"),
+                # VMStatus is an enum on the dataclass path
+                "status": getattr(status, "value", status),
+                "disks": sorted({_get(d, "storage") for d in hit}),
+            })
     guests.sort(key=lambda g: (g.get("vmid") or 0))
     return web.json_response({"ok": True, "pool": pool, "node": node,
                               "storages": storages, "guests": guests,
@@ -941,21 +976,30 @@ async def _watch_scan(cluster, cid: str, node: str, pool: str, job_id: int) -> N
     """Poll a resilver/scrub to completion so the job row reflects reality even
     if every browser is closed. Bounded so a stuck scan can't leak a task."""
     deadline = _now() + 14 * 24 * 3600
+    misses = 0
     try:
         while _now() < deadline:
             await asyncio.sleep(20)
             try:
-                rc, out, _ = await _run(cluster, node,
-                                        f"zpool status -j {shlex.quote(pool)}")
-                pools = parse_pools(out, root_pool=None)
+                pools = await _status_pools(cluster, node, pool)
             except ZfsError:
+                misses += 1
+                if misses >= 30:      # ~10 min of an unreadable node
+                    await _job_finish(job_id, "warning",
+                                      {"error": "pool status unreadable"})
+                    return
                 continue
+            misses = 0
             p = next((x for x in pools if x["name"] == pool), None)
             if not p:
                 await _job_finish(job_id, "failed", {"error": "pool_vanished"})
                 return
             scan = p.get("scan") or {}
-            if (scan.get("state") or "") in ("FINISHED", "CANCELED", ""):
+            state = (scan.get("state") or "").upper()
+            # An empty state means the pool reports no scan at all (e.g. attach
+            # onto a cache device, which resilvers nothing) — that is "nothing
+            # to watch", not "the scan finished successfully".
+            if state in ("FINISHED", "CANCELED") or not scan:
                 ok = p["state"] in ("ONLINE",) and not p["error_count"]
                 await _job_finish(job_id, "done" if ok else "warning",
                                   {"pool_state": p["state"],
@@ -1026,6 +1070,25 @@ async def _body(request) -> dict:
     return b if isinstance(b, dict) else {}
 
 
+def zpool_cmd(argv: list[str], *, force: bool = False,
+              dry_flag: str | None = None) -> str:
+    """Assemble a zpool command line.
+
+    zpool takes NO global options — `zpool -n add ...` answers "unrecognized
+    command '-n'" and exits 2. Flags belong AFTER the subcommand. Putting them
+    first made every dry run fail, so vdev-add / raidz-expand / pool-create
+    always answered "ZFS refused this" with a usage dump as the explanation:
+    three endpoints dead on arrival, and the unit test asserted on the source
+    text so it pinned the bug rather than catching it. Hence this pure function
+    — tested on the string it produces.
+    """
+    if len(argv) < 2:
+        raise ZfsError("bad_command", "need at least `zpool <subcommand>`")
+    prog, sub, rest = argv[0], argv[1], list(argv[2:])
+    flags = ([dry_flag] if dry_flag else []) + (["-f"] if force else [])
+    return " ".join(shlex.quote(x) for x in [prog, sub, *flags, *rest])
+
+
 async def _dry_then_run(cluster, node: str, cid: str, pool: str, request,
                         *, action: str, argv: list[str], confirm: bool,
                         force: bool, dry_flag: str = "-n",
@@ -1036,11 +1099,7 @@ async def _dry_then_run(cluster, node: str, cid: str, pool: str, request,
     tells us why, which is far more trustworthy than us re-implementing its
     rules. `force` maps to -f and is only ever set by an explicit UI opt-in.
     """
-    base = list(argv)
-    if force:
-        base.insert(1, "-f")
-    dry = " ".join(shlex.quote(x) for x in
-                   [base[0], dry_flag] + base[1:])
+    dry = zpool_cmd(argv, force=force, dry_flag=dry_flag)
     rc, out, err = await _run(cluster, node, dry, timeout=LONG_TIMEOUT)
     preview = ((out or "") + ("\n" + err if err else "")).strip()
     if rc != 0:
@@ -1053,9 +1112,17 @@ async def _dry_then_run(cluster, node: str, cid: str, pool: str, request,
                                  status=409)
     if not confirm:
         return web.json_response({"ok": True, "dry_run": True, "preview": preview,
-                                  "command": " ".join(shlex.quote(x) for x in base)})
-    real = " ".join(shlex.quote(x) for x in base)
-    rc, out, err = await _run(cluster, node, real, timeout=LONG_TIMEOUT)
+                                  "command": zpool_cmd(argv, force=force)})
+    real = zpool_cmd(argv, force=force)
+    try:
+        rc, out, err = await _run(cluster, node, real, timeout=LONG_TIMEOUT)
+    except ZfsError as e:
+        # The command may have reached the node before the transport died, so
+        # record the attempt rather than losing it with the exception.
+        await _audit(request, action, cid, f"{node}/{pool}",
+                     f"error: {e.code}: {e.detail[:140]}",
+                     {**params, "command": real, "partial": True})
+        raise
     detail = ((out or "") + ("\n" + err if err else "")).strip()
     await _audit(request, action, cid, f"{node}/{pool}",
                  "ok" if rc == 0 else f"error: {detail[:160]}",
@@ -1145,21 +1212,39 @@ async def _scan_in_flight(cluster, node: str, pool: str) -> dict | None:
     window in which a second failure is fatal. Callers refuse unless forced.
     """
     try:
-        rc, out, _ = await _run(cluster, node, f"zpool status -j {shlex.quote(pool)}")
-        for p in parse_pools(out):
+        for p in await _status_pools(cluster, node, pool):
             if p["name"] != pool:
                 continue
             scan = p.get("scan") or {}
             if (scan.get("state") or "").upper() in ("SCANNING", "ACTIVE"):
                 return scan
     except ZfsError:
-        return None   # cannot tell -> do not block the operator
+        # Could not read the pool. Do not block the operator on a guess — the
+        # command they asked for will surface the real error itself.
+        return None
     return None
 
 
+async def _status_pools(cluster, node: str, pool: str) -> list[dict]:
+    """`zpool status -j` for one pool, refusing to guess when it fails.
+
+    `_run` deliberately does not raise on a non-zero exit, so callers must check
+    rc themselves. Ignoring it meant that on any node where the command failed
+    — OpenZFS < 2.2 has no `-j`, and PVE 8.0 shipped 2.1.x — stdout was empty,
+    `parse_pools("")` returned [], and the caller concluded "that disk is not in
+    the pool" / "no scan is running". Both are confident lies about a node we
+    could not read.
+    """
+    rc, out, err = await _run(cluster, node, f"zpool status -j {shlex.quote(pool)}")
+    if rc != 0:
+        raise ZfsError("zpool_status_failed",
+                       (err or out or f"zpool status exited {rc}").strip()[:300],
+                       status=502)
+    return parse_pools(out)
+
+
 async def _find_vdev(cluster, node: str, pool: str, want: str) -> dict | None:
-    rc, out, _ = await _run(cluster, node, f"zpool status -j {shlex.quote(pool)}")
-    pools = parse_pools(out)
+    pools = await _status_pools(cluster, node, pool)
     p = next((x for x in pools if x["name"] == pool), None)
     if not p:
         return None
@@ -1222,12 +1307,29 @@ async def replace_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "old_not_in_pool",
                                   "detail": f"{old} is not a member of {pool}"},
                                  status=400)
+    # Is the replacement actually blank? The first version searched the combined
+    # output for a bare "/" among other patterns — but `zpool labelclear -n` on a
+    # CLEAN disk prints "failed to read label from /dev/..." (contains "/"),
+    # while a disk carrying a stale label prints nothing. The test was therefore
+    # inverted in the common case: clean disks were refused as "already carries
+    # data", and the only way forward was force — which also switches off the
+    # too-small guard below. Judge each command separately instead.
     rc, out, _ = await _run(
         cluster, node,
-        f"lsblk -no NAME,FSTYPE,MOUNTPOINT {shlex.quote(new)} 2>&1; echo '---'; "
+        f"lsblk -rno FSTYPE,MOUNTPOINT {shlex.quote(new)} 2>/dev/null; "
+        f"echo '---MARK---'; "
         f"zpool labelclear -n {shlex.quote(new)} 2>&1 || true")
-    busy = [ln for ln in (out or "").splitlines()
-            if re.search(r"(zfs_member|LVM2_member|_raid_member|/)", ln)]
+    blk_part, _, label_part = (out or "").partition("---MARK---")
+    busy: list[str] = []
+    for ln in blk_part.splitlines():
+        fstype, _, mount = ln.strip().partition(" ")
+        if fstype:
+            busy.append(f"{new}: holds {fstype}")
+        if mount.strip().startswith("/"):
+            busy.append(f"{new}: mounted at {mount.strip()}")
+    low = label_part.lower()
+    if low.strip() and not re.search(r"unlabeled|failed to read label|no such", low):
+        busy.append("carries a ZFS label: " + label_part.strip().splitlines()[0][:120])
     if busy and not force:
         return web.json_response(
             {"ok": False, "error": "target_in_use",
@@ -1289,7 +1391,21 @@ async def replace_handler(request: web.Request) -> web.Response:
     script = " && ".join(plan)
     job_id = await _job_create(cid, node, pool, "replace", user, script,
                                {"old": old, "new": new, "boot_disk": is_boot})
-    rc, out, err = await _run(cluster, node, script, timeout=LONG_TIMEOUT)
+    # If the transport drops or the 120s cap fires mid-script, a partially
+    # executed DESTRUCTIVE boot-disk operation must still leave an audit record
+    # and a closed job row — an exception unwinding past both is an A09 hole on
+    # the most dangerous endpoint in the module.
+    try:
+        rc, out, err = await _run(cluster, node, script, timeout=LONG_TIMEOUT)
+    except ZfsError as e:
+        await _audit(request, "zfs.replace", cid, f"{node}/{pool}",
+                     f"error: {e.code}: {e.detail[:140]}",
+                     {"old": old, "new": new, "boot_disk": is_boot,
+                      "job_id": job_id, "partial": True})
+        await _job_finish(job_id, "failed",
+                          {"error": f"{e.code}: {e.detail[:300]}",
+                           "note": "command may have partially executed"})
+        raise
     detail = ((out or "") + ("\n" + err if err else "")).strip()
     await _audit(request, "zfs.replace", cid, f"{node}/{pool}",
                  "ok" if rc == 0 else f"error: {detail[:160]}",
