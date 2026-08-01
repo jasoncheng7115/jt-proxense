@@ -375,6 +375,15 @@
 
             <article class="feat-card">
                 <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <ellipse cx="12" cy="5" rx="8" ry="3"/>
+                    <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/>
+                    <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>
+                </svg>
+                <h3>ZFS 儲存集區維運</h3>
+                <p>原廠 WebUI 只能「建立」儲存集區,之後就把你丟回命令列。這裡補上另一半:更換磁碟(含開機碟的 ESP 處理)、新增 vdev 與 log / cache / special、RAIDZ 線上擴充、多 vdev 建池精靈、清理檢查與 TRIM,以及「影響範圍」——這個集區掛了會連帶失去哪些 PVE 儲存與客體。拓樸以視覺化方式呈現:集區 → vdev → 每顆磁碟,含 HDD/SSD/NVMe 圖示與容錯圓點(還能再壞幾顆)。<strong>讀取全部走 PVE API,不需 SSH、也不會變更節點</strong>;只有維運操作需要 SSH,且一律先以 ZFS 自己的乾跑預覽、再輸入集區名稱確認。</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
                     <path d="M12 3v12"/>
                     <polyline points="8 11 12 15 16 11"/>
                     <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
@@ -409,7 +418,7 @@
     <div class="container">
         <div class="section-head">
             <div class="section-eyebrow">畫面牆</div>
-            <h2>真實工作環境的 17 張截圖。</h2>
+            <h2>真實工作環境的 21 張截圖。</h2>
             <p>點任一張可放大。IP、Email、Token 皆已馬賽克。</p>
         </div>
 
@@ -430,6 +439,8 @@
             <figure class="shot"><img src="screenshots/11-tasks.png" alt="作業記錄"><figcaption>Tasks 作業<span class="desc">叢集作業記錄 + 即時明細</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/12-backups.png" alt="排程備份"><figcaption>Backups 備份<span class="desc">排程 vzdump 作業</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/13-users.png" alt="使用者管理"><figcaption>Users 使用者<span class="desc">RBAC、2FA、角色授權</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/19-zfs.png" alt="ZFS 儲存集區管理"><figcaption>ZFS 儲存集區<span class="desc">拓樸視覺化：集區 → vdev → 磁碟，含容錯圓點</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/19b-zfs-disks.png" alt="ZFS 磁碟清冊"><figcaption>ZFS 磁碟清冊<span class="desc">HDD / SSD / NVMe 分類、by-id 與用途</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/14-upgrade.png" alt="主機升級協調器"><figcaption>主機升級<span class="desc">滾動式批次協調器</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/15-settings.png" alt="設定面板"><figcaption>Settings 設定<span class="desc">內建設定，免改 YAML</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/16-chinese.png" alt="繁中介面"><figcaption>i18n<span class="desc">同一介面，繁體中文</span></figcaption></figure>

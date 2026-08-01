@@ -375,6 +375,15 @@
 
             <article class="feat-card">
                 <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <ellipse cx="12" cy="5" rx="8" ry="3"/>
+                    <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/>
+                    <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>
+                </svg>
+                <h3>ZFS pool lifecycle</h3>
+                <p>The stock WebUI can <em>create</em> a pool and then leaves you at the CLI forever. This is the other half: replace a disk (including the ESP work a boot disk needs), add vdevs and log / cache / special devices, RAIDZ online expansion, a multi-vdev pool builder, scrub and TRIM, plus a blast-radius view — which PVE storages and guests die with this pool. The topology is drawn, not listed: pool → vdev → individual disks, with HDD/SSD/NVMe marks and redundancy pips showing how many more failures the group can take. <strong>Reads go through the PVE API — no SSH, no changes to the node</strong>; only maintenance needs SSH, and every action is previewed with ZFS's own dry run and confirmed by typing the pool name.</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
                     <path d="M12 3v12"/>
                     <polyline points="8 11 12 15 16 11"/>
                     <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
@@ -409,7 +418,7 @@
     <div class="container">
         <div class="section-head">
             <div class="section-eyebrow">Screen wall</div>
-            <h2>Seventeen shots from a real workspace.</h2>
+            <h2>Twenty-one shots from a real workspace.</h2>
             <p>Click any tile to enlarge. IPs, emails and tokens are blurred.</p>
         </div>
 
@@ -430,6 +439,8 @@
             <figure class="shot"><img src="screenshots/11-tasks.png" alt="Cluster operation log"><figcaption>Tasks<span class="desc">Cluster operation log + live detail</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/12-backups.png" alt="Backup schedules"><figcaption>Backups<span class="desc">Scheduled vzdump jobs</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/13-users.png" alt="User management"><figcaption>Users<span class="desc">RBAC, 2FA, role grants</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/19-zfs.png" alt="ZFS pool management"><figcaption>ZFS pools<span class="desc">Topology drawn: pool → vdev → disks, with redundancy pips</span></figcaption></figure>
+            <figure class="shot"><img src="screenshots/19b-zfs-disks.png" alt="ZFS disk inventory"><figcaption>ZFS disk inventory<span class="desc">HDD / SSD / NVMe, by-id and what claims each disk</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/14-upgrade.png" alt="Host upgrade orchestrator"><figcaption>Host upgrade<span class="desc">Rolling batch orchestrator</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/15-settings.png" alt="Settings panel"><figcaption>Settings<span class="desc">In-app config, no YAML editing</span></figcaption></figure>
             <figure class="shot"><img src="screenshots/16-chinese.png" alt="Traditional Chinese locale"><figcaption>i18n<span class="desc">Same UI, 繁體中文</span></figcaption></figure>
