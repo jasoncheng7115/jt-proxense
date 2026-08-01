@@ -98,6 +98,15 @@ def _resolve_host(cluster, node: str) -> str:
                 return host
     except Exception:
         pass
+    # A single-node cluster configured by IP can't be matched by name (the IP's
+    # first octet isn't the node name), but its one endpoint IS that node — use
+    # it rather than falling to a DNS name that may not resolve.
+    cfg_nodes = getattr(cluster.config, "nodes", None) or []
+    if len(cfg_nodes) == 1:
+        only = cfg_nodes[0]
+        h = getattr(only, "host", None) or (only.get("host") if isinstance(only, dict) else None)
+        if h:
+            return str(h)
     return node
 
 

@@ -149,6 +149,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
   a network error no longer wedges every button; switching cluster from the
   top bar no longer keeps fetching the old one.
 
+### Fixed (remaining review items)
+- Mutations on one pool are now serialised (409 `pool_busy` on a second
+  concurrent one) so two admins — or a scrub and a replace — can't race the
+  check-then-act pre-flights.
+- A paused scrub is recorded and no longer polled for the full 14-day cap; a
+  transient DB error while writing scan progress skips the tick instead of
+  aborting the watch and marking a healthy scan failed.
+- A ZFS read that fails on permissions or an unreachable node now reports
+  `zfs_read_failed` (403/502) instead of rendering as "no ZFS on this node".
+- draid minimum device counts corrected; a single-node cluster configured by
+  IP now resolves SSH to that endpoint instead of a possibly-unresolvable
+  node name; the "a scan is running" message no longer prints "(None% done)".
+
 ### Security
 - Every ZFS mutation is admin-gated and audited (including pre-flight refusals).
   Device arguments must resolve under `/dev/disk/by-id`; `/dev/sdX`, `by-path`

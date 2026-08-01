@@ -17,7 +17,7 @@ Routes:
   POST /api/clusters/{cid}/nodes/{node}/zfs/pools/{pool}/vdev      (admin)
   POST /api/clusters/{cid}/nodes/{node}/zfs/pools/{pool}/expand    (admin)
   POST /api/clusters/{cid}/nodes/{node}/zfs/pools                  (admin)
-  GET  /api/clusters/{cid}/zfs/jobs           /  .../zfs/jobs/{id} (viewer)
+  GET  /api/clusters/{cid}/zfs/jobs                               (viewer)
 
 Design notes that matter (learned the hard way — see the module tests):
 
@@ -148,8 +148,11 @@ def _norm_devices(raw, *, minimum: int = 1) -> list[str]:
 
 
 def _min_devices(layout: str) -> int:
+    # draid needs at least parity + 1 data + 1 spare-ish; ZFS's practical floor
+    # is higher than raidz, so don't advertise a too-low minimum that ZFS then
+    # rejects with a worse message.
     return {"stripe": 1, "mirror": 2, "raidz": 3, "raidz2": 4, "raidz3": 5,
-            "draid": 3, "draid2": 4, "draid3": 5}.get(layout, 1)
+            "draid": 4, "draid2": 5, "draid3": 6}.get(layout, 1)
 
 
 # ------------------------------------------------------------------- ssh glue
@@ -378,6 +381,9 @@ def _scan_progress(scan: dict | None) -> dict | None:
         "errors": _int0(scan.get("errors")),
         "start_time": scan.get("start_time"),
         "end_time": scan.get("end_time"),
+        # a paused scrub keeps state SCANNING; scrub_pause holds a timestamp
+        # (or "-"/"0" when not paused)
+        "paused": str(scan.get("scrub_pause") or "-").strip() not in ("-", "0", ""),
         "text": None,      # matches _api_scan's key set
     }
 
@@ -644,6 +650,7 @@ def _api_scan(text: str | None) -> dict | None:
         "errors": errs,
         "start_time": None,
         "end_time": None,
+        "paused": "paused" in low,
         "text": t,
     }
 
@@ -821,7 +828,18 @@ async def zfs_get_handler(request: web.Request) -> web.Response:
     node = request.match_info["node"]
     cluster = _require_cluster(cid)
 
-    listing = await cluster.client.zfs_list(node)
+    try:
+        listing = await cluster.client.zfs_list(node, raise_on_error=True)
+    except Exception as e:
+        # Distinguish "this node has no ZFS" (empty, fine) from a real failure
+        # such as an API token missing Sys.Audit, or the node being down — which
+        # otherwise rendered identically as "no ZFS here".
+        detail = str(e)
+        status = 403 if ("403" in detail or "permission" in detail.lower()) else 502
+        return web.json_response(
+            {"ok": False, "error": "zfs_read_failed",
+             "detail": f"could not read ZFS from {node}: {detail[:200]}"},
+            status=status)
     details: dict[str, dict] = {}
     for entry in listing or []:
         nm = entry.get("name")
@@ -1024,6 +1042,12 @@ async def _watch_scan(cluster, cid: str, node: str, pool: str, job_id: int) -> N
             # we have seen the scan actually run at least once.
             if state in ("SCANNING", "ACTIVE"):
                 started = True
+                # A paused scrub still reports SCANNING; watching it for 14
+                # days is pointless — record it and stop. Resuming is a new
+                # action that spawns its own watcher.
+                if scan.get("paused"):
+                    await _job_finish(job_id, "paused", {"scan": scan})
+                    return
             if state == "CANCELED":
                 await _job_finish(job_id, "canceled",
                                   {"pool_state": p["state"], "scan": scan})
@@ -1039,17 +1063,25 @@ async def _watch_scan(cluster, cid: str, node: str, pool: str, job_id: int) -> N
                 # cache device that resilvers nothing
                 await _job_finish(job_id, "done", {"pool_state": p["state"]})
                 return
-            async with db.connect() as c:
-                await c.execute(
-                    "UPDATE zfs_jobs SET progress=?, detail_json=? WHERE id=?",
-                    (scan.get("percent") or 0, json.dumps({"scan": scan}), job_id))
-                await c.commit()
+            try:
+                async with db.connect() as c:
+                    await c.execute(
+                        "UPDATE zfs_jobs SET progress=?, detail_json=? WHERE id=?",
+                        (scan.get("percent") or 0, json.dumps({"scan": scan}), job_id))
+                    await c.commit()
+            except Exception as e:
+                # A blip writing PROGRESS must not abort the watch of a running
+                # scan — just skip this tick.
+                logger.debug("zfs job %s progress update failed: %s", job_id, e)
         await _job_finish(job_id, "warning", {"error": "watch_timeout"})
     except asyncio.CancelledError:
         raise
     except Exception as e:  # never let the watcher kill the loop
         logger.warning("zfs job %s watcher failed: %s", job_id, e)
-        await _job_finish(job_id, "warning", {"error": str(e)[:200]})
+        try:
+            await _job_finish(job_id, "warning", {"error": str(e)[:200]})
+        except Exception:
+            logger.exception("zfs job %s: could not even record the failure", job_id)
 
 
 # One watcher per (cluster, node, pool). A pool can have a replace, a scrub and
@@ -1098,6 +1130,39 @@ async def mark_orphans_on_startup() -> None:
 
 
 # ------------------------------------------------------------ mutation glue
+
+_POOL_LOCKS: dict[tuple[str, str, str], "asyncio.Lock"] = {}
+
+
+def pool_serialized(handler):
+    """Serialise mutations on one pool.
+
+    Every pre-flight ("is a scan running?", "is that disk in the pool?", "is
+    the replacement blank?") is a check-then-act with an await in the middle, so
+    two admins — or a scrub and a replace — hitting the same pool at once could
+    both pass the checks. ZFS itself arbitrates the actual writes, so the risk is
+    confusing errors rather than corruption, but there is no reason to allow it.
+    A second in-flight mutation on the same pool is refused with 409 rather than
+    queued (queueing would let requests pile up behind a slow boot-disk replace).
+
+    create-pool has no {pool} in the path, so it keys on "" and serialises
+    per node — harmless (two concurrent creates on one node is rare).
+    """
+    @functools.wraps(handler)
+    async def wrapped(request: web.Request):
+        cid = request.match_info.get("cluster_id", "")
+        node = request.match_info.get("node", "")
+        pool = request.match_info.get("pool") or ""
+        lock = _POOL_LOCKS.setdefault((cid, node, pool), asyncio.Lock())
+        if lock.locked():
+            return web.json_response(
+                {"ok": False, "error": "pool_busy",
+                 "detail": "another operation is already in progress on this "
+                           "pool — try again in a moment"}, status=409)
+        async with lock:
+            return await handler(request)
+    return wrapped
+
 
 def _actor(request) -> tuple[str, str, str]:
     user = (request.get("user") or {}).get("username", "anonymous")
@@ -1189,6 +1254,7 @@ async def _dry_then_run(cluster, node: str, cid: str, pool: str, request,
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def scrub_handler(request: web.Request) -> web.Response:
     cid = request.match_info["cluster_id"]
     node = request.match_info["node"]
@@ -1207,9 +1273,9 @@ async def scrub_handler(request: web.Request) -> web.Response:
         if busy:
             return web.json_response(
                 {"ok": False, "error": "scan_already_running",
-                 "detail": f"{busy.get('function') or 'a scan'} is already running "
-                           f"({busy.get('percent')}% done). Starting another now "
-                           "would compete for the same disks.",
+                 "detail": (f"{busy.get('function') or 'a scan'} is already running"
+                            + (f" ({busy['percent']}% done)" if busy.get('percent') is not None else "")
+                            + ". Starting another now would compete for the same disks."),
                  "scan": busy, "forceable": True}, status=409)
     cmd = " ".join(x for x in ["zpool", "scrub", flag, shlex.quote(pool)] if x)
     rc, out, err = await _run(cluster, node, cmd)
@@ -1229,6 +1295,7 @@ async def scrub_handler(request: web.Request) -> web.Response:
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def trim_handler(request: web.Request) -> web.Response:
     cid = request.match_info["cluster_id"]
     node = request.match_info["node"]
@@ -1389,6 +1456,7 @@ def stateClass_ok(state: str | None) -> bool:
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def replace_handler(request: web.Request) -> web.Response:
     """Replace a failing device.
 
@@ -1569,6 +1637,7 @@ async def replace_handler(request: web.Request) -> web.Response:
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def device_handler(request: web.Request) -> web.Response:
     """offline / online / clear / detach / attach / remove one device."""
     cid = request.match_info["cluster_id"]
@@ -1637,6 +1706,7 @@ async def device_handler(request: web.Request) -> web.Response:
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def vdev_add_handler(request: web.Request) -> web.Response:
     """Add a top-level vdev: more data capacity, or log / cache / special /
     spare / dedup.
@@ -1707,6 +1777,7 @@ async def vdev_add_handler(request: web.Request) -> web.Response:
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def expand_handler(request: web.Request) -> web.Response:
     """RAIDZ online expansion (OpenZFS 2.3+): grow a raidz vdev by one disk.
 
@@ -1747,6 +1818,7 @@ async def expand_handler(request: web.Request) -> web.Response:
 
 @role_required("admin")
 @zfs_errors
+@pool_serialized
 async def create_pool_handler(request: web.Request) -> web.Response:
     """Create a pool with an arbitrary multi-vdev topology.
 

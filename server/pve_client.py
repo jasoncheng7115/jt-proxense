@@ -438,12 +438,18 @@ class PVEClient:
             logger.warning("list_node_disks %s: %s", node, e)
             return []
 
-    async def zfs_list(self, node: str) -> list:
+    async def zfs_list(self, node: str, *, raise_on_error: bool = False) -> list:
         """`/nodes/{node}/disks/zfs` — pools with size / alloc / free / frag /
-        dedup / health. No SSH needed, unlike the `zpool` CLI."""
+        dedup / health. No SSH needed, unlike the `zpool` CLI.
+
+        By default returns [] on any error (a node may simply have no ZFS). Pass
+        raise_on_error=True to distinguish "no pools" from "permission denied" /
+        "node unreachable" so the caller can say which."""
         try:
             return await self._request("GET", f"/nodes/{node}/disks/zfs")
         except Exception as e:
+            if raise_on_error:
+                raise
             logger.debug("zfs_list %s: %s", node, e)
             return []
 

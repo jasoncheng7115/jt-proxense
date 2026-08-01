@@ -220,3 +220,17 @@ def test_missing_asyncssh_is_reported_once_centrally():
     src = inspect.getsource(ssh_util)
     assert "SshUnavailable" in src and "pip install" in src
     assert issubclass(ssh_util.SshUnavailable, OSError)
+
+
+def test_single_node_cluster_by_ip_uses_the_endpoint():
+    """A one-node cluster configured by IP can't be matched by name; its sole
+    endpoint IS that node, so use the IP rather than a DNS name that may not
+    resolve."""
+    c = _cluster(nodes=[types.SimpleNamespace(host="192.168.1.50")])
+    assert ssh_util.target_for(c, "pve")[0] == "192.168.1.50"
+
+
+def test_multi_node_by_ip_does_not_guess():
+    c = _cluster(nodes=[types.SimpleNamespace(host="192.168.1.50"),
+                        types.SimpleNamespace(host="192.168.1.51")])
+    assert ssh_util.target_for(c, "pve")[0] == "pve"

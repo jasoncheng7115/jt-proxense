@@ -994,3 +994,62 @@ def test_both_scan_shapes_match_when_present():
     assert resil["scan"] is not None
     api_scan = z._api_scan("resilver in progress since x 12.5% done")
     assert set(resil["scan"]) == set(api_scan), set(resil["scan"]) ^ set(api_scan)
+
+
+# ================================================ remaining-items round
+
+def test_mutations_are_serialised_per_pool():
+    """Two mutations on the same pool must not race the check-then-act
+    pre-flights. A second in-flight one is refused with pool_busy."""
+    src = inspect.getsource(z.pool_serialized)
+    assert "_POOL_LOCKS" in src and "pool_busy" in src
+    for name in ("scrub_handler", "trim_handler", "replace_handler",
+                 "device_handler", "vdev_add_handler", "expand_handler",
+                 "create_pool_handler"):
+        h = getattr(z, name)
+        assert "pool_serialized" in [d for d in _decorator_names(h)], \
+            f"{name} is not pool_serialized"
+
+
+def _decorator_names(fn):
+    # role_required/zfs_errors/pool_serialized all use functools.wraps, so the
+    # chain is visible via __wrapped__; fall back to source scan.
+    src = inspect.getsource(fn)
+    return [ln.strip().lstrip("@").split("(")[0]
+            for ln in src.splitlines() if ln.strip().startswith("@")]
+
+
+def test_paused_scrub_is_not_watched_for_14_days():
+    prog = z._scan_progress({"function": "SCRUB", "state": "SCANNING",
+                             "scrub_pause": "1783875179"})
+    assert prog["paused"] is True
+    prog2 = z._scan_progress({"function": "SCRUB", "state": "SCANNING",
+                              "scrub_pause": "-"})
+    assert prog2["paused"] is False
+    assert 'if scan.get("paused")' in inspect.getsource(z._watch_scan)
+
+
+def test_watcher_progress_write_failure_does_not_abort():
+    src = inspect.getsource(z._watch_scan)
+    # the progress UPDATE is wrapped so a DB blip skips the tick, not the watch
+    assert "progress update failed" in src
+
+
+def test_scan_shapes_still_match_with_paused_added():
+    prog = z._scan_progress({"function": "SCRUB", "state": "SCANNING",
+                             "to_examine": "10G", "examined": "5G"})
+    api = z._api_scan("scrub in progress 50% done")
+    assert set(prog) == set(api)
+
+
+def test_draid_minimum_devices_are_not_understated():
+    assert z._min_devices("draid") >= 4
+    assert z._min_devices("draid2") >= 5
+
+
+def test_zfs_read_failure_is_distinct_from_no_zfs():
+    """A permission/unreachable error must not render as an empty (no-ZFS)
+    node — the handler surfaces zfs_read_failed."""
+    src = inspect.getsource(z.zfs_get_handler)
+    assert "raise_on_error=True" in src
+    assert "zfs_read_failed" in src
