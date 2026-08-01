@@ -122,6 +122,33 @@ versioning follows [Semantic Versioning](https://semver.org/).
   error left every action button disabled until reload; and switching cluster
   from the top bar left the page fetching the previous cluster.
 
+### Fixed (second review pass)
+- **Replacing a genuinely dead disk was broken several ways at once.** The
+  blank-disk pre-flight used `zpool labelclear -n` — a flag that does not
+  exist — so every replacement was refused; a FAULTED disk (shown by GUID)
+  built a bad member argument and skipped the boot flow; the boot flow cloned
+  the partition table from the *dying* disk and hardcoded the ESP as part2.
+  Now: lsblk-based blank check, member arg from path/name, boot-ness from the
+  pool, partition table cloned from a healthy sibling, ESP/ZFS partitions
+  located by GPT type GUID, whole-disk size check, and too-small is a hard
+  refuse.
+- **`storage_download` and `ssh_setup` looked a node up in the health map**
+  (keyed `host:port`) by node name, so file download 404'd and one-click SSH
+  key propagation rejected every seed. Both route through ssh_util now.
+- **create-pool's property filter was a character class, not an allow-list** —
+  `cachefile=/path` could make zpool write a file as root. Replaced with an
+  explicit key set and a no-slash value rule.
+- **Scan watchers** are deduped per pool (three could poll one resilver over
+  SSH every 20s), no longer attribute a previous scrub's completion to a new
+  job, and record a cancelled scrub as cancelled rather than done.
+- Both read parsers now emit an identical key set; the API path no longer
+  guesses the root pool from a partition-backed member.
+- **Frontend** (from the same review): a dry run is bound to the exact request
+  it previewed; the blast-radius modal surfaces a failed request instead of
+  "nothing depends on this pool"; a non-JSON error no longer enables Execute;
+  a network error no longer wedges every button; switching cluster from the
+  top bar no longer keeps fetching the old one.
+
 ### Security
 - Every ZFS mutation is admin-gated and audited (including pre-flight refusals).
   Device arguments must resolve under `/dev/disk/by-id`; `/dev/sdX`, `by-path`

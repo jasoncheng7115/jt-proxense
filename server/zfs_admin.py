@@ -73,6 +73,16 @@ _BYID_DIR = "/dev/disk/by-id/"
 
 VDEV_LAYOUTS = ("stripe", "mirror", "raidz", "raidz2", "raidz3", "draid", "draid2", "draid3")
 VDEV_CLASSES = ("data", "log", "cache", "special", "spare", "dedup")
+
+# Create-time property allow-lists. Values are constrained to no "/" (below), so
+# path-valued props like cachefile / mountpoint / altroot cannot appear at all.
+_CREATE_FS_PROPS = {k: "-O" for k in (
+    "compression", "atime", "relatime", "recordsize", "xattr", "acltype",
+    "dnodesize", "quota", "refreservation", "special_small_blocks",
+    "sync", "logbias", "primarycache", "secondarycache", "checksum",
+    "copies", "casesensitivity", "dedup")}
+_CREATE_POOL_PROPS = {k: "-o" for k in (
+    "autotrim", "autoexpand", "autoreplace", "comment")}
 # Layouts that carry no redundancy — refused for special/dedup unless forced,
 # because losing a special vdev loses the whole pool.
 _NO_REDUNDANCY = ("stripe",)
@@ -368,6 +378,7 @@ def _scan_progress(scan: dict | None) -> dict | None:
         "errors": _int0(scan.get("errors")),
         "start_time": scan.get("start_time"),
         "end_time": scan.get("end_time"),
+        "text": None,      # matches _api_scan's key set
     }
 
 
@@ -427,6 +438,10 @@ def parse_pools(status_json: str, list_json: str = "", *, root_pool: str | None 
             "removable_toplevel": not has_raidz,
             "vdevs": buckets,
             "vdev_count": sum(len(g) for g in buckets.values()),
+            # identical key set to parse_pools_api so SSH enrichment can never
+            # add or drop a field the frontend reads
+            "errors_text": None,
+            "source": "ssh",
         })
     pools.sort(key=lambda x: (not x["is_root_pool"], x["name"]))
     return pools
@@ -812,12 +827,12 @@ async def zfs_get_handler(request: web.Request) -> web.Response:
         nm = entry.get("name")
         if nm:
             details[nm] = await cluster.client.zfs_detail(node, nm)
-    # The node's own root pool, so the UI can flag boot-disk layouts.
+    # The node's own root pool, so the UI can flag boot-disk layouts. There is
+    # no way to know this from the API alone (a partition-backed pool is not
+    # necessarily root — that heuristic flagged data pools built on partitions),
+    # so leave it None on the API path and only claim it when the SSH enrich
+    # step reads `findmnt /`.
     root_pool = None
-    for nm, det in details.items():
-        if any(re.search(r"-part\d+$", (c.get("name") or ""))
-               for c in _flatten_api(det)):
-            root_pool = root_pool or nm
     pools = parse_pools_api(listing, details, root_pool=root_pool)
     pve_disks = await cluster.client.list_node_disks(node)
     disks = parse_disks_api(pve_disks, pools)
@@ -831,8 +846,13 @@ async def zfs_get_handler(request: web.Request) -> web.Response:
             rc, out, _ = await _run(cluster, node, _READ_CMD)
             sec = _split(out)
             if (sec.get("STATUS") or "").strip():
+                # `findmnt -no SOURCE /` is a ZFS dataset like "rpool/ROOT/pve-1"
+                # ONLY when root is on ZFS; on ext4/LVM it is "/dev/mapper/...",
+                # whose split("/")[0] is "" and would blank a real value. Accept
+                # it only when it is not a device path.
                 rsrc = (sec.get("ROOT") or "").strip().splitlines()
-                rp = rsrc[0].split("/")[0] if rsrc else root_pool
+                src0 = rsrc[0] if rsrc else ""
+                rp = src0.split("/")[0] if (src0 and not src0.startswith("/")) else root_pool
                 ssh_pools = parse_pools(sec.get("STATUS", ""), sec.get("LIST", ""),
                                         root_pool=rp)
                 if ssh_pools:
@@ -977,6 +997,7 @@ async def _watch_scan(cluster, cid: str, node: str, pool: str, job_id: int) -> N
     if every browser is closed. Bounded so a stuck scan can't leak a task."""
     deadline = _now() + 14 * 24 * 3600
     misses = 0
+    started = False        # have we actually seen this scan running yet?
     try:
         while _now() < deadline:
             await asyncio.sleep(20)
@@ -996,15 +1017,27 @@ async def _watch_scan(cluster, cid: str, node: str, pool: str, job_id: int) -> N
                 return
             scan = p.get("scan") or {}
             state = (scan.get("state") or "").upper()
-            # An empty state means the pool reports no scan at all (e.g. attach
-            # onto a cache device, which resilvers nothing) — that is "nothing
-            # to watch", not "the scan finished successfully".
-            if state in ("FINISHED", "CANCELED") or not scan:
-                ok = p["state"] in ("ONLINE",) and not p["error_count"]
+            # Right after `zpool replace`/`scrub` the reported scan may still be
+            # the PREVIOUS finished one (not registered yet at the first poll):
+            # treating that FINISHED as "our scan completed" marked the job done
+            # before the resilver even began. Only trust a terminal state once
+            # we have seen the scan actually run at least once.
+            if state in ("SCANNING", "ACTIVE"):
+                started = True
+            if state == "CANCELED":
+                await _job_finish(job_id, "canceled",
+                                  {"pool_state": p["state"], "scan": scan})
+                return
+            if state == "FINISHED" and started:
+                ok = p["state"] == "ONLINE" and not p["error_count"]
                 await _job_finish(job_id, "done" if ok else "warning",
                                   {"pool_state": p["state"],
-                                   "errors": p["error_count"],
-                                   "scan": scan})
+                                   "errors": p["error_count"], "scan": scan})
+                return
+            if not scan and started:
+                # scan disappeared after we saw it run — e.g. attach onto a
+                # cache device that resilvers nothing
+                await _job_finish(job_id, "done", {"pool_state": p["state"]})
                 return
             async with db.connect() as c:
                 await c.execute(
@@ -1019,10 +1052,28 @@ async def _watch_scan(cluster, cid: str, node: str, pool: str, job_id: int) -> N
         await _job_finish(job_id, "warning", {"error": str(e)[:200]})
 
 
+# One watcher per (cluster, node, pool). A pool can have a replace, a scrub and
+# an attach all "in flight" at once, but they share a single resilver/scrub the
+# kernel serialises — three watchers would just open three SSH sessions every
+# 20s (and can brush sshd's MaxStartups). Dedup on the pool.
+_WATCHERS: dict[tuple[str, str, str], "asyncio.Task"] = {}
+
+
 def _spawn_watch(cluster, cid: str, node: str, pool: str, job_id: int) -> None:
+    key = (cid, node, pool)
+    existing = _WATCHERS.get(key)
+    if existing and not existing.done():
+        return                          # already watching this pool
     t = asyncio.create_task(_watch_scan(cluster, cid, node, pool, job_id))
+    _WATCHERS[key] = t
     _JOB_TASKS.add(t)
-    t.add_done_callback(_JOB_TASKS.discard)
+
+    def _cleanup(task):
+        _JOB_TASKS.discard(task)
+        if _WATCHERS.get(key) is task:
+            _WATCHERS.pop(key, None)
+
+    t.add_done_callback(_cleanup)
 
 
 async def mark_orphans_on_startup() -> None:
@@ -1269,6 +1320,73 @@ async def _find_vdev(cluster, node: str, pool: str, want: str) -> dict | None:
     return None
 
 
+# GPT partition type GUIDs (stable across systems).
+_ESP_GUID = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"      # EFI System Partition
+_ZFS_GUIDS = {
+    "6a898cc3-1dd2-11b2-99a6-080020736631",             # Solaris /usr & Apple ZFS
+    "516e7cba-6ecf-11d6-8ff8-00022d09712b",             # FreeBSD ZFS
+}
+
+
+async def _boot_layout(cluster, node: str, disk_byid: str) -> dict | None:
+    """Which partition on this disk is the ESP, and which is the ZFS member?
+
+    Located by GPT partition-type GUID, not by index — PVE's default is ESP on
+    part2 / ZFS on part3, but that must not be assumed (legacy-BIOS and
+    hand-built layouts differ, and formatting the wrong partition as vfat would
+    wreck it). Returns {"esp": N, "zfs": M} or None.
+    """
+    dev = _BYID_DIR + disk_byid
+    _, out, _ = await _run(
+        cluster, node, f"lsblk -rno NAME,PARTTYPE,FSTYPE {shlex.quote(dev)} 2>/dev/null")
+    esp = zfs = None
+    for ln in (out or "").splitlines():
+        cols = ln.split()
+        if len(cols) < 2:
+            continue
+        name, ptype = cols[0], cols[1].lower()
+        fstype = cols[2].lower() if len(cols) > 2 else ""
+        m = re.search(r"(\d+)$", name)
+        if not m:
+            continue
+        num = m.group(1)
+        if ptype == _ESP_GUID:
+            esp = num
+        elif ptype in _ZFS_GUIDS or fstype == "zfs_member":
+            zfs = num
+    if esp and zfs:
+        return {"esp": esp, "zfs": zfs}
+    return None
+
+
+def _healthy_boot_sibling(pool_obj: dict, target_byid: str) -> str | None:
+    """A healthy, ONLINE, partition-backed member of the pool other than the one
+    being replaced. On a boot pool this is where we clone the partition table
+    FROM — cloning from the dying disk (the usual reason to replace) either
+    fails or copies a corrupt table."""
+    want = re.sub(r"-part\d+$", "", target_byid or "")
+    out: list[str] = []
+
+    def walk(v: dict):
+        by = v.get("by_id")
+        if (by and not v.get("children")
+                and v.get("is_partition")
+                and stateClass_ok(v.get("state"))
+                and re.sub(r"-part\d+$", "", by) != want):
+            out.append(re.sub(r"-part\d+$", "", by))
+        for c in v.get("children") or []:
+            walk(c)
+
+    for group in ("data", "special", "log"):     # members that mirror the boot layout
+        for v in (pool_obj.get("vdevs") or {}).get(group, []):
+            walk(v)
+    return out[0] if out else None
+
+
+def stateClass_ok(state: str | None) -> bool:
+    return (state or "").upper() == "ONLINE"
+
+
 @role_required("admin")
 @zfs_errors
 async def replace_handler(request: web.Request) -> web.Response:
@@ -1307,29 +1425,24 @@ async def replace_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "old_not_in_pool",
                                   "detail": f"{old} is not a member of {pool}"},
                                  status=400)
-    # Is the replacement actually blank? The first version searched the combined
-    # output for a bare "/" among other patterns — but `zpool labelclear -n` on a
-    # CLEAN disk prints "failed to read label from /dev/..." (contains "/"),
-    # while a disk carrying a stale label prints nothing. The test was therefore
-    # inverted in the common case: clean disks were refused as "already carries
-    # data", and the only way forward was force — which also switches off the
-    # too-small guard below. Judge each command separately instead.
-    rc, out, _ = await _run(
-        cluster, node,
-        f"lsblk -rno FSTYPE,MOUNTPOINT {shlex.quote(new)} 2>/dev/null; "
-        f"echo '---MARK---'; "
-        f"zpool labelclear -n {shlex.quote(new)} 2>&1 || true")
-    blk_part, _, label_part = (out or "").partition("---MARK---")
+    # Is the replacement actually blank? `lsblk -rno FSTYPE` lists the
+    # filesystem of the disk AND every partition on it, one per line — a blank
+    # disk yields only empty lines, a used one shows "zfs_member" / "vfat" /
+    # "ext4" / "LVM2_member" etc. (The previous version used `zpool labelclear
+    # -n`, but labelclear has no -n flag: it returned "invalid option 'n'",
+    # which matched nothing, so every replacement — clean or not — was refused
+    # as "already carries data" and the operator was pushed into --force.)
+    _, blk_out, _ = await _run(
+        cluster, node, f"lsblk -rno FSTYPE,MOUNTPOINT {shlex.quote(new)} 2>/dev/null")
     busy: list[str] = []
-    for ln in blk_part.splitlines():
+    seen_fs: set[str] = set()
+    for ln in (blk_out or "").splitlines():
         fstype, _, mount = ln.strip().partition(" ")
-        if fstype:
-            busy.append(f"{new}: holds {fstype}")
+        if fstype and fstype not in seen_fs:
+            seen_fs.add(fstype)
+            busy.append(f"holds {fstype}")
         if mount.strip().startswith("/"):
-            busy.append(f"{new}: mounted at {mount.strip()}")
-    low = label_part.lower()
-    if low.strip() and not re.search(r"unlabeled|failed to read label|no such", low):
-        busy.append("carries a ZFS label: " + label_part.strip().splitlines()[0][:120])
+            busy.append(f"mounted at {mount.strip()}")
     if busy and not force:
         return web.json_response(
             {"ok": False, "error": "target_in_use",
@@ -1337,44 +1450,77 @@ async def replace_handler(request: web.Request) -> web.Response:
                        "\n".join(busy[:6]),
              "forceable": True}, status=409)
 
-    # Size pre-flight. ZFS refuses a smaller device, but it does so *after* the
-    # operator has confirmed a destructive-looking action, so check first and
-    # say why in plain terms.
-    old_sz = vd.get("size")
-    if old_sz:
-        rc2, out2, _ = await _run(
-            cluster, node, f"blockdev --getsize64 {shlex.quote(new)} 2>/dev/null || echo 0")
-        try:
-            new_sz = int((out2 or "0").strip().splitlines()[0])
-        except (ValueError, IndexError):
-            new_sz = 0
-        if new_sz and new_sz < old_sz and not force:
-            return web.json_response(
-                {"ok": False, "error": "replacement_too_small",
-                 "detail": f"the replacement holds {new_sz} bytes but the member "
-                           f"it takes over is {old_sz}; ZFS will refuse this",
-                 "forceable": False}, status=409)
+    # The member string ZFS knows: its path, else its name (a FAULTED disk shows
+    # up by GUID with no path — `device_handler` gets this right and `replace`
+    # used to fall back to `old`, which _norm_device had prefixed with by-id, so
+    # `zpool replace pool /dev/disk/by-id/<GUID> …` answered "no such device").
+    member = vd.get("path") or vd.get("name") or old
 
-    is_boot = bool(vd.get("is_partition"))
+    # Boot-ness is a property of the POOL, not of the (possibly-dead, GUID-named)
+    # leaf: a root pool, or any pool whose members are partition-backed. Deriving
+    # it from the dead leaf sent real dead-boot-disk replacements down the plain
+    # data path — the "resilvers fine, cannot boot" trap this flow exists to
+    # avoid.
+    pobj = next((x for x in await _status_pools(cluster, node, pool)
+                 if x["name"] == pool), None)
+    is_boot = bool(vd.get("is_partition")) or bool(pobj and pobj.get("is_root_pool"))
+
     plan: list[str] = []
+    esp: dict | None = None
     if is_boot:
-        # part3 = ZFS, part2 = ESP under PVE's default layout. Derive the
-        # partition suffix from the CURRENT member rather than assuming.
-        m = re.search(r"-part(\d+)$", vd.get("by_id") or vd.get("path") or "")
-        zpart = m.group(1) if m else "3"
-        old_disk = re.sub(r"-part\d+$", "", vd.get("by_id") or "")
+        sib = _healthy_boot_sibling(pobj or {}, vd.get("by_id") or "")
+        if not sib:
+            return web.json_response(
+                {"ok": False, "error": "no_boot_sibling",
+                 "detail": "cannot find a healthy partition-backed member to "
+                           "clone the boot layout from; replace this disk by "
+                           "hand and re-run once the pool is redundant again"},
+                status=409)
+        # Read the sibling's partition roles: which partition is the ZFS member
+        # and which is the ESP (by GPT type GUID, not a hardcoded index).
+        esp = await _boot_layout(cluster, node, sib)
+        if not esp:
+            return web.json_response(
+                {"ok": False, "error": "boot_layout_unreadable",
+                 "detail": f"could not read the partition layout of {sib}"},
+                status=502)
+        sib_dev = _BYID_DIR + sib
         plan = [
-            f"sgdisk --replicate={shlex.quote(new)} {shlex.quote(_BYID_DIR + old_disk)}",
+            # clone the table from the HEALTHY sibling, not the dying disk
+            f"sgdisk --replicate={shlex.quote(new)} {shlex.quote(sib_dev)}",
             f"sgdisk --randomize-guids {shlex.quote(new)}",
-            f"partprobe {shlex.quote(new)} 2>/dev/null || udevadm settle",
+            # settle ALWAYS (the old `|| udevadm settle` only ran on failure, so
+            # a successful partprobe raced udev creating the -part symlinks)
+            f"partprobe {shlex.quote(new)} 2>/dev/null; udevadm settle",
             f"zpool replace {'-f ' if force else ''}{shlex.quote(pool)} "
-            f"{shlex.quote(vd.get('path') or old)} {shlex.quote(new)}-part{zpart}",
-            f"proxmox-boot-tool format {shlex.quote(new)}-part2 --force",
-            f"proxmox-boot-tool init {shlex.quote(new)}-part2",
+            f"{shlex.quote(member)} {shlex.quote(new)}-part{esp['zfs']}",
+            f"proxmox-boot-tool format {shlex.quote(new)}-part{esp['esp']} --force",
+            f"proxmox-boot-tool init {shlex.quote(new)}-part{esp['esp']}",
         ]
     else:
         plan = [f"zpool replace {'-f ' if force else ''}{shlex.quote(pool)} "
-                f"{shlex.quote(vd.get('path') or old)} {shlex.quote(new)}"]
+                f"{shlex.quote(member)} {shlex.quote(new)}"]
+
+    async def _bytes(dev: str) -> int:
+        _, o, _ = await _run(
+            cluster, node, f"blockdev --getsize64 {shlex.quote(dev)} 2>/dev/null || echo 0")
+        try:
+            return int((o or "0").strip().splitlines()[0])
+        except (ValueError, IndexError):
+            return 0
+
+    new_sz = await _bytes(new)
+    # On the boot path we replicate the sibling's WHOLE-disk table, so the new
+    # disk must be at least as large as that sibling — not merely as large as
+    # the old ZFS partition. On the data path, compare against the member.
+    need_sz = await _bytes(_BYID_DIR + sib) if (is_boot and esp) else (vd.get("size") or 0)
+    if new_sz and need_sz and new_sz < need_sz:
+        return web.json_response(
+            {"ok": False, "error": "replacement_too_small",
+             "detail": f"the replacement is {new_sz} bytes but needs at least "
+                       f"{need_sz} ({'the disk it clones the boot layout from' if is_boot else 'the member it takes over'})"
+                       "; a smaller disk cannot be forced",
+             "forceable": False}, status=409)
 
     if not confirm:
         return web.json_response({
@@ -1654,17 +1800,25 @@ async def create_pool_handler(request: web.Request) -> web.Response:
     if not re.match(r"^(9|1[0-6])$", ashift):
         return web.json_response({"error": "bad_ashift"}, status=400)
     argv += ["-o", f"ashift={ashift}"]
+    # An ALLOW-LIST, not a character filter. The old `^[a-z_]{2,32}$` key check
+    # let `cachefile=/etc/anything` (zpool would write that file as root),
+    # `mountpoint=/etc` (shadow a system dir), `altroot`, `multihost` … through.
+    # Only known-safe tunables are accepted, each routed to the correct -O
+    # (filesystem) or -o (pool) flag; anything else is rejected by name.
     for k, v in props.items():
         if k == "ashift":
             continue
-        if not re.match(r"^[a-z_]{2,32}$", str(k)) or not re.match(
-                r"^[A-Za-z0-9_.:%/\-]{1,64}$", str(v)):
-            return web.json_response({"error": "bad_property",
+        flag = _CREATE_FS_PROPS.get(k) or _CREATE_POOL_PROPS.get(k)
+        if not flag:
+            return web.json_response(
+                {"error": "prop_not_allowed",
+                 "detail": f"{k} is not an accepted pool/filesystem property"},
+                status=400)
+        if not re.match(r"^[A-Za-z0-9_.:%\-]{1,64}$", str(v)):
+            # note: no "/" — keeps path-valued props (cachefile/mountpoint) out
+            return web.json_response({"error": "bad_property_value",
                                       "detail": f"{k}={v}"}, status=400)
-        argv += ["-O" if k in ("compression", "atime", "relatime", "recordsize",
-                               "xattr", "acltype", "dnodesize", "mountpoint",
-                               "quota", "special_small_blocks") else "-o",
-                 f"{k}={v}"]
+        argv += [flag, f"{k}={v}"]
     argv.append(name)
     for klass, layout, devs in groups:
         if klass != "data":

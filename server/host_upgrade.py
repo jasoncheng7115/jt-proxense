@@ -623,11 +623,6 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
 
 
 async def _reboot_node(cluster, node: str, node_id: int) -> bool:
-    try:
-        import asyncssh
-    except ImportError:
-        await _ev(node_id, "error", "asyncssh not installed")
-        return False
     host, user, port = _ssh_for(cluster, node)
     # If this host happens to be jt-proxense's ACTIVE API endpoint, hop
     # off it now — reactive failover would otherwise burn a few failed

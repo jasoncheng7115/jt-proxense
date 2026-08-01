@@ -35,6 +35,10 @@ DEFAULT_USER = "root"
 DEFAULT_PORT = 22
 
 
+class SshUnavailable(OSError):
+    """asyncssh itself is missing on the jt-proxense host."""
+
+
 class SshTimeout(OSError):
     """Connection did not complete within the timeout.
 
@@ -104,7 +108,12 @@ async def connect(host: str, user: str, port: int = DEFAULT_PORT, *,
     Usable both as `conn = await connect(...)` and
     `async with await connect(...) as conn:`.
     """
-    import asyncssh
+    try:
+        import asyncssh
+    except ImportError as e:
+        raise SshUnavailable(
+            "asyncssh is not installed on the jt-proxense host — "
+            "pip install 'asyncssh>=2.21.0'") from e
     try:
         return await asyncio.wait_for(
             asyncssh.connect(host, port=port, username=user, known_hosts=None),

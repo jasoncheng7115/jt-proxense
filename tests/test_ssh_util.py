@@ -185,3 +185,38 @@ def test_known_hosts_policy_documented_in_one_place():
     src = inspect.getsource(ssh_util)
     assert "known_hosts" in src
     assert "ssh_setup" in src, "the policy comment should point at how keys get authorised"
+
+
+# ------------------------------------- call sites must not re-key by hand
+
+def test_no_module_looks_up_a_node_in_the_health_map():
+    """`get_health_status()` is keyed "{host}:{port}", never by node name.
+
+    Two modules (storage_download, ssh_setup) kept their own `health.get(node)`
+    after the refactor and so 404'd / 400'd on any cluster whose endpoint isn't
+    literally the bare node name. Any `health...get(<node>)` / `<node> in health`
+    outside pve_client is almost certainly this bug returning.
+    """
+    import re
+    offenders = []
+    for path in sorted(SERVER.glob("*.py")):
+        if path.name in ("pve_client.py", "ssh_util.py"):
+            continue
+        # strip comments so a docstring/comment explaining the OLD bug does not
+        # trip the guard
+        code = "\n".join(ln.split("#", 1)[0] for ln in
+                         path.read_text(encoding="utf-8").splitlines())
+        if (re.search(r"health\.get\(\s*node\b", code)
+                or re.search(r"\bseed\s+not\s+in\s+health\b", code)
+                or re.search(r"get_health_status\(\)\.get\(\s*node\b", code)):
+            offenders.append(path.name)
+    assert not offenders, (
+        "node looked up in the host:port-keyed health map: " + ", ".join(offenders))
+
+
+def test_missing_asyncssh_is_reported_once_centrally():
+    """The friendly 'install asyncssh' error lives in ssh_util, not copied into
+    each caller as a dead ImportError guard."""
+    src = inspect.getsource(ssh_util)
+    assert "SshUnavailable" in src and "pip install" in src
+    assert issubclass(ssh_util.SshUnavailable, OSError)

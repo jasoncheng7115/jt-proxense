@@ -82,29 +82,19 @@ async def download_handler(request: web.Request) -> web.StreamResponse:
     user, ip, rid = _audit_actor(request)
     audit_target = f"{cluster_id}/{node}/{storage}/{volume}"
 
-    try:
-        import asyncssh
-    except ImportError:
-        return web.json_response(
-            {"error": "asyncssh_not_installed",
-             "message": "Install asyncssh on the jt-proxense host: "
-                        "pip install asyncssh>=2.21.0"},
-            status=500,
-        )
-
-    # Find the host of the chosen node — pveproxy host is also the SSH
-    # host (PVE always exposes both on the management interface).
-    health = cluster.client.get_health_status()
-    node_info = health.get(node)
-    if not node_info:
+    # Validate the node against the cached node list (keyed by node NAME) and
+    # resolve host/user/port through ssh_util. The old code did
+    # `get_health_status().get(node)`, but that map is keyed "{host}:{port}", so
+    # the lookup missed on any cluster whose endpoint isn't literally the bare
+    # node name and every download 404'd. ssh_util centralises this now.
+    nodes = getattr(getattr(cluster, "cache", None), "nodes", None) or {}
+    if node not in nodes:
         return web.json_response(
             {"error": "node_unknown",
              "message": f"node {node!r} not in cluster cache"},
             status=404,
         )
-    ssh_host = node_info["host"]
-    ssh_user = _ssh_user_for(cluster)
-    ssh_port = _ssh_port_for(cluster)
+    ssh_host, ssh_user, ssh_port = ssh_util.target_for(cluster, node)
 
     # Resolve volid → real path via `pvesm path`.
     quoted_volid = shlex.quote(volume)

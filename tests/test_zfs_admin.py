@@ -14,8 +14,11 @@ distinguishing `class`; it hangs them off the pool object under sibling keys
 encoded the wrong assumption and the UI would have silently shown no
 special/log/cache/spare vdevs at all.
 """
+import ast
+import inspect
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -822,13 +825,172 @@ def test_dry_then_run_audits_a_failed_execution():
     assert "except ZfsError as e:" in src and '"partial": True' in src
 
 
-def test_replacement_clean_check_is_not_inverted():
-    """`zpool labelclear -n` on a CLEAN disk prints a path ("failed to read
-    label from /dev/..."); a disk with a stale label prints nothing. Matching a
-    bare "/" therefore refused every clean disk and pushed the operator toward
-    --force, which also disables the too-small guard.
+def _judge_blank(blk_out: str) -> list[str]:
+    """The exact logic replace_handler uses to decide if a disk is blank."""
+    busy, seen = [], set()
+    for ln in blk_out.splitlines():
+        fstype, _, mount = ln.strip().partition(" ")
+        if fstype and fstype not in seen:
+            seen.add(fstype)
+            busy.append(f"holds {fstype}")
+        if mount.strip().startswith("/"):
+            busy.append(f"mounted at {mount.strip()}")
+    return busy
+
+
+def test_replacement_clean_check_uses_lsblk_not_labelclear():
+    """`zpool labelclear` has NO -n flag — `zpool labelclear -n` returns
+    "invalid option 'n'", which matched nothing, so the check refused every
+    disk (clean or not) and forced the operator into --force. Verified against a
+    real node. The check now reads lsblk FSTYPE, which lists a filesystem per
+    partition; a blank disk yields only empty lines.
     """
+    # no shell command in the handler runs labelclear (a comment explaining
+    # its removal is fine)
+    cmds = [ln for ln in inspect.getsource(z.replace_handler).splitlines()
+            if "labelclear" in ln and "#" not in ln.split("labelclear")[0]]
+    assert not cmds, cmds
+    # a genuinely blank disk (lsblk prints empty lines) is accepted
+    assert _judge_blank("\n\n\n") == []
+    # a PVE boot disk (ESP + zfs member) is refused
+    busy = _judge_blank(" \n \nvfat \nzfs_member \n")
+    assert busy and any("zfs_member" in b for b in busy)
+    # a mounted ext4 disk is refused
+    assert _judge_blank("ext4 /mnt/data\n")
+
+
+def test_boot_replace_clones_from_a_healthy_sibling_not_the_dead_disk():
     src = inspect.getsource(z.replace_handler)
-    assert "---MARK---" in src, "lsblk and labelclear output must be judged apart"
-    assert "unlabeled|failed to read label" in src
-    assert '"_raid_member|/"' not in src and "|/)" not in src
+    assert "_healthy_boot_sibling" in src
+    assert "no_boot_sibling" in src
+    # the sgdisk source must be the sibling device, never the member being replaced
+    assert "sgdisk --replicate={shlex.quote(new)} {shlex.quote(sib_dev)}" in src
+
+
+def test_boot_replace_locates_esp_by_gpt_type_not_index():
+    src = inspect.getsource(z)
+    assert "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" in src   # ESP type GUID
+    assert "-part2 --force" not in src                     # no hardcoded ESP index
+    rs = inspect.getsource(z.replace_handler)
+    assert "esp['esp']" in rs and "esp['zfs']" in rs
+
+
+def test_boot_layout_detection_parses_partition_types():
+    # sim the lsblk NAME PARTTYPE FSTYPE output from a real PVE boot disk
+    out = ("sdb  \n"
+           "sdb1 21686148-6449-6e6f-744e-656564454649 \n"
+           "sdb2 c12a7328-f81f-11d2-ba4b-00a0c93ec93b vfat\n"
+           "sdb3 6a898cc3-1dd2-11b2-99a6-080020736631 zfs_member")
+    esp = zfs = None
+    for ln in out.splitlines():
+        cols = ln.split()
+        if len(cols) < 2:
+            continue
+        name, ptype = cols[0], cols[1].lower()
+        fst = cols[2].lower() if len(cols) > 2 else ""
+        m = re.search(r"(\d+)$", name)
+        if not m:
+            continue
+        if ptype == z._ESP_GUID:
+            esp = m.group(1)
+        elif ptype in z._ZFS_GUIDS or fst == "zfs_member":
+            zfs = m.group(1)
+    assert esp == "2" and zfs == "3"
+
+
+def test_replace_member_arg_survives_a_faulted_guid_leaf():
+    """A FAULTED disk shows by GUID with no path; the member arg must be its
+    name, not `old` re-prefixed with by-id (which yields "no such device")."""
+    src = inspect.getsource(z.replace_handler)
+    assert 'member = vd.get("path") or vd.get("name") or old' in src
+
+
+def test_too_small_replacement_is_a_hard_refuse():
+    """–f overrides warnings, not physics: a smaller disk cannot be forced, so
+    the guard must not carry `and not force`, and forceable must say False."""
+    src = inspect.getsource(z.replace_handler)
+    assert '"error": "replacement_too_small"' in src
+    assert '"forceable": False' in src
+    # the refuse must not be gated on force
+    seg = src[src.index("replacement_too_small") - 400:src.index("replacement_too_small")]
+    assert "and not force" not in seg
+
+
+def test_boot_flag_comes_from_the_pool_not_the_leaf():
+    src = inspect.getsource(z.replace_handler)
+    assert 'pobj.get("is_root_pool")' in src
+
+
+# ------------------------------------------- create-pool property safety
+
+def test_create_pool_rejects_dangerous_properties():
+    """`cachefile=/path` would make zpool write an arbitrary file as root;
+    `mountpoint`/`altroot`/`multihost` were all waved through by the old
+    `^[a-z_]{2,32}$` character filter. Only an explicit allow-list passes."""
+    assert "cachefile" not in z._CREATE_FS_PROPS
+    assert "cachefile" not in z._CREATE_POOL_PROPS
+    assert "altroot" not in z._CREATE_POOL_PROPS
+    assert "mountpoint" not in z._CREATE_FS_PROPS   # path-valued, dropped
+    # a real tunable is present and routed to the filesystem flag
+    assert z._CREATE_FS_PROPS.get("compression") == "-O"
+    assert z._CREATE_POOL_PROPS.get("autotrim") == "-o"
+
+
+def test_create_pool_property_values_forbid_slash():
+    """No property value may contain a path separator — that is what kept
+    cachefile/mountpoint style abuse impossible even for an allowed key."""
+    src = inspect.getsource(z.create_pool_handler)
+    # the value regex used for props must not permit "/"
+    assert 'r"^[A-Za-z0-9_.:%\\-]{1,64}$"' in src
+
+
+# ----------------------------------------------- watcher / scan attribution
+
+def test_watchers_are_deduped_per_pool():
+    src = inspect.getsource(z._spawn_watch)
+    assert "_WATCHERS" in src
+    assert "already watching" in src or "existing.done()" in src
+
+
+def test_watcher_does_not_call_a_stale_scan_finished():
+    """Right after starting a scan the reported scan may be the previous one;
+    the job must not be marked done until the scan is seen running."""
+    src = inspect.getsource(z._watch_scan)
+    assert "started" in src
+    assert 'if state == "FINISHED" and started' in src
+
+
+def test_cancelled_scrub_gets_its_own_status():
+    assert '"canceled"' in inspect.getsource(z._watch_scan)
+
+
+def test_api_read_path_does_not_guess_root_pool():
+    """A partition-backed pool is not necessarily the root pool."""
+    src = inspect.getsource(z.zfs_get_handler)
+    assert "leave it None on the API path" in src or "root_pool = None\n    pools = parse_pools_api" in src
+
+
+def test_ssh_root_pool_rejects_a_device_path():
+    """findmnt / on ext4 root yields /dev/mapper/... whose split('/')[0] is '' —
+    it must not blank a real root_pool value."""
+    src = inspect.getsource(z.zfs_get_handler)
+    assert "not src0.startswith" in src
+
+
+def test_both_parsers_emit_the_same_pool_keys():
+    """The frontend must not branch on which parser answered. SSH enrichment
+    swaps parse_pools_api output for parse_pools output for the same pool — if
+    the key sets differ, enrichment silently adds or drops fields."""
+    ssh = _lab("zpool_status_complex.json")
+    api = z.parse_pools_api(
+        json.loads(_fx("api_zfs_list.json")),
+        {"jtplab2": json.loads(_fx("api_zfs_detail_complex.json"))},
+        root_pool="rpool")[0]
+    assert set(ssh) == set(api), set(ssh) ^ set(api)
+
+
+def test_both_scan_shapes_match_when_present():
+    resil = _lab("zpool_status_resilver.json")
+    assert resil["scan"] is not None
+    api_scan = z._api_scan("resilver in progress since x 12.5% done")
+    assert set(resil["scan"]) == set(api_scan), set(resil["scan"]) ^ set(api_scan)

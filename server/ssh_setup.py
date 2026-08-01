@@ -105,12 +105,16 @@ async def propagate_handler(request: web.Request) -> web.Response:
     if not pubkey or not _PUBKEY_RE.match(pubkey):
         return web.json_response({"error": "no_pubkey"}, status=500)
 
-    health = cluster.client.get_health_status() or {}
-    if seed not in health:
+    # The picker (targets_handler) offers PVE node NAMES, so validate + resolve
+    # by name. The previous code checked `seed not in health` and iterated
+    # `health.items()`, but that map is keyed "{host}:{port}" — the seed name was
+    # never a key (always 400) and the fan-out list treated "host:port" strings
+    # as node identifiers. Go by the cached node list and ssh_util instead.
+    nodes = sorted((getattr(getattr(cluster, "cache", None), "nodes", None) or {}))
+    if seed not in nodes:
         return web.json_response({"error": "bad_seed_node"}, status=400)
-    seed_host = health[seed].get("host") or seed
-    targets = [(n, (info or {}).get("host") or n)
-               for n, info in health.items() if n != seed]
+    seed_host = ssh_util._resolve_host(cluster, seed)
+    targets = [(n, ssh_util._resolve_host(cluster, n)) for n in nodes if n != seed]
     if not targets:
         return web.json_response({"error": "single_node_cluster"}, status=400)
 
