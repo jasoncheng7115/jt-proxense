@@ -153,43 +153,6 @@
             <div class="section-eyebrow">同一個叢集，看得到也動得了</div>
             <h2>用你需要的角度看它，然後動手。</h2>
             <p>用一個按鍵切換畫面，每一種都是同一份即時狀態的不同切片；需要出手時，操作也在同一個地方，走同一套認證與稽核。</p>
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <rect x="3" y="3" width="7" height="7" rx="1"/>
-                    <rect x="14" y="3" width="7" height="7" rx="1"/>
-                    <rect x="3" y="14" width="7" height="7" rx="1"/>
-                    <rect x="14" y="14" width="7" height="7" rx="1"/>
-                    <circle cx="6.5" cy="6.5" r="1.2" fill="currentColor"/>
-                </svg>
-                <h3>矩陣縮圖預覽</h3>
-                <p>每台運作中虛擬機的 framebuffer 即時截圖，可依節點 / 類型 / 標籤分組。QEMU 透過迷你 RFB 3.8 client；LXC 透過 termproxy + vt100 emulator，CT 卡片直接顯示 shell 輸出而非黑框。點任一卡片開啟全尺寸放大，附 CRT 雜訊載入特效。</p>
-            </article>
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M3 12h12"/>
-                    <polyline points="13 6 19 12 13 18"/>
-                    <circle cx="20" cy="6" r="2"/>
-                    <circle cx="20" cy="18" r="2"/>
-                </svg>
-                <h3>跨叢集遷移</h3>
-                <p>Wizard 會剖析來源 VM、選擇目標叢集端點、取得 TLS fingerprint、列出磁碟與 NIC 對應。包含驗證、預檢、online / offline 模式、頻寬限速。Admin only；僅 QEMU（PVE API 限制）。失敗時跳出 toast 顯示可複製貼上的 <code>qm unlock</code> 解鎖指令。</p>
-            </article>
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M3 6c0-1.1.9-2 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/>
-                    <path d="M3 10h18M7 14h6"/>
-                </svg>
-                <h3>儲存內容瀏覽</h3>
-                <p>點任一 file-level 儲存區，依 content 動態出頁籤（備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄）— 只列出該儲存實際支援的類型。可排序清單、搜尋、含 audit 的刪除。Block-level（RBD / LVM / ZFSpool）只給瀏覽。</p>
-            </article>
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M3 3v18h18"/>
-                    <polyline points="7 14 11 10 15 14 21 8"/>
-                </svg>
-                <h3>Telegraf line-protocol 接收器</h3>
-                <p>InfluxDB v2 端點 <code>/api/v2/write</code>（token 認證、支援 gzip）。Per-host ring buffer 保留最新樣本，透過 <code>/api/telegraf/{hosts,host}</code> 讀取。在 PVE 各主機跑你自己的 Telegraf <code>outputs.influxdb_v2</code>，補強 API 輪詢之外的指標。</p>
-            </article>
 
         </div>
 
@@ -246,6 +209,43 @@
                 </svg>
                 <h3>Ceph</h3>
                 <p>Ceph 叢集拓撲與即時 IOPS。OSD、Pool、recovery 狀態同畫面。</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    <circle cx="6.5" cy="6.5" r="1.2" fill="currentColor"/>
+                </svg>
+                <h3>矩陣縮圖預覽</h3>
+                <p>每台運作中虛擬機的 framebuffer 即時截圖，可依節點 / 類型 / 標籤分組。QEMU 透過迷你 RFB 3.8 client；LXC 透過 termproxy + vt100 emulator，CT 卡片直接顯示 shell 輸出而非黑框。點任一卡片開啟全尺寸放大，附 CRT 雜訊載入特效。</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 12h12"/>
+                    <polyline points="13 6 19 12 13 18"/>
+                    <circle cx="20" cy="6" r="2"/>
+                    <circle cx="20" cy="18" r="2"/>
+                </svg>
+                <h3>跨叢集遷移</h3>
+                <p>Wizard 會剖析來源 VM、選擇目標叢集端點、取得 TLS fingerprint、列出磁碟與 NIC 對應。包含驗證、預檢、online / offline 模式、頻寬限速。Admin only；僅 QEMU（PVE API 限制）。失敗時跳出 toast 顯示可複製貼上的 <code>qm unlock</code> 解鎖指令。</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 6c0-1.1.9-2 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/>
+                    <path d="M3 10h18M7 14h6"/>
+                </svg>
+                <h3>儲存內容瀏覽</h3>
+                <p>點任一 file-level 儲存區，依 content 動態出頁籤（備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄）— 只列出該儲存實際支援的類型。可排序清單、搜尋、含 audit 的刪除。Block-level（RBD / LVM / ZFSpool）只給瀏覽。</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 3v18h18"/>
+                    <polyline points="7 14 11 10 15 14 21 8"/>
+                </svg>
+                <h3>Telegraf line-protocol 接收器</h3>
+                <p>InfluxDB v2 端點 <code>/api/v2/write</code>（token 認證、支援 gzip）。Per-host ring buffer 保留最新樣本，透過 <code>/api/telegraf/{hosts,host}</code> 讀取。在 PVE 各主機跑你自己的 Telegraf <code>outputs.influxdb_v2</code>，補強 API 輪詢之外的指標。</p>
             </article>
         </div>
     </div>
