@@ -461,15 +461,16 @@ section {
     gap: 14px;
 }
 .lifecycle-row {
-    display: grid;
-    grid-template-columns: 110px 1fr;
-    gap: 16px;
-    align-items: start;
-    padding: 16px 18px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    display: grid; grid-template-columns: 96px 1fr; gap: 18px; align-items: start;
+    /* These are secondary actions. Boxing each one inside the already-boxed
+       install card produced three nested frames and gave update/uninstall the
+       same visual weight as the command people actually came for. A rule and
+       some space separate them just as well. */
+    padding: 14px 2px 0;
+    border-top: 1px solid var(--border);
+    background: none;
 }
+.lifecycle-row:first-child { border-top: 0; padding-top: 4px; }
 .lifecycle-label {
     font-family: var(--font-display);
     font-size: 13px;
@@ -718,3 +719,24 @@ section {
     color: var(--text-muted);
 }
 .demo-credit a { color: var(--cyan); }
+
+
+/* Lifecycle commands are reference material, not the headline. Flatter and a
+   touch smaller so the eye lands on the install one-liner first. */
+.lifecycle-body .code-block {
+    background: rgba(2, 5, 11, .6);
+    border-color: rgba(255, 255, 255, .07);
+    padding: 13px 52px 13px 18px;
+    font-size: 13px;
+}
+.lifecycle-body p { margin-bottom: 8px; font-size: 14px; }
+.lifecycle-label { padding-top: 13px; }
+
+/* The long raw.githubusercontent URLs wrap to two lines at any sane width;
+   let them break cleanly instead of forcing the card wider. */
+.code-block { overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+    .lifecycle-row { grid-template-columns: 1fr; gap: 8px; }
+    .lifecycle-label { padding-top: 0; }
+}

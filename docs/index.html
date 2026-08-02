@@ -28,7 +28,6 @@
             <a href="#install">Install</a>
             <a href="#demo">Demo</a>
             <a href="#features">Features</a>
-            <a href="#v03">v0.3</a>
             <a href="#screenshots">Screenshots</a>
             <a href="https://github.com/jasoncheng7115/jt-proxense" target="_blank" rel="noopener">GitHub</a>
             <a href="index.zh-tw.html" class="nav-lang">繁體中文</a>
@@ -151,9 +150,47 @@
 <section id="features">
     <div class="container">
         <div class="section-head">
-            <div class="section-eyebrow">Six views, one cluster</div>
-            <h2>Look at it the way you need to.</h2>
-            <p>Switch between views with a keystroke. Each is a different lens on the same live state.</p>
+            <div class="section-eyebrow">One cluster, seen and operated</div>
+            <h2>Look at it the way you need to — then act on it.</h2>
+            <p>Switch between views with a keystroke — each a different lens on the same live state. When you need to act, the controls are in the same place, behind the same auth and audit trail.</p>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                    <circle cx="6.5" cy="6.5" r="1.2" fill="currentColor"/>
+                </svg>
+                <h3>Matrix thumbnail preview</h3>
+                <p>Live framebuffer screenshot for every running guest, group-able by node / type / tag. QEMU via a minimal RFB 3.8 client; LXC via termproxy + a vt100 emulator so CT cards show real shell output, not black boxes. Click any card for a full-size view with a CRT-static loading effect.</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 12h12"/>
+                    <polyline points="13 6 19 12 13 18"/>
+                    <circle cx="20" cy="6" r="2"/>
+                    <circle cx="20" cy="18" r="2"/>
+                </svg>
+                <h3>Cross-cluster migration</h3>
+                <p>Wizard that introspects the source VM, picks an endpoint on the target cluster, fetches the TLS fingerprint, and lays out disk + NIC mappings. Validation, dry-run pre-checks, online / offline modes, and bandwidth limits. Admin-only; QEMU-only (PVE's API limit). Lock-recovery toast with copy-paste <code>qm unlock</code> hint when migration fails.</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 6c0-1.1.9-2 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/>
+                    <path d="M3 10h18M7 14h6"/>
+                </svg>
+                <h3>Storage content browse</h3>
+                <p>Click any file-level storage → tabs by content type (Backups / ISO / CT templates / Snippets / Import / Disk images / CT root) — only the tabs the storage actually carries. Sortable list, search, delete with audit. Block-level storages (RBD / LVM / ZFSpool) get a list-only view.</p>
+            </article>
+            <article class="feat-card">
+                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <path d="M3 3v18h18"/>
+                    <polyline points="7 14 11 10 15 14 21 8"/>
+                </svg>
+                <h3>Telegraf line-protocol receiver</h3>
+                <p>InfluxDB v2 endpoint at <code>/api/v2/write</code> (token-auth, gzip-tolerant). Per-host ring buffer of the most recent samples, exposed via <code>/api/telegraf/{hosts,host}</code>. Bring your own Telegraf <code>outputs.influxdb_v2</code> on each PVE host, get supplemental metrics surfaced alongside the API-polled ones.</p>
+            </article>
+
         </div>
 
         <div class="feat-grid">
@@ -284,59 +321,6 @@
     </div>
 </section>
 
-<!-- ============== v0.3 OPS LAYER ============== -->
-<section id="v03">
-    <div class="container">
-        <div class="section-head">
-            <div class="section-eyebrow">v0.3 — Operations layer</div>
-            <h2>From watching to working.</h2>
-            <p>Live framebuffer thumbnails, cross-cluster migrate, file-level storage browsing — all built on the same auth + audit foundation as v0.2.</p>
-        </div>
-
-        <div class="feat-grid">
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <rect x="3" y="3" width="7" height="7" rx="1"/>
-                    <rect x="14" y="3" width="7" height="7" rx="1"/>
-                    <rect x="3" y="14" width="7" height="7" rx="1"/>
-                    <rect x="14" y="14" width="7" height="7" rx="1"/>
-                    <circle cx="6.5" cy="6.5" r="1.2" fill="currentColor"/>
-                </svg>
-                <h3>Matrix thumbnail preview</h3>
-                <p>Live framebuffer screenshot for every running guest, group-able by node / type / tag. QEMU via a minimal RFB 3.8 client; LXC via termproxy + a vt100 emulator so CT cards show real shell output, not black boxes. Click any card for a full-size view with a CRT-static loading effect.</p>
-            </article>
-
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M3 12h12"/>
-                    <polyline points="13 6 19 12 13 18"/>
-                    <circle cx="20" cy="6" r="2"/>
-                    <circle cx="20" cy="18" r="2"/>
-                </svg>
-                <h3>Cross-cluster migration</h3>
-                <p>Wizard that introspects the source VM, picks an endpoint on the target cluster, fetches the TLS fingerprint, and lays out disk + NIC mappings. Validation, dry-run pre-checks, online / offline modes, and bandwidth limits. Admin-only; QEMU-only (PVE's API limit). Lock-recovery toast with copy-paste <code>qm unlock</code> hint when migration fails.</p>
-            </article>
-
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M3 6c0-1.1.9-2 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/>
-                    <path d="M3 10h18M7 14h6"/>
-                </svg>
-                <h3>Storage content browse</h3>
-                <p>Click any file-level storage → tabs by content type (Backups / ISO / CT templates / Snippets / Import / Disk images / CT root) — only the tabs the storage actually carries. Sortable list, search, delete with audit. Block-level storages (RBD / LVM / ZFSpool) get a list-only view.</p>
-            </article>
-
-            <article class="feat-card">
-                <svg class="feat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M3 3v18h18"/>
-                    <polyline points="7 14 11 10 15 14 21 8"/>
-                </svg>
-                <h3>Telegraf line-protocol receiver</h3>
-                <p>InfluxDB v2 endpoint at <code>/api/v2/write</code> (token-auth, gzip-tolerant). Per-host ring buffer of the most recent samples, exposed via <code>/api/telegraf/{hosts,host}</code>. Bring your own Telegraf <code>outputs.influxdb_v2</code> on each PVE host, get supplemental metrics surfaced alongside the API-polled ones.</p>
-            </article>
-        </div>
-    </div>
-</section>
 
 <!-- ============== v0.4–v0.8 FLEET OPS ============== -->
 <section id="v08">
