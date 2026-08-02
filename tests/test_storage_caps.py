@@ -92,3 +92,21 @@ def test_broken_cache_fails_open():
         cache = None
     assert sc.check(Bad, "ceph1", "backup") is None
     assert sc.content_types(Bad, "ceph1") is None
+
+
+def test_storage_absent_from_this_node_is_refused():
+    """"Not on this node" is NOT the same as "unknown". Treating both as
+    unknown let a backup through to a storage configured only on two other
+    nodes — PVE accepted it and the vzdump task then had nowhere to write."""
+    r = sc.check(C, "old-nfs", "backup", "host-114")   # exists only on host-108
+    assert r is not None
+    assert r["error"] == "storage_not_on_node"
+    assert r["node"] == "host-114"
+
+
+def test_genuinely_unknown_storage_still_fails_open():
+    assert sc.check(C, "never-polled-anywhere", "backup", "host-114") is None
+
+
+def test_cluster_wide_lookup_ignores_node():
+    assert sc.content_types(C, "old-nfs", None) == {"backup"}

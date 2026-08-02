@@ -76,6 +76,19 @@ def check(cluster, storage: str, purpose: str, node: str | None = None) -> dict 
         return None
     have = content_types(cluster, storage, node)
     if have is None:
+        # Two very different situations look the same from here, and conflating
+        # them let a real failure through: a backup was sent to a storage that
+        # is configured on two OTHER nodes, and this returned None (allow).
+        #   - never heard of this storage at all -> we genuinely do not know
+        #   - known cluster-wide, absent from THIS node -> that is a refusal
+        if node and content_types(cluster, storage, None) is not None:
+            return {
+                "error": "storage_not_on_node",
+                "detail": (f"storage '{storage}' is not configured on node "
+                           f"'{node}' (it exists elsewhere in the cluster). PVE "
+                           f"would accept the request and fail the task."),
+                "storage": storage, "node": node,
+            }
         return None                       # unknown storage — let PVE decide
     if need in have:
         return None
