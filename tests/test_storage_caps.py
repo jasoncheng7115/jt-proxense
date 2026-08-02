@@ -18,6 +18,8 @@ class Storage:
     node: str
     content: list = field(default_factory=list)
     enabled: bool = True
+    # PVE's `nodes=` restriction. Empty means every node — NOT no nodes.
+    allowed_nodes: list = field(default_factory=list)
 
 
 NODES = ["host-108", "host-114"]
@@ -110,3 +112,31 @@ def test_genuinely_unknown_storage_still_fails_open():
 
 def test_cluster_wide_lookup_ignores_node():
     assert sc.content_types(C, "old-nfs", None) == {"backup"}
+
+
+def test_pve_node_restriction_is_authoritative():
+    """`cache.storages` carries a row for nodes PVE's `nodes=` setting
+    EXCLUDES, so 'is there a row for this node?' answered yes and a backup was
+    accepted for a guest on a node the storage is not configured for.
+    allowed_nodes mirrors PVE's own restriction; it wins."""
+    restricted = [Storage("pinned", n, ["backup"],
+                          allowed_nodes=["host-115", "host-108"])
+                  for n in ("host-108", "host-111")]
+
+    class R:
+        class cache:
+            storages = {f"{s.node}/{s.storage}": s for s in restricted}
+
+    r = sc.check(R, "pinned", "backup", "host-111")
+    assert r is not None and r["error"] == "storage_not_on_node"
+    assert sc.check(R, "pinned", "backup", "host-108") is None
+
+
+def test_no_restriction_means_every_node():
+    """An empty allowed_nodes is 'all nodes', not 'no nodes'."""
+    free = [Storage("open", "host-108", ["backup"], allowed_nodes=[])]
+
+    class F:
+        class cache:
+            storages = {"host-108/open": free[0]}
+    assert not sc.restricted_from(F, "open", "host-999")

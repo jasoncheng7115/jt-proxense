@@ -53,6 +53,25 @@ def _entries(cluster, storage: str, node: str | None) -> list:
     return out
 
 
+def restricted_from(cluster, storage: str, node: str | None) -> bool:
+    """True when PVE's own `nodes=` restriction excludes this node.
+
+    This is the authoritative answer and the cache's per-node rows are not:
+    `cache.storages` carries an entry for nodes PVE actually excludes, so
+    "is there a row for this node?" said yes for a storage configured
+    `nodes=host-115,host-108` and a backup was accepted for a guest on
+    host-111, where it cannot possibly be written. `allowed_nodes` mirrors
+    PVE's setting — empty means every node.
+    """
+    if not node:
+        return False
+    for st in _entries(cluster, storage, None):
+        allowed = {str(a) for a in (_get(st, "allowed_nodes", []) or [])}
+        if allowed:
+            return node not in allowed
+    return False
+
+
 def content_types(cluster, storage: str, node: str | None = None) -> set[str] | None:
     """Declared content types, or None when we have never seen this storage."""
     try:
@@ -74,6 +93,16 @@ def check(cluster, storage: str, purpose: str, node: str | None = None) -> dict 
     need = NEEDS.get(purpose)
     if not need or not storage:
         return None
+    # PVE's own node restriction comes first: a storage can be present in the
+    # cache for a node and still be excluded by `nodes=` in storage.cfg.
+    if restricted_from(cluster, storage, node):
+        return {
+            "error": "storage_not_on_node",
+            "detail": (f"storage '{storage}' is restricted to specific nodes and "
+                       f"'{node}' is not one of them. PVE would accept the "
+                       f"request and fail the task."),
+            "storage": storage, "node": node,
+        }
     have = content_types(cluster, storage, node)
     if have is None:
         # Two very different situations look the same from here, and conflating
