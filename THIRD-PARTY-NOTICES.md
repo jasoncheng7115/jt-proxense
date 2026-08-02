@@ -91,3 +91,18 @@ upstream repository linked in the tables above.
 ---
 
 If you spot a missing attribution, please open an issue on the project tracker.
+
+---
+
+## Media
+
+### Demo video soundtrack
+
+`docs/demo.mp4` uses:
+
+> "Heroic Age" Kevin MacLeod (incompetech.com)
+> Licensed under Creative Commons: By Attribution 4.0
+> https://creativecommons.org/licenses/by/4.0/
+
+No other third-party audio or imagery is bundled; the screenshots and the
+screen recording are of this software running on the author's own hardware.
