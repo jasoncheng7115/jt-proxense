@@ -8,6 +8,154 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.3] — 2026-08-02
+
+### Added
+- **Task outcomes survive a restart** (migration 011, `pending_tasks`) — the
+  watcher that follows a PVE task to its real exitstatus used to live only in
+  memory, so a deploy threw in-flight ones away and the outcome row simply
+  never arrived (indistinguishable from a broken watcher, which cost real
+  debugging time). In-flight tasks are now persisted and resumed on startup;
+  anything already past its watch window is closed out as `timeout` rather than
+  silently forgotten. The table's contents are exactly "outcomes still owed".
+- **Creation / restore / disk-placement pre-flight** (`create_guard.py`) —
+  three more things PVE accepts and then fails inside the task, each of which
+  can leave a half-created guest:
+  - **VMID already in use.** PVE ids are cluster-wide, so "free on this node"
+    is not free. Restore additionally warns that `force` destroys the guest
+    currently holding the id.
+  - **Bridge missing on the target node.** Checked against the node's real
+    interface list; physical NICs are not accepted as bridges.
+  - **Storage will not hold this content.** Reuses the content whitelist added
+    in 0.9.2, so a VM disk cannot be placed on an ISO-only storage and a disk
+    move cannot target one either.
+  Verified against a live cluster: creating onto VMID 147, onto `vmbr99`, and
+  onto an `iso,vztmpl` storage are all refused with the reason and the
+  workable alternatives.
+
+### Fixed
+- Backup, restore and clone watchers used the 15-minute default window. A real
+  vzdump to PBS ran past it and was recorded as a timeout while it was still
+  working; those operations now get 6 hours.
+
+---
+
+## [0.9.2] — 2026-08-02
+
+### Added
+- **Migration pre-flight** (`migrate_guard.py`, `ha_affinity.py`) — PVE accepts
+  a migration it cannot perform and fails it minutes later inside the task, by
+  which point the UI has already reported success. Two preconditions are now
+  checked before anything is submitted:
+  - **HA node affinity.** A *strict* node-affinity rule can forbid a guest from
+    running on the target; `ha-manager` then exits 2. Handles both PVE 8
+    (`/cluster/ha/groups` + `restricted`) and PVE 9 (`/cluster/ha/rules` with
+    `type: node-affinity`), including the fact that on PVE 9 the groups
+    endpoint *errors* rather than returning empty.
+  - **Storage availability.** Subtler than it looks: `local-zfs` is
+    `shared=false` yet exists on every node, so "does the target have a storage
+    of this name?" answers yes while the data sits on the source. Refuses when
+    a storage is absent from the target, and when an online migration would
+    need to copy non-shared disks without being asked to.
+  Both refuse with 409 naming the rule, the storages and the legal nodes.
+  `GET .../migrate-targets` exposes the same logic so a picker can offer only
+  reachable nodes. Maintenance drain re-targets per guest instead of firing
+  doomed migrations, and reports guests it had to skip.
+- **Backup storage pre-flight** — a storage's content whitelist is enforced by
+  PVE only when vzdump runs. Backing up to a storage that carries
+  `images,rootdir` is now refused up front, with the list of storages that
+  would work.
+- **Task outcome tracking** (`task_outcome.py`) — every long-running PVE
+  operation returns a UPID immediately, and handlers used to write
+  `result="ok"` at that moment. A snapshot delete that failed therefore read as
+  a success in the audit log forever. Submission is now recorded as
+  `submitted`, and a watcher appends a second row with the real `exitstatus`.
+  Applied to 22 destructive operations across snapshots, guest deletion,
+  clones, backups, restores, Ceph and network apply. A timeout records
+  `timeout` and an unreachable node records `unknown` — never `error`, because
+  reporting a failure that was not observed is its own kind of lie.
+
+### Fixed
+- **Migration pre-flight ran before authorisation.** Its 409 body names HA
+  rules, permitted nodes and storage layout — a map of the cluster — so any
+  authenticated user could read it out of refusals. Now gated first, with a
+  regression test pinning the order in both migrate handlers.
+- `migrate-targets` answered "no targets" while the poll cache was still
+  filling after a restart, which reads as "this guest cannot be migrated". It
+  now reports `unknown` until the inventory is populated.
+- Node names were read as `NodeMetrics.name`, a field that does not exist
+  (it is `node`), so the target list was silently empty for every guest.
+
+### Security
+- All migration and backup pre-flight endpoints are behind the existing role
+  gates, and the destructive migrate path still requires the pool/target
+  confirmation it always did. Refusal bodies are only reachable after
+  authorisation.
+
+---
+
+## [0.9.1] — 2026-08-02
+
+### Added
+- **Root-pool boot mirror** (`boot_mirror.py` + `BootMirrorWizard`, admin) —
+  replacing a disk in `rpool` is the riskiest operation this product performs:
+  the pool holds the bootloader, the node configuration and — through
+  `local-zfs` — the guests' own disks. The stock tooling gives you a wiki page
+  and a shell prompt. This is a staged, checked, resumable workflow instead:
+  - **Three scenarios, detected rather than assumed.** `add_mirror` (single
+    disk → mirror), `replace_live` (planned swap of a healthy disk) and
+    `replace_dead` (FAULTED / REMOVED / UNAVAIL). The third matters most and is
+    what hand-written procedures usually miss: a disk is normally replaced
+    *because it died*, and you cannot clone a partition table off a dead disk.
+    The plan clones from a surviving member and uses `zpool replace`, not
+    `zpool attach`. If every member is faulted there is no path and it says so.
+  - **Server-side pre-flight with hard blocks** — ZFS root, target is the root
+    pool, no scrub/resilver already running, a healthy clone source exists, the
+    new disk is blank, is not already a member, and is at least as large as the
+    source (the whole GPT is cloned, so this one cannot be forced). Sector-size
+    mismatch and firmware are reported as advisories.
+  - **Backup gate.** Guests on the node are checked against
+    `/cluster/backup-info/not-backed-up`. Missing backups BLOCK, and the block
+    can only be passed by an explicit acknowledgement that is written to the
+    audit log. Unreadable backup information also blocks — a false "all clear"
+    on this gate is worse than no gate.
+  - **Progress survives leaving the page.** A resilver runs for hours, so the
+    job, its stage and its whole command timeline live in the database
+    (migration 010). Close the tab, come back on another machine, and the
+    percentage has kept moving; a banner on the ZFS page links straight back
+    into any run still in flight. A daemon restart re-attaches the watcher
+    rather than orphaning the job, because the resilver itself never stopped.
+  - **Detach is never automatic.** It is offered only after the server
+    re-verifies against the LIVE pool that the resilver finished, and it runs
+    `proxmox-boot-tool clean` + `refresh` afterwards so kernel updates stop
+    warning about an ESP that no longer exists.
+  - Every command is recorded verbatim, run one per SSH round trip so a failure
+    names the exact step, and the GPT is backed up with `sgdisk --backup=`
+    before the first write.
+- `docs/sop-rpool-mirror.md` — the operator procedure this implements.
+- `docs/sop-demo-video.md` — end-to-end procedure for producing the demo video
+  (recording, captions, soundtrack, licensing obligations, verification).
+
+### Fixed
+- **Dropdowns inside modals were unclickable.** `CyberSelect` renders its
+  option list through a portal at `z-index: 2000`, but modal overlays sit at
+  4000–9999, so the list painted *behind* the modal: present in the DOM, fully
+  opaque, and impossible to click. Raised to 12050 with a regression test that
+  fails if any future overlay outranks it.
+- **`lsblk -r` column shift.** Raw mode collapses empty fields, so a partition
+  with no `PARTTYPE` but an `FSTYPE` (`rbd1  ext4` on a real node) parsed the
+  filesystem as the partition type — which would have picked the wrong ESP.
+  Boot-mirror layout detection now parses `lsblk -P` key=value output.
+
+### Security
+- The boot-mirror endpoints are admin-only on every route, device names are
+  normalised to `/dev/disk/by-id/` (paths under `/dev/sdX`, by-path names and
+  traversal are rejected), the destructive start requires the pool name typed
+  back, and every preflight, start, detach and abort is written to the audit
+  log — including whether the backup gate was acknowledged and by whom.
+
+---
+
 ## [0.9.0] — 2026-07-25
 
 ### Added

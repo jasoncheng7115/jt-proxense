@@ -37,6 +37,7 @@ from typing import Any, Callable
 from aiohttp import web
 
 from . import audit
+from . import create_guard
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -542,6 +543,13 @@ async def _do_move_disk(request: web.Request, kind: str) -> web.Response:
             return web.json_response({"error": "bad_format"}, status=400)
         if fmt == "":
             fmt = None
+
+    # The destination must actually hold this kind of volume. PVE accepts the
+    # request and fails partway through the copy otherwise, which leaves the
+    # disk on the old storage with a half-written copy on the new one.
+    blocked = create_guard.check_disk_storage(cluster, node, storage, kind)
+    if blocked is not None:
+        return web.json_response(blocked, status=409)
 
     actor, ip, rid = _audit(request)
     try:

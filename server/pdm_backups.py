@@ -11,6 +11,9 @@ from __future__ import annotations
 from aiohttp import web
 
 from . import audit
+from . import create_guard
+from . import storage_caps
+from . import task_outcome
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -185,6 +188,15 @@ async def trigger_handler(request: web.Request) -> web.Response:
         # very loose validation — PVE itself validates the email list
         if body["mailto"].strip():
             extra["mailto"] = body["mailto"][:512]
+    # PVE enforces a storage's content whitelist only when the vzdump task
+    # runs. Sending a backup to a storage that carries images/rootdir is
+    # accepted and then fails — verified on a real cluster where ceph1 declares
+    # "images,rootdir" and has no "backup".
+    bad = storage_caps.check(cluster, storage, "backup", node)
+    if bad is not None:
+        bad["usable_storages"] = storage_caps.usable_for(cluster, "backup", node)
+        return web.json_response(bad, status=409)
+
     try:
         kwargs = {
             "mode": body.get("mode", "snapshot"),
@@ -203,11 +215,12 @@ async def trigger_handler(request: web.Request) -> web.Response:
             result=audit.result_error(e), request_id=rid, params=body,
         )
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(
-        user=user, source_ip=ip, action="backup.trigger",
-        target=f"{cluster_id}/{node}/vmid={vmid}", cluster_id=cluster_id,
-        result="ok", request_id=rid, params=body,
-    )
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="backup.trigger", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{node}/vmid={vmid}",
+            timeout_s=task_outcome.LONG_TIMEOUT_S)
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -256,11 +269,12 @@ async def delete_backup_file_handler(request: web.Request) -> web.Response:
             result=audit.result_error(e), request_id=rid,
         )
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(
-        user=user, source_ip=ip, action="backup.file.delete",
-        target=f"{cluster_id}/{storage}/{volume}", cluster_id=cluster_id,
-        result="ok", request_id=rid,
-    )
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="backup.file.delete", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{storage}/{volume}",
+            timeout_s=task_outcome.LONG_TIMEOUT_S)
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -291,6 +305,22 @@ async def restore_handler(request: web.Request) -> web.Response:
     vm_type = body.get("type", "qemu")
     if vm_type not in ("qemu", "lxc"):
         return web.json_response({"error": "bad_type"}, status=400)
+
+    # A restore onto an id that is already in use either fails, or with
+    # force=true OVERWRITES the running guest that holds it. PVE ids are
+    # cluster-wide, so "not on this node" is not free. Requiring force to be
+    # explicit here means nobody destroys a guest by fat-fingering an id.
+    blocked = create_guard.check_vmid_free(
+        cluster, vmid, allow_existing=bool(body.get("force", False)))
+    if blocked is not None:
+        blocked["detail"] += (" Restoring over it requires force=true, which "
+                              "destroys the guest currently using that id.")
+        return web.json_response(blocked, status=409)
+    # The target storage has to hold the restored disks.
+    blocked = create_guard.check_disk_storage(cluster, node, storage, vm_type)
+    if blocked is not None:
+        return web.json_response(blocked, status=409)
+
     user, ip, rid = _audit_actor(request)
     try:
         upid = await cluster.client.restore_backup(
@@ -304,11 +334,12 @@ async def restore_handler(request: web.Request) -> web.Response:
             result=audit.result_error(e), request_id=rid, params=body,
         )
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(
-        user=user, source_ip=ip, action="backup.restore",
-        target=f"{cluster_id}/{node}/{vm_type}/{vmid}", cluster_id=cluster_id,
-        result="ok", request_id=rid, params=body,
-    )
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="backup.restore", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{node}/{vm_type}/{vmid}",
+            timeout_s=task_outcome.LONG_TIMEOUT_S)
     return web.json_response({"ok": True, "upid": upid})
 
 

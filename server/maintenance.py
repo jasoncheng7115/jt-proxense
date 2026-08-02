@@ -32,6 +32,7 @@ import re
 from aiohttp import web
 
 from . import audit
+from . import ha_affinity
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -104,21 +105,61 @@ async def maintenance_handler(request: web.Request) -> web.Response:
             if (getattr(vm, "status", "") or "").lower() != "running":
                 continue
             running.append(vm)
+        # Nodes we could fall back to when the requested target is illegal for
+        # a particular guest.
+        online_nodes = []
+        try:
+            for key, n in (cluster.cache.nodes or {}).items():
+                name = getattr(n, "node", None) or key
+                st = getattr(n, "status", None)
+                st = getattr(st, "value", st)
+                if name and name != node and str(st).lower() == "online":
+                    online_nodes.append(str(name))
+        except Exception as e:
+            logger.debug("maintenance: node list unavailable: %s", e)
+
         for vm in running:
             vmid = int(vm.vmid)
             vm_type = getattr(vm, "type", "qemu")
+
+            # A STRICT HA node-affinity rule can forbid this guest from running
+            # on the chosen target. PVE accepts the migration and ha-manager
+            # then fails it (exit 2) — during a drain that means the operator
+            # believes the node is evacuated when guests are still on it. Try a
+            # legal alternative, and if there is none say so instead of firing
+            # a migration that cannot succeed.
+            dest = target
+            blocked = await ha_affinity.check_target(cluster, vm_type, vmid, dest)
+            if blocked is not None:
+                allowed = set(blocked.get("allowed_nodes") or [])
+                alt = next((n for n in online_nodes if n in allowed), None)
+                if alt:
+                    logger.info("maintenance: %s:%s cannot go to %s (HA); using %s",
+                                vm_type, vmid, target, alt)
+                    dest = alt
+                else:
+                    out["migrations"].append({
+                        "vmid": vmid, "type": vm_type, "ok": False,
+                        "skipped": True,
+                        "detail": blocked["detail"],
+                    })
+                    continue
+
             try:
                 if vm_type == "lxc":
                     upid = await cluster.client.ct_migrate(
-                        node, vmid, target=target, online=True, restart=True,
+                        node, vmid, target=dest, online=True, restart=True,
                     )
                 else:
                     upid = await cluster.client.vm_migrate(
-                        node, vmid, target=target, online=True,
+                        node, vmid, target=dest, online=True,
                     )
                 out["migrations"].append({
-                    "vmid": vmid, "type": vm_type,
-                    "ok": True, "upid": upid,
+                    # "submitted", NOT "succeeded": PVE hands back a UPID
+                    # immediately and the migration can still fail inside the
+                    # task. Callers must poll the UPID for the real outcome.
+                    "vmid": vmid, "type": vm_type, "target": dest,
+                    "ok": True, "submitted": True, "upid": upid,
                 })
             except Exception as e:
                 out["migrations"].append({

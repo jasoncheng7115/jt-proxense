@@ -24,6 +24,7 @@ from typing import Optional
 from aiohttp import web
 
 from . import audit, auth
+from . import ha_affinity, migrate_guard
 from .cluster_manager import cluster_manager
 from .config import get_config
 from .middleware import role_required
@@ -254,10 +255,21 @@ async def ct_migrate_handler(request: web.Request) -> web.Response:
     if vm is None:
         return web.json_response({"error": "ct_not_found"}, status=404)
 
+    # Same HA node-affinity pre-flight as the QEMU path — containers are HA
+    # resources too (`ct:<vmid>`), and the strict rules that bit us list both.
+
     min_role = "admin" if _require_admin_for_destructive() else "operator"
     deny = _check_vm_role(request, cluster_id, vm, min_role)
     if deny is not None:
         return deny
+
+    # After authorisation — see the QEMU path. LXC has no live migration, so an
+    # "online" request really means restart-mode; local volumes still get copied.
+    blocked = await migrate_guard.check(
+        cluster, "lxc", vmid, target, source=vm.get("node"),
+        online=online or restart, with_local_disks=True)
+    if blocked is not None:
+        return web.json_response(blocked, status=409)
 
     user = (request.get("user") or {}).get("username", "system")
     src_ip = request.get("client_ip", "unknown")
@@ -319,6 +331,17 @@ async def vm_migrate_handler(request: web.Request) -> web.Response:
     deny = _check_vm_role(request, cluster_id, vm, min_role)
     if deny is not None:
         return deny
+
+    # HA node-affinity + storage pre-flight, AFTER authorisation: its refusal
+    # names HA rules, allowed nodes and storage layout, so running it first
+    # would let an unauthorised caller map the cluster through 409 bodies.
+    # PVE would otherwise accept the request and fail it inside ha-manager
+    # (exit 2), long after the UI reported a migration in progress.
+    blocked = await migrate_guard.check(
+        cluster, "qemu", vmid, target, source=vm.get("node"),
+        online=online, with_local_disks=with_local)
+    if blocked is not None:
+        return web.json_response(blocked, status=409)
 
     user = (request.get("user") or {}).get("username", "system")
     src_ip = request.get("client_ip", "unknown")
@@ -475,6 +498,82 @@ async def vm_bulk_handler(request: web.Request) -> web.Response:
 
 # ---------------------------------------------------------------- routes
 
+@role_required("viewer")
+async def migrate_targets_handler(request: web.Request) -> web.Response:
+    """Nodes this guest may legally be migrated to.
+
+    Exists so the UI can offer only valid targets instead of letting an
+    operator pick one that HA will reject after the fact. `allowed_nodes` is
+    null when nothing restricts the guest — that is "no restriction", NOT
+    "no targets", and callers must not confuse the two.
+    """
+    cluster_id = request.match_info["cluster_id"]
+    vmid = int(request.match_info["vmid"])
+    # One handler serves both routes; the path decides the HA service prefix
+    # (`ct:` vs `vm:`), and getting it wrong checks a rule for a guest that
+    # does not exist and silently reports "unrestricted".
+    kind = "lxc" if "/cts/" in request.path else "qemu"
+    cluster = cluster_manager.get_cluster(cluster_id)
+    if cluster is None:
+        return web.json_response({"error": "cluster_not_found"}, status=404)
+    vm = await _resolve_vm_target(cluster_id, vmid)
+    if vm is None:
+        return web.json_response({"error": "vm_not_found"}, status=404)
+
+    # cache.nodes is dict[str, NodeMetrics] — a DATACLASS whose name field is
+    # `node`, not `name`, and whose status is a NodeStatus enum. Reading
+    # `.name` returned None for every node, so the target list came back empty
+    # and the UI would have shown "nowhere to migrate to" without any error.
+    # Keyed by node name, so fall back to the key when the value is unreadable.
+    online = []
+    try:
+        nodes = getattr(cluster.cache, "nodes", {}) or {}
+        items = nodes.items() if isinstance(nodes, dict) else [(None, n) for n in nodes]
+        for key, n in items:
+            if isinstance(n, dict):
+                name = n.get("node") or n.get("name") or key
+                status = n.get("status")
+            else:
+                name = getattr(n, "node", None) or key
+                status = getattr(n, "status", None)
+            status = getattr(status, "value", status)
+            if name and str(status).lower() == "online":
+                online.append(str(name))
+    except Exception as e:
+        logger.debug("migrate-targets: node list unavailable: %s", e)
+
+    allowed = await ha_affinity.allowed_nodes(cluster, kind, vmid)
+    source = vm.get("node")
+    # Filter on storage too: a node that HA permits but which does not carry
+    # the guest's storages is not a real target, and offering it just moves the
+    # failure later.
+    # An empty node list means the poll cache has not filled yet (e.g. straight
+    # after a daemon restart) — NOT that the guest has nowhere to go. Returning
+    # [] there would render as "this guest cannot be migrated", which is the
+    # same class of confident-but-wrong answer this whole guard exists to stop.
+    # Storages arrive on a separate poll from nodes, and a PARTIAL inventory is
+    # just as misleading as an empty one: right after a restart only the source
+    # node was known, every candidate got filtered out, and the answer came back
+    # as a confident "no targets".
+    inventory_ready = bool(online) and bool(
+        getattr(getattr(cluster, "cache", None), "storages", None))
+    if not inventory_ready:
+        return web.json_response({
+            "ok": True, "source_node": source,
+            "allowed_nodes": sorted(allowed) if allowed is not None else None,
+            "targets": None, "unknown": True,
+            "detail": "cluster inventory not populated yet — try again shortly",
+        })
+
+    targets = await migrate_guard.viable_targets(
+        cluster, kind, vmid, source, online, online=True, with_local_disks=False)
+    return web.json_response({
+        "ok": True, "source_node": source,
+        "allowed_nodes": sorted(allowed) if allowed is not None else None,
+        "targets": sorted(targets),
+    })
+
+
 ROUTES = [
     # VM lifecycle
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/start",    vm_start_handler),
@@ -484,6 +583,7 @@ ROUTES = [
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/suspend",  vm_suspend_handler),
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/vms/{vmid}/resume",   vm_resume_handler),
     ("POST", "/api/clusters/{cluster_id}/vms/{vmid}/migrate",               vm_migrate_handler),
+    ("GET",  "/api/clusters/{cluster_id}/vms/{vmid}/migrate-targets",       migrate_targets_handler),
     # LXC container lifecycle (parallel to VM, same RBAC + audit pattern)
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/start",    ct_start_handler),
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/stop",     ct_stop_handler),
@@ -492,6 +592,7 @@ ROUTES = [
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/suspend",  ct_suspend_handler),
     ("POST", "/api/clusters/{cluster_id}/nodes/{node}/cts/{vmid}/resume",   ct_resume_handler),
     ("POST", "/api/clusters/{cluster_id}/cts/{vmid}/migrate",               ct_migrate_handler),
+    ("GET",  "/api/clusters/{cluster_id}/cts/{vmid}/migrate-targets",       migrate_targets_handler),
     # Bulk: auto-detects VM vs CT per vmid via cluster cache lookup
     ("POST", "/api/clusters/{cluster_id}/vms/bulk",                         vm_bulk_handler),
     # Task status polling (works for both VM and CT tasks — UPID format is same)

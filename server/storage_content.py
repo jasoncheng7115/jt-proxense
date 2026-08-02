@@ -24,6 +24,7 @@ import aiohttp
 from aiohttp import web
 
 from . import audit
+from . import task_outcome
 from . import console_sessions
 from . import secret_store
 from .cluster_manager import cluster_manager
@@ -179,12 +180,11 @@ async def download_url_handler(request: web.Request) -> web.Response:
             status=502,
         )
 
-    await audit.write(
-        user=user, source_ip=ip, action="storage.content.download_url",
-        target=audit_target, cluster_id=cluster_id,
-        result="ok", request_id=rid,
-        params={"url": url[:200], "filename": filename, "content": content},
-    )
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="storage.content.download_url", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=audit_target)
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -227,11 +227,11 @@ async def delete_content_handler(request: web.Request) -> web.Response:
             status=502,
         )
 
-    await audit.write(
-        user=user, source_ip=ip, action="storage.content.delete",
-        target=audit_target, cluster_id=cluster_id,
-        result="ok", request_id=rid,
-    )
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="storage.content.delete", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=audit_target)
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -375,12 +375,11 @@ async def upload_handler(request: web.Request) -> web.Response:
             status=502,
         )
 
-    await audit.write(
-        user=user, source_ip=ip, action="storage.content.upload",
-        target=audit_target, cluster_id=cluster_id,
-        result="ok", request_id=rid,
-        params={"file": file_name, "content": content_type},
-    )
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="storage.content.upload", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=audit_target)
     return web.json_response({"ok": True, "upid": upid, "filename": file_name})
 
 

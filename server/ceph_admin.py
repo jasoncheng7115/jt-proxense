@@ -21,6 +21,7 @@ import logging
 from aiohttp import web
 
 from . import audit
+from . import task_outcome
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -204,9 +205,11 @@ async def mon_create_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.mon.create",
-                      target=f"{cid}/{node}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.mon.create", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -228,9 +231,11 @@ async def mon_delete_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}/{monid}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.mon.delete",
-                      target=f"{cid}/{node}/{monid}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.mon.delete", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}/{monid}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -249,9 +254,11 @@ async def mgr_create_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.mgr.create",
-                      target=f"{cid}/{node}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.mgr.create", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -273,9 +280,11 @@ async def mgr_delete_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}/{mgrid}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.mgr.delete",
-                      target=f"{cid}/{node}/{mgrid}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.mgr.delete", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}/{mgrid}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -294,9 +303,11 @@ async def mds_create_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.mds.create",
-                      target=f"{cid}/{node}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.mds.create", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -318,9 +329,11 @@ async def mds_delete_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}/{name}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.mds.delete",
-                      target=f"{cid}/{node}/{name}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.mds.delete", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}/{name}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -364,10 +377,11 @@ async def pool_create_handler(request: web.Request) -> web.Response:
                           result=audit.result_error(e), request_id=rid,
                           params={"pg_num": pg_num, "size": size, "min_size": min_size})
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.pool.create",
-                      target=f"{cid}/{node}/{name}", cluster_id=cid,
-                      result="ok", request_id=rid,
-                      params={"pg_num": pg_num, "size": size, "min_size": min_size})
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.pool.create", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}/{name}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -391,10 +405,11 @@ async def pool_delete_handler(request: web.Request) -> web.Response:
                           result=audit.result_error(e), request_id=rid,
                           params={"remove_storages": remove_storages})
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="ceph.pool.delete",
-                      target=f"{cid}/{node}/{name}", cluster_id=cid,
-                      result="ok", request_id=rid,
-                      params={"remove_storages": remove_storages})
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="ceph.pool.delete", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}/{name}")
     return web.json_response({"ok": True, "upid": upid})
 
 

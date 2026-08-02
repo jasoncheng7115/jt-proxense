@@ -53,6 +53,7 @@ from typing import Any
 from aiohttp import web
 
 from . import audit
+from . import create_guard
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -352,6 +353,14 @@ async def create_qemu_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": "validation", "detail": err}, status=400)
     vmid = int(body.get("vmid"))
 
+    # Pre-flight the things PVE only discovers once the create task runs: a
+    # bridge that does not exist on this node, a storage that will not hold
+    # disk images, or a VMID already used elsewhere in the cluster. Each of
+    # those leaves a half-created guest behind.
+    blocked = await _create_preflight(cluster, node, vmid, body, kind="qemu")
+    if blocked is not None:
+        return web.json_response(blocked, status=409)
+
     actor, ip, rid = _audit(request)
     try:
         upid = await cluster.client.create_qemu(node, vmid, **fields)
@@ -395,6 +404,14 @@ async def create_lxc_handler(request: web.Request) -> web.Response:
     # itself. params hash includes only non-secret fields.
     safe_params = {k: v for k, v in fields.items()
                    if k not in ("password", "ssh-public-keys")}
+    # Pre-flight the things PVE only discovers once the create task runs: a
+    # bridge that does not exist on this node, a storage that will not hold
+    # disk images, or a VMID already used elsewhere in the cluster. Each of
+    # those leaves a half-created guest behind.
+    blocked = await _create_preflight(cluster, node, vmid, body, kind="lxc")
+    if blocked is not None:
+        return web.json_response(blocked, status=409)
+
     actor, ip, rid = _audit(request)
     try:
         upid = await cluster.client.create_lxc(node, vmid, **fields)
@@ -504,3 +521,32 @@ ROUTES = [
     ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/qemu/{vmid}/restore",                restore_qemu_handler),
     ("POST", r"/api/clusters/{cluster_id}/nodes/{node}/lxc/{vmid}/restore",                 restore_lxc_handler),
 ]
+
+
+async def _create_preflight(cluster, node: str, vmid: int, body: dict, *,
+                            kind: str) -> dict | None:
+    """VMID / storage / bridge checks, in that order.
+
+    Ordered cheapest-and-most-certain first: a taken VMID is a fact we already
+    hold, storage content is polled data, and only the bridge list costs a
+    request. Returns the first refusal — reporting one clear reason beats a
+    list the operator has to triage.
+    """
+    blocked = create_guard.check_vmid_free(cluster, vmid)
+    if blocked is not None:
+        return blocked
+
+    storages = set()
+    for d in (body.get("disks") or []):
+        if isinstance(d, dict) and d.get("storage"):
+            storages.add(str(d["storage"]).strip())
+    if body.get("storage"):
+        storages.add(str(body["storage"]).strip())
+    for st in sorted(storages):
+        blocked = create_guard.check_disk_storage(cluster, node, st, kind)
+        if blocked is not None:
+            return blocked
+
+    bridges = [n.get("bridge") for n in (body.get("nics") or [])
+               if isinstance(n, dict) and n.get("bridge")]
+    return await create_guard.check_nic_bridges(cluster, node, bridges)

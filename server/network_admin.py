@@ -26,6 +26,7 @@ import re
 from aiohttp import web
 
 from . import audit
+from . import task_outcome
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -184,9 +185,11 @@ async def network_apply_handler(request: web.Request) -> web.Response:
                           target=f"{cid}/{node}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=actor, source_ip=ip, action="network.apply",
-                      target=f"{cid}/{node}", cluster_id=cid,
-                      result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, node, upid,
+        action="network.apply", user=actor, source_ip=ip,
+        request_id=rid, cluster_id=cid,
+        target=f"{cid}/{node}")
     return web.json_response({"ok": True, "upid": upid})
 
 

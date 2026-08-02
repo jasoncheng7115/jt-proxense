@@ -17,6 +17,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from . import audit
+from . import task_outcome
 from .cluster_manager import cluster_manager
 from .config import get_config
 
@@ -109,9 +110,11 @@ async def vm_reset_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.reset",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid}",
-                      cluster_id=cluster_id, result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action="vm.reset", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/vm/{vmid}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -184,10 +187,11 @@ async def snapshot_create_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid, params=body)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip,
-                      action=f"{'ct' if is_lxc else 'vm'}.snapshot.create",
-                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
-                      cluster_id=cluster_id, result="ok", request_id=rid, params=body)
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action=f"{'ct' if is_lxc else 'vm'}.snapshot.create", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -220,10 +224,11 @@ async def snapshot_delete_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip,
-                      action=f"{'ct' if is_lxc else 'vm'}.snapshot.delete",
-                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
-                      cluster_id=cluster_id, result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action=f"{'ct' if is_lxc else 'vm'}.snapshot.delete", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -256,10 +261,11 @@ async def snapshot_rollback_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip,
-                      action=f"{'ct' if is_lxc else 'vm'}.snapshot.rollback",
-                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}",
-                      cluster_id=cluster_id, result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action=f"{'ct' if is_lxc else 'vm'}.snapshot.rollback", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}/{snapname}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -316,10 +322,12 @@ async def clone_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid, params=body)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip,
-                      action=f"{'ct' if is_lxc else 'vm'}.clone",
-                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid} -> {newid}",
-                      cluster_id=cluster_id, result="ok", request_id=rid, params=body)
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action=f"{'ct' if is_lxc else 'vm'}.clone", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid} -> {newid}",
+            timeout_s=task_outcome.LONG_TIMEOUT_S)
     return web.json_response({"ok": True, "upid": upid, "newid": newid})
 
 
@@ -346,9 +354,11 @@ async def template_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid)
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="vm.to_template",
-                      target=f"{cluster_id}/{vm['node']}/vm/{vmid}",
-                      cluster_id=cluster_id, result="ok", request_id=rid)
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action="vm.to_template", user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/vm/{vmid}")
     return web.json_response({"ok": True, "upid": upid})
 
 
@@ -381,10 +391,11 @@ async def delete_handler(request: web.Request) -> web.Response:
                           cluster_id=cluster_id, result=audit.result_error(e),
                           request_id=rid, params={"purge": purge})
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action=action,
-                      target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}",
-                      cluster_id=cluster_id, result="ok", request_id=rid,
-                      params={"purge": purge})
+    await task_outcome.submitted(
+        cluster, vm["node"], upid,
+        action=action, user=user, source_ip=ip,
+        request_id=rid, cluster_id=cluster_id,
+        target=f"{cluster_id}/{vm['node']}/{vm['type']}/{vmid}")
     return web.json_response({"ok": True, "upid": upid})
 
 

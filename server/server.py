@@ -50,7 +50,7 @@ from . import ceph_admin
 from . import network_admin
 from . import maintenance
 from . import host_upgrade
-from . import zfs_admin
+from . import boot_mirror, task_outcome, zfs_admin
 from . import pve_users_admin
 from . import cluster_locks
 from . import audit_forwarder_admin
@@ -769,6 +769,11 @@ def create_app() -> web.Application:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
+    # v0.9.1 root-pool boot mirror — staged, resumable across page reloads
+    for method, path, handler in boot_mirror.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
     # v0.4 PVE users / groups / ACL (admin)
     for method, path, handler in pve_users_admin.ROUTES:
         route = app.router.add_route(method, path, handler)
@@ -966,6 +971,15 @@ async def start_server():
     # is flagged 'orphaned' for human review instead of silently reported done.
     asyncio.create_task(zfs_admin.mark_orphans_on_startup())
 
+    # Boot-mirror jobs: a resilver keeps running inside the kernel across a
+    # daemon restart, so re-attach the watcher rather than orphaning the job —
+    # the operator who comes back hours later must still see live progress.
+    asyncio.create_task(boot_mirror.resume_on_startup())
+
+    # PVE tasks whose outcome we still owe the audit log (migration 011). Most
+    # resolve on the first poll because they finished while we were down.
+    asyncio.create_task(task_outcome.resume_on_startup())
+
     # Export jobs: mark conversions orphaned by the restart as failed,
     # then run the 24 h output-retention reaper.
     async def _export_lifecycle():
@@ -988,6 +1002,10 @@ async def stop_server(runner: web.AppRunner):
     if fwd is not None:
         await fwd.stop()
         audit_forwarder.set_forwarder(None)
+    # In-flight PVE task watchers die with the process, so anything still
+    # being followed loses its outcome row. Say so rather than leaving a silent
+    # hole in the audit trail.
+    await task_outcome.warn_on_shutdown()
     await cluster_manager.stop_all()
     await runner.cleanup()
     logger.info("Server stopped")
