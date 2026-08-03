@@ -1053,3 +1053,35 @@ def test_zfs_read_failure_is_distinct_from_no_zfs():
     src = inspect.getsource(z.zfs_get_handler)
     assert "raise_on_error=True" in src
     assert "zfs_read_failed" in src
+
+
+def test_whole_disk_byid_strips_both_suffixes():
+    """A 2 TB NVMe sitting in a live pool reported as merely 'mounted' because
+    only `-partN` was stripped. udev appends the NVMe NAMESPACE (`_1`) to the
+    disk's by-id but not to its partition link, so the inventory's
+    `..._S4J4NX0T209320J_1` never matched the member's `..._S4J4NX0T209320J-part1`.
+    """
+    from server.zfs_admin import whole_disk_byid
+    base = "nvme-Samsung_SSD_970_EVO_Plus_2TB_S4J4NX0T209320J"
+    assert whole_disk_byid(f"{base}-part1") == base
+    assert whole_disk_byid(f"{base}_1") == base
+    assert whole_disk_byid(base) == base
+    # SATA disks have no namespace suffix and must be untouched beyond -partN
+    sata = "ata-TOSHIBA_HDWG440_Y160A00EFZ1G"
+    assert whole_disk_byid(f"{sata}-part1") == sata
+    assert whole_disk_byid(sata) == sata
+
+
+def test_whole_disk_byid_does_not_eat_a_numeric_serial():
+    """A serial that merely ENDS in digits must survive — only a `_N` namespace
+    suffix comes off, and that is preceded by an underscore."""
+    from server.zfs_admin import whole_disk_byid
+    assert whole_disk_byid("ata-VENDOR_MODEL_0022431W00VD") == "ata-VENDOR_MODEL_0022431W00VD"
+
+
+def test_namespace_suffix_is_only_stripped_for_nvme():
+    """`_N` is an NVMe namespace. A SATA serial ending in `_12` is part of the
+    identity — stripping it would merge two distinct disks into one row."""
+    from server.zfs_admin import whole_disk_byid
+    assert whole_disk_byid("ata-VENDOR_MODEL_12") == "ata-VENDOR_MODEL_12"
+    assert whole_disk_byid("nvme-VENDOR_MODEL_12") == "nvme-VENDOR_MODEL"

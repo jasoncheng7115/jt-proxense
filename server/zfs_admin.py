@@ -105,6 +105,30 @@ class ZfsError(Exception):
         self.status = status
 
 
+def whole_disk_byid(by_id: str) -> str:
+    """Reduce a by-id to the WHOLE DISK it belongs to.
+
+    Two different suffixes have to come off, and missing the second one made a
+    2 TB NVMe in a live pool report as merely "mounted" instead of naming its
+    pool:
+      * `-partN`  — the partition ZFS creates when handed a whole disk, so
+        nearly every pool member carries one.
+      * `_N`      — the NVMe NAMESPACE, which udev appends to the by-id of the
+        block device but NOT to the partition link. So the inventory sees
+        `nvme-Samsung_..._S4J4NX0T209320J_1` while the pool member is
+        `nvme-Samsung_..._S4J4NX0T209320J-part1`; stripping only `-partN` left
+        the two unequal and the disk looked unclaimed.
+    """
+    s = re.sub(r"-part\d+$", "", by_id or "")
+    # Only NVMe carries a namespace suffix. Stripping `_N` unconditionally would
+    # also eat a serial that happens to end in `_12`, which would merge two
+    # different disks into one entry — a silent wrong answer in exactly the
+    # place an operator is deciding which drive to pull.
+    if s.startswith("nvme-"):
+        s = re.sub(r"_\d+$", "", s)
+    return s
+
+
 def _norm_pool(name: str) -> str:
     name = (name or "").strip()
     if not _POOL_RE.match(name):
@@ -499,7 +523,7 @@ def parse_disks(lsblk_json: str, byid_ls: str, pools: list[dict],
 
     def collect(v: dict, pool: str):
         if v.get("by_id"):
-            leaf = re.sub(r"-part\d+$", "", v["by_id"])
+            leaf = whole_disk_byid(v["by_id"])
             member[leaf] = (pool, v.get("state") or "")
         for c in v.get("children") or []:
             collect(c, pool)
@@ -738,7 +762,7 @@ def parse_disks_api(pve_disks: list, pools: list[dict]) -> list[dict]:
 
     def collect(v: dict, pool: str):
         if v.get("by_id"):
-            member[re.sub(r"-part\d+$", "", v["by_id"])] = pool
+            member[whole_disk_byid(v["by_id"])] = pool
         for c in v.get("children") or []:
             collect(c, pool)
 
@@ -756,7 +780,10 @@ def parse_disks_api(pve_disks: list, pools: list[dict]) -> list[dict]:
         link = d.get("by_id_link") or ""
         by_id = link[len(_BYID_DIR):] if link.startswith(_BYID_DIR) else (link or None)
         used = (d.get("used") or "").strip()
-        pool = member.get(by_id or "")
+        # Normalise the inventory side too: udev appends the NVMe namespace
+        # (`_1`) to the disk's by-id but not to its partition link, so the raw
+        # strings never match for NVMe even though it is the same device.
+        pool = member.get(whole_disk_byid(by_id or ""))
         kind = (d.get("type") or "").lower()
         if kind not in ("hdd", "ssd", "nvme"):
             kind = _media_kind(kdev, None, bool(d.get("rpm")), by_id)
