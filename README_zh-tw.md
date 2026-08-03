@@ -22,10 +22,10 @@
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
 ```
 
-安裝程式會建立 `jt-proxense` 系統使用者、安裝 Python 依賴、佈署 systemd unit、bootstrap 一個 `admin` 使用者（會印出一次性密碼，請複製起來）並啟動服務。預設網址：`http://<your-server>:8098/`。
+安裝程式會建立 `jt-proxense` 系統使用者、安裝 Python 依賴、佈署 systemd unit、bootstrap 一個 `admin` 使用者 (會印出一次性密碼，請複製起來)並啟動服務。預設網址：`http://<your-server>:8098/`。
 
 **在 WebUI 新增你的 PVE 叢集 — 免改設定檔。** 以 `admin` 登入後，進
-**設定 → 叢集** 新增連線（host + 使用者 + API Token），會自動寫回
+**設定 → 叢集** 新增連線 (host + 使用者 + API Token)，會自動寫回
 `config.yaml` 並熱重載；沒有任何叢集時服務也能正常啟動。
 
 <sub>偏好 YAML？`config.example.yaml` 有完整選項說明，
@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/ins
 
 ## 更新
 
-安裝程式具冪等性 —— 重跑同一行指令就會抓最新版並重啟服務:
+安裝程式具冪等性 —— 重跑同一行指令就會抓最新版並重啟服務：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash
@@ -41,19 +41,19 @@ curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/ins
 
 ## 解除安裝
 
-一行指令 —— 完整移除服務、程式、資料、密鑰庫 + master key、以及服務使用者(不可逆):
+一行指令 —— 完整移除服務、程式、資料、密鑰庫 + master key、以及服務使用者 (不可逆):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
 ```
 
-會要求確認(輸入 `remove`);要略過加 `--yes`:`… | sudo bash -s -- --yes`。
-**若日後可能要救回,請先匯出設定** —— 見[搬移到另一台主機](#搬移到另一台主機)。
+會要求確認 (輸入 `remove`);要略過加 `--yes`:`… | sudo bash -s -- --yes`。
+**若日後可能要救回，請先匯出設定** —— 見[搬移到另一台主機](#搬移到另一台主機)。
 
 ## 搬移到另一台主機
 
-jt-proxense 會把構成一個 instance 的所有東西(叢集設定、含使用者/稽核/筆記的
-SQLite DB、以及解密已存叢集密鑰用的 master key)打包成**一個 passphrase 加密檔**:
+jt-proxense 會把構成一個 instance 的所有東西 (叢集設定、含使用者/稽核/筆記的
+SQLite DB、以及解密已存叢集密鑰用的 master key) 打包成**一個 passphrase 加密檔**:
 
 ```bash
 # 在「舊」主機 — 匯出(會問 passphrase):
@@ -69,7 +69,7 @@ sudo systemctl restart jt-proxense
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/uninstall.sh | sudo bash
 ```
 
-設定包內含 master key 與完整 DB,請妥善保管,匯入後刪除。
+設定包內含 master key 與完整 DB，請妥善保管，匯入後刪除。
 
 ---
 
@@ -93,7 +93,7 @@ sudo systemctl restart jt-proxense
 - `auth.backend: local` — Argon2id 雜湊密碼存於 SQLite。預設。
 - `auth.backend: pam` — 透過 PAM 認證系統帳號。角色仍由本服務管理。
 
-### 雙因素認證（TOTP）
+### 雙因素認證 (TOTP)
 
 登入後從 header 點使用者名稱 → **Two-factor (TOTP) setup**，用任何 authenticator app 掃 QR，保存 8 組備用代碼。設備遺失時用 `jt-proxense user reset-totp <username>` 清除。
 
@@ -112,7 +112,7 @@ jt-proxense user grant alice '*' admin --vm-pattern 'tag:prod'
 
 ### 稽核日誌
 
-每個狀態變更（登入、角色授權、設定修改、VM 開關機/遷移等）都附加式記錄在 `/var/lib/jt-proxense/jt-proxense.db`。Admin 可在 <http://your-server:8098/audit> 瀏覽（日期區間 + LIKE 過濾 + CSV 匯出）。保留期限：`jt-proxense audit purge --days 90`。
+每個狀態變更 (登入、角色授權、設定修改、VM 開關機/遷移等) 都附加式記錄在 `/var/lib/jt-proxense/jt-proxense.db`。Admin 可在 <http://your-server:8098/audit> 瀏覽 (日期區間 + LIKE 過濾 + CSV 匯出)。保留期限：`jt-proxense audit purge --days 90`。
 
 ### 緊急鎖死復原
 
@@ -128,7 +128,7 @@ sudo jt-proxense unlock --all          # 解除所有 IP 的鎖
 ```
 
 登入頁若出現 **「嘗試次數過多，請稍後再試」**，表示該 IP 觸發了
-單一 IP 的登入限流（5 分鐘內失敗 5 次）。等 5 分鐘會自動解除，或用
+單一 IP 的登入限流 (5 分鐘內失敗 5 次)。等 5 分鐘會自動解除，或用
 `jt-proxense unlock` 立即解除。此指令只清除限流計數，**不會更動密碼**。
 
 威脅模型與漏洞回報請見 [SECURITY.md](SECURITY.md)。
@@ -137,7 +137,7 @@ sudo jt-proxense unlock --all          # 解除所有 IP 的鎖
 
 ## 功能特色
 
-### 監控（v0.1.0+）
+### 監控 (v0.1.0+)
 
 - **多叢集管理** — 從同一介面監看多個 PVE 叢集
 - **即時更新** — WebSocket 推送，亞秒級指標刷新
@@ -146,45 +146,45 @@ sudo jt-proxense unlock --all          # 解除所有 IP 的鎖
 - **六種畫面**：
   - **Dashboard 概觀** — 全域總覽
   - **Nodes 節點** — 節點 ECG 心電圖式指標
-  - **Matrix 矩陣** — VM + LXC 狀態格（可篩選 / 排序 / 分組）
+  - **Matrix 矩陣** — VM + LXC 狀態格 (可篩選 / 排序 / 分組)
   - **Radar 雷達** — 異常偵測雷達
   - **Storage 儲存** — 儲存池 treemap 視覺化
   - **Ceph** — Ceph 叢集拓撲與 IOPS
 
-### 認證 + 可追溯性（v0.2）
+### 認證 + 可追溯性 (v0.2)
 
 - **Argon2id 密碼 + 12 小時滑動 session + per-IP 速率限制**
 - **PAM 後端** — 用系統帳號登入
 - **TOTP 雙因素認證**，含 8 組單次備用碼
-- **三種角色**支援**逐叢集 + 逐 VM-pattern 範圍授權**（`tag:prod`、`web-*`）
+- **三種角色**支援**逐叢集 + 逐 VM-pattern 範圍授權** (`tag:prod`、`web-*`)
 - **附加式稽核日誌**，可在 `/audit` 瀏覽、CSV 匯出
 - **緊急 CLI 後門** — 認證設定錯誤也能無 web 復原
 - 所有 UI 統一 cyberpunk 風格、有動畫，但表格保持資訊密度
 
-### VM + 容器控制（v0.3，預設關閉）
+### VM + 容器控制 (v0.3，預設關閉)
 
 - 開機 / 關機 / 重啟 / 暫停 / 恢復 — VM **與** LXC 容器
-- 叢集內遷移（VM 線上、CT offline 或 restart-style）
+- 叢集內遷移 (VM 線上、CT offline 或 restart-style)
 - 批次操作最多 100 個 vmid / 次，自動分辨 VM vs CT
-- Tier 確認（hard stop / migrate 需 admin）
+- Tier 確認 (hard stop / migrate 需 admin)
 - 每個動作都進稽核日誌；改 `vm_control.enabled: true` 即啟用
 
-### 操作層（v0.3.x）
+### 操作層 (v0.3.x)
 
 - **矩陣縮圖預覽** — 每台運作中虛擬機的 framebuffer 即時截圖，可依節點 / 類型 / 標籤分組。QEMU 透過迷你 RFB 3.8 client；LXC 透過 termproxy + vt100 emulator，CT 卡片直接顯示 shell 輸出。點任一卡片開啟全尺寸放大，附 CRT 雜訊載入特效。
-- **跨叢集遷移** — Wizard 會剖析來源 VM、選擇目標叢集端點、取得 TLS fingerprint、列出磁碟與 NIC 對應。包含驗證、預檢、online / offline 模式、頻寬限速。Admin only；僅 QEMU（PVE API 限制）。失敗時跳出 toast 顯示可複製貼上的 `qm unlock` 解鎖指令。
-- **儲存內容瀏覽** — 點任一 file-level 儲存區，依 content 動態出頁籤（備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄）— 只列出該儲存實際支援的類型。可排序清單、搜尋、含 audit 的刪除。Block-level（RBD / LVM / ZFSpool）只給瀏覽。
-- **Telegraf 接收器** — InfluxDB v2 端點 `/api/v2/write`（token 認證、支援 gzip）。Per-host ring buffer 透過 `/api/telegraf/{hosts,host}` 讀取。在 PVE 各主機跑你自己的 Telegraf `outputs.influxdb_v2`，補強 API 輪詢之外的指標。
+- **跨叢集遷移** — Wizard 會剖析來源 VM、選擇目標叢集端點、取得 TLS fingerprint、列出磁碟與 NIC 對應。包含驗證、預檢、online / offline 模式、頻寬限速。Admin only；僅 QEMU (PVE API 限制)。失敗時跳出 toast 顯示可複製貼上的 `qm unlock` 解鎖指令。
+- **儲存內容瀏覽** — 點任一 file-level 儲存區，依 content 動態出頁籤 (備份 / ISO 映像 / CT 範本 / 程式碼片段 / 匯入 / 磁碟映像 / CT 根目錄) — 只列出該儲存實際支援的類型。可排序清單、搜尋、含 audit 的刪除。Block-level (RBD / LVM / ZFSpool)只給瀏覽。
+- **Telegraf 接收器** — InfluxDB v2 端點 `/api/v2/write`(token 認證、支援 gzip)。Per-host ring buffer 透過 `/api/telegraf/{hosts,host}` 讀取。在 PVE 各主機跑你自己的 Telegraf `outputs.influxdb_v2`，補強 API 輪詢之外的指標。
 
-## 反向代理（HTTPS 443 → 8098）
+## 反向代理 (HTTPS 443 → 8098)
 
 ### 為什麼要這樣做
 
 內建 server 只走純 HTTP `8098`，設計上就是要放在 TLS 反向代理後面。正式環境請：
 
-- **jt-proxense 綁 localhost**（`127.0.0.1:8098`），只有反向代理連得到。
+- **jt-proxense 綁 localhost** (`127.0.0.1:8098`)，只有反向代理連得到。
 - **nginx 端做 TLS 終結**，用 Let's Encrypt 或自家憑證。
-- **用 app 自己的認證**（`auth.enabled: true`），別在 nginx 再疊一層 basic auth — app 已經有角色、稽核、MFA 一整套。
+- **用 app 自己的認證** (`auth.enabled: true`)，別在 nginx 再疊一層 basic auth — app 已經有角色、稽核、MFA 一整套。
 
 ### 步驟 1 — 把服務綁回 localhost
 
@@ -275,7 +275,7 @@ certbot 會自動改寫 `ssl_certificate*` 兩行並排好續約。
 
 ### 步驟 5 — 防火牆關掉 8098
 
-開 `443`（與 `80` 用於跳轉與 ACME 驗證），關掉 `8098`：
+開 `443`(與 `80` 用於跳轉與 ACME 驗證)，關掉 `8098`：
 
 ```bash
 ufw allow 80/tcp
@@ -287,10 +287,10 @@ ufw deny 8098/tcp
 
 ### 注意事項
 
-- 服務必須掛在根路徑 `/`，模板使用絕對路徑，子路徑掛載（`/proxense/`）目前不支援。
+- 服務必須掛在根路徑 `/`，模板使用絕對路徑，子路徑掛載 (`/proxense/`)目前不支援。
 - 別在 nginx 加 `auth_basic` — app 已經處理登入、session、MFA、稽核、角色，再多一層只會把操作員搞混。
 - noVNC 一定要 `proxy_buffering off`、加上長 `proxy_read_timeout`，少了任一個 console 不是凍住就是 60 秒後直接斷。
-- 換 upstream port（例如同機跑多份）時，只要改 `proxy_pass` 那兩行就好。
+- 換 upstream port (例如同機跑多份)時，只要改 `proxy_pass` 那兩行就好。
 - 內網 / 沒有公開 DNS 的環境，可以用 `openssl req -x509 ...` 自簽，跳過 certbot — 操作員第一次連會被瀏覽器要求接受憑證。
 
 ---
@@ -314,12 +314,12 @@ pveum aclmod / -user monitoring@pve -role PVEAuditor
 | `clusters[].nodes[].priority` | Failover 優先序，數字越小越優先 | `0` |
 | `clusters[].auth.token_value` | 唯讀 PVE API Token | — |
 | `clusters[].poll_interval` | 即時資料 polling 秒數 | `2` |
-| `alerts.cpu_warning` / `_critical` | CPU 門檻（%） | `80` / `95` |
+| `alerts.cpu_warning` / `_critical` | CPU 門檻 (%) | `80` / `95` |
 | `ui.language` | `en` / `zh-TW` | `en` |
 
 ---
 
-## 補充主機指標（Telegraf / InfluxDB）
+## 補充主機指標 (Telegraf / InfluxDB)
 
 PVE API 提供的指標相對粗粒度。為了呈現 PVE 拿不到的東西 — per-process CPU、硬體感測器、SMART、IPMI、細粒度 net/disk-IO — jt-proxense 內建一個 **InfluxDB line-protocol 接收器**。每台 PVE host 上的 Telegraf agent 把指標推到 jt-proxense，dashboard 為每組 `(host, measurement)` 保留最近 60 筆樣本，並透過 REST 暴露。
 
@@ -337,7 +337,7 @@ server:
 
 ### Telegraf agent 設定 (PVE host)
 
-每台 PVE host 安裝 telegraf（`apt install telegraf`），然後寫入 `/etc/telegraf/telegraf.conf`:
+每台 PVE host 安裝 telegraf (`apt install telegraf`)，然後寫入 `/etc/telegraf/telegraf.conf`:
 
 ```toml
 [agent]
@@ -380,12 +380,12 @@ curl -s -b cookie http://<jt-proxense>:8098/api/telegraf/hosts | jq .
 curl -s -b cookie http://<jt-proxense>:8098/api/telegraf/<hostname> | jq .
 ```
 
-若一分鐘後 `hosts` 仍是空的，到 PVE host 上看 `journalctl -u telegraf -n 50` — 多半是 token 不對（接收器 log 會看到 401）或防火牆擋住 8086。
+若一分鐘後 `hosts` 仍是空的，到 PVE host 上看 `journalctl -u telegraf -n 50` — 多半是 token 不對 (接收器 log 會看到 401) 或防火牆擋住 8086。
 
 ### 注意事項
 
 - 接收器**不掛**主 app 的 auth middleware — 用 `influx_token` 保護或綁在私網介面。
-- Ring buffer 只在記憶體裡（10 秒間隔約 10 分鐘）。歷史保存不在範圍 — 若要長期保留請把 Telegraf 直接指向真正的 InfluxDB，jt-proxense 只做即時監看。
+- Ring buffer 只在記憶體裡 (10 秒間隔約 10 分鐘)。歷史保存不在範圍 — 若要長期保留請把 Telegraf 直接指向真正的 InfluxDB，jt-proxense 只做即時監看。
 - 不想要的 measurements 可在 telegraf 端用 `[outputs.influxdb_v2.tagdrop]` / `[inputs.<name>.tagpass]` 過濾掉 — 接收器拿到什麼就 bucket 什麼。
 
 ---
@@ -459,7 +459,7 @@ npm run build           # 重新 build dist/
 python3 run.py
 ```
 
-前端開發伺服器（HMR）：
+前端開發伺服器 (HMR)：
 
 ```bash
 npm run dev             # 啟動 Vite，會 proxy API 到後端
@@ -490,7 +490,7 @@ Apache License 2.0 — 見 [LICENSE](LICENSE)。
 
 ## 免責聲明
 
-本軟體依「現狀」（AS IS）提供，不附帶任何明示或默示之擔保，包括但不限於
+本軟體依「現狀」 (AS IS)提供，不附帶任何明示或默示之擔保，包括但不限於
 適售性、特定用途適用性及非侵權之擔保。在任何情況下，作者或著作權人均不
 對因使用本軟體或與本軟體相關而產生之任何索賠、損害或其他責任負責。
 
@@ -499,8 +499,8 @@ Apache License 2.0 — 見 [LICENSE](LICENSE)。
 - **本軟體並非 Proxmox 官方產品**，與 Proxmox Server Solutions GmbH
   無任何隸屬、背書或支援關係。「Proxmox」與「Proxmox VE」為其各自
   權利人之商標，此處僅用於描述互通性。
-- JT-PROXENSE 會對您的叢集執行**會改變狀態的操作**（VM/CT 開關機、
-  遷移、備份、主機升級、NTP／儲存／防火牆設定、SSH 金鑰佈署等），
+- JT-PROXENSE 會對您的叢集執行**會改變狀態的操作** (VM/CT 開關機、
+  遷移、備份、主機升級、NTP／儲存／防火牆設定、SSH 金鑰佈署等)，
   誤用可能導致停機或資料遺失。請務必先在非正式環境測試；使用所生之
   一切後果由您自行承擔。
 - 部分功能需要 jt-proxense 主機到 PVE 節點的**免密碼 root SSH**。
