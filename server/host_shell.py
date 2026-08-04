@@ -105,7 +105,10 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
             status=500,
         )
 
-    user_for_pve = (cluster.client.auth.username or "root@pam").strip()
+    # PVEAuthConfig declares `user`, not `username` -- a dataclass, so this
+    # raised AttributeError and host shell was broken for every cluster.
+    # Reported as issue #2.
+    user_for_pve = (cluster.client.auth.user or "root@pam").strip()
     try:
         ticket, csrf = await console_sessions.get_or_mint_pve_ticket(
             cluster_id, cluster.client,
@@ -435,8 +438,18 @@ async function connect() {
     socket.addEventListener('message', (ev) => {
         const data = ev.data;
         if (!authed) {
-            // PVE sends 'O' once auth handshake completes.
-            if (typeof data === 'string' && data.charCodeAt(0) === 79) {
+            // PVE acks the auth handshake with a single 'O'. It may arrive as
+            // a TEXT frame or a BINARY one -- the bridge forwards whichever
+            // PVE sent, and binaryType is 'arraybuffer', so a binary ack shows
+            // up as an ArrayBuffer. Only handling the string form left the
+            // terminal stuck on 'opening bridge' forever (issue #2).
+            let firstCode = -1;
+            if (typeof data === 'string') {
+                firstCode = data.charCodeAt(0);
+            } else if (data && data.byteLength) {
+                firstCode = new Uint8Array(data)[0];
+            }
+            if (firstCode === 79) {          // 'O'
                 authed = true;
                 setStatus('connected');
                 overlay.classList.add('hidden');
@@ -444,6 +457,12 @@ async function connect() {
                 pveSendResize(term.cols, term.rows);
                 return;
             }
+            // Anything else before auth used to be dropped silently, so a
+            // rejected handshake was indistinguishable from a slow one. Say so.
+            setStatus('error', (I18N.err_handshake || 'handshake failed') + ': '
+                      + (typeof data === 'string' ? data.slice(0, 120) : '[binary]'));
+            try { socket.close(); } catch (_) {}
+            recon.disabled = false;
             return;
         }
         if (typeof data === 'string') term.write(data);

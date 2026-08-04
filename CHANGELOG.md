@@ -8,6 +8,34 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.5] — 2026-08-04
+
+### Fixed
+- **Host Shell was completely non-functional** (reported by @heroneoz,
+  [#2](https://github.com/jasoncheng7115/jt-proxense/issues/2)). Two
+  independent bugs, either of which alone was fatal:
+  - `host_shell.py` read `cluster.client.auth.username`, but `PVEAuthConfig`
+    is a dataclass declaring `user` — every attempt raised `AttributeError`
+    before a ticket was ever minted.
+  - The page recognised PVE's auth ack (`'O'`) only as a TEXT frame. The bridge
+    forwards whichever frame type PVE sent and `binaryType` is `'arraybuffer'`,
+    so a binary ack arrived as an `ArrayBuffer` and the check silently failed,
+    leaving the overlay on "opening host shell bridge" forever. Verified
+    against a live node: the frames really are binary here too, so this was
+    never browser-specific. `console_term_page.py` (the LXC console) had
+    handled both forms all along — the two copies had diverged.
+- **A rejected host-shell handshake now reports itself.** Any pre-auth frame
+  that was not `'O'` used to be dropped with a bare `return`, so a refusal and
+  a slow connect looked identical.
+
+### Testing
+- `tests/test_host_shell_handshake.py` extracts the WebSocket message handler
+  from both console pages and **executes it in node** against a real
+  `ArrayBuffer`. An earlier draft of these tests grepped the source for
+  `new Uint8Array(data)` — a string that already appeared in the post-auth
+  write path — and therefore passed against the broken code. All three
+  regressions are confirmed to fail before the fix and pass after.
+
 ## [0.9.4] — 2026-08-04
 
 ### Added

@@ -8,6 +8,28 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.9.5] — 2026-08-04
+
+### 修正
+- **主機 Shell 完全無法使用** (由 @heroneoz 回報，
+  [#2](https://github.com/jasoncheng7115/jt-proxense/issues/2))。兩個各自獨立的
+  錯誤，任一個單獨存在都足以讓功能失效：
+  - `host_shell.py` 讀取 `cluster.client.auth.username`，但 `PVEAuthConfig` 是
+    dataclass 且欄位名為 `user` —— 每次呼叫都在取得票證前就拋出 `AttributeError` 。
+  - 頁面只將 PVE 的認證回應 (`'O'`) 視為 TEXT 訊框。橋接會原樣轉發 PVE 送出的訊框
+    型別，而 `binaryType` 為 `'arraybuffer'`，因此二進位回應會以 `ArrayBuffer` 抵達
+    並使判斷靜默失敗，遮罩永遠停在「正在開啟主機 Shell 通道…」。已對實際節點驗證：
+    此處的訊框確實也是二進位，所以這從來就不是特定瀏覽器的問題。
+    `console_term_page.py` (LXC 主控台) 一直都同時處理兩種形式 —— 是這兩份複本分岔了。
+- **主機 Shell 握手被拒時會如實回報。** 先前任何非 `'O'` 的認證前訊框都會被一個空的
+  `return` 丟棄，導致「被拒絕」與「連線緩慢」看起來完全一樣。
+
+### 測試
+- `tests/test_host_shell_handshake.py` 會從兩個主控台頁面擷取 WebSocket 訊息處理器，
+  並**在 node 中實際執行**，以真正的 `ArrayBuffer` 餵入。這些測試的初版只是在原始碼中
+  grep `new Uint8Array(data)` —— 而該字串原本就出現在認證後的寫入路徑 —— 因此對有問題
+  的程式碼也照樣通過。三項回歸均已確認：修復前失敗、修復後通過。
+
 ## [0.9.4] — 2026-08-04
 
 ### 新增
