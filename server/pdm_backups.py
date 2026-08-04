@@ -14,6 +14,7 @@ from . import audit
 from . import create_guard
 from . import storage_caps
 from . import task_outcome
+from . import backup_jobs
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 
@@ -39,7 +40,9 @@ async def list_jobs_handler(request: web.Request) -> web.Response:
         jobs = await cluster.client.list_backup_jobs()
     except Exception as e:
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    return web.json_response({"jobs": jobs})
+    # This handler -- not backup_jobs.list_backup_jobs_handler -- is the one
+    # aiohttp actually routes to, so the normalisation has to happen here.
+    return web.json_response({"jobs": backup_jobs.normalise_jobs(jobs)})
 
 
 @role_required("admin")

@@ -740,3 +740,14 @@ section {
     .lifecycle-row { grid-template-columns: 1fr; gap: 8px; }
     .lifecycle-label { padding-top: 0; }
 }
+
+/* A shareable full-screen page for the demo: sending someone the landing page
+   means they have to find the video, and an <video> tag inside a section is not
+   something you can hand to a person as "here, watch this". */
+.demo-open { margin-top: 14px; text-align: center; }
+.demo-open a {
+    display: inline-block; padding: 8px 18px;
+    border: 1px solid var(--cyan, #00d8ef); border-radius: 4px;
+    color: var(--cyan, #00d8ef); text-decoration: none; font-size: 14px;
+}
+.demo-open a:hover { background: rgba(0, 216, 239, .1); }

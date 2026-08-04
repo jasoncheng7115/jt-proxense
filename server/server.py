@@ -35,6 +35,7 @@ from . import backup_jobs
 from . import node_inspect
 from . import log_health
 from . import vm_export
+from . import node_config_backup
 from . import node_ntp
 from . import node_netinfo
 from . import ssh_setup
@@ -711,6 +712,11 @@ def create_app() -> web.Application:
 
     # VM export to OVA / Hyper-V (operator+; internal job queue)
     for method, path, handler in vm_export.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # Per-node config archive download (admin; SSH-based, read-only)
+    for method, path, handler in node_config_backup.ROUTES:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 

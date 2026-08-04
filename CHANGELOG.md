@@ -8,6 +8,59 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.4] — 2026-08-04
+
+### Added
+- **Per-node configuration download** (`node_config_backup.py`, node context
+  menu → Config backup, admin only). Two collection modes:
+  - **API** (default) — builds the archive from PVE REST calls alone, so it
+    works on a node that has never had an SSH key installed. One JSON per
+    endpoint (storage, access/ACL, firewall, HA, SDN, pools, notifications,
+    node network/DNS/time/apt/certs/disks) plus `/etc/hosts` verbatim and every
+    guest config. A `MANIFEST.txt` names what the API *cannot* reach
+    (`/etc/fstab`, `/etc/default/grub`, `/etc/chrony`, …) so the archive is not
+    mistaken for a restorable copy of `/etc`.
+  - **SSH** — `tar czf -` streamed to stdout, so nothing is written to the
+    node. Byte-for-byte files.
+  - Secrets (`/etc/pve/priv`, `/etc/ceph`, `/etc/ssh`, `*.key`, `shadow.cfg`)
+    are excluded by default and opt-in only, recorded as a distinct audit
+    action, and the dialog states that the cluster CA key can forge a ticket
+    for any user.
+  - PVE's own system report (`pvereport`) is opt-in and warns that it embeds
+    guest **notes** fields, which frequently contain plaintext credentials.
+  - Optional passphrase encryption in OpenSSL's `enc` container format
+    (AES-256-CBC + PBKDF2), decryptable with stock `openssl` — no jt-proxense
+    needed. Passphrase travels in the POST body, never a URL.
+- **SMART health column** in the ZFS disk inventory — PVE already returned
+  `health` and `wearout`; the table simply never showed them. Sorted so failing
+  disks come first.
+
+### Fixed
+- **Node context menu appeared far from the cursor.** `ClusterCore`'s menu was
+  not portalled, so `position: fixed` resolved against `.view-container`, whose
+  `page-enter` animation leaves a transform behind — every coordinate was
+  shifted right by the sidebar width. Also, at eleven entries the menu fits
+  neither above nor below a mid-page click and the old order jumped it to the
+  top of the viewport; it now stays anchored and scrolls.
+- **Backup schedule "next run" was always empty.** PVE spells the field
+  `next-run`; JS cannot read a hyphenated key as `j.next_run`. The fix landed
+  in `backup_jobs.py`, which turned out to be **dead code**: `pdm_backups.py`
+  registers the same route and wins. Both now share one normaliser. Disabled
+  jobs no longer advertise a next run.
+- **Host-upgrade failure badge was hard to read** — white on solid `#ff0040`
+  with an 8px glow, the only badge in the app painted that way. Now matches the
+  house pattern.
+- **Heat map claimed "last 30 samples"** while all 30 buckets held one copied
+  reading, and never said how long 30 samples is (2s or 10s per cluster). It
+  now reports the measured wall-clock span and says when it is still filling.
+
+### Security
+- SSH failures other than `SshUnavailable` (notably asyncssh's
+  `PermissionDenied`) escaped as a 500 with a traceback body; they now return
+  JSON and surface the SSH-setup helper.
+- API-mode collection is asserted by test never to request a path containing
+  `priv` or `ssh`.
+
 ## [0.9.3] — 2026-08-02
 
 ### Added
