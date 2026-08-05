@@ -8,6 +8,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.6] — 2026-08-05
+
+### Fixed
+- **Dashboard "Infrastructure" card read 0 while the header said 8/8.** A
+  regression from 0.9.4: when the count-up tweens were delayed until after the
+  page-enter animation, the "already animated" flag was cleared when the timer
+  was *scheduled* rather than when it *ran*, and the cleanup cancelled only the
+  rAF, never the pending timer. Data almost always arrives during that delay,
+  so the effect re-ran, took the snap path, and the original timer then fired
+  holding a closure over the old value — animating the display back down to
+  zero. Every counter on the card was affected.
+- **Sidebar collapse relayouted the whole app on every frame.** The container
+  transitioned `grid-template-columns`, which is a layout animation: each frame
+  re-laid-out every dashboard card, gauge and canvas. Measured on the live
+  page, 900 ms per toggle: 8 rendered frames with it on, 24 with it off, and
+  long-task time halved. The width now snaps in a single relayout and the
+  motion comes from composited layers instead.
+- **The dashboard emptied out as the display got wider.** `.cluster-grid` was
+  pinned to three columns above 1200px, so four clusters on a 1900px display
+  rendered as 3 + 1 with two thirds of the second row blank. Raising the count
+  was the wrong fix — at 2560px, six fixed tracks for four cards left the right
+  third empty instead. Both grids now use `repeat(auto-fit, minmax(300px, 1fr))`,
+  which collapses the tracks nothing occupies.
+
+### Changed
+- **Sidebar collapse/expand choreography** — a scan-line sweep down the panel,
+  the right edge charging, nav labels decoding back in one after another on
+  expand, and an icon pulse that carries across both directions. One-shot: the
+  driving class is removed afterwards, so nothing animates at rest. Every
+  keyframe ends at `transform: none` — a persisted transform would make the
+  sidebar the containing block for `position: fixed` descendants. Honours
+  `prefers-reduced-motion`.
+
 ## [0.9.5] — 2026-08-04
 
 ### Fixed
