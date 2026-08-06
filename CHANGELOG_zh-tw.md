@@ -8,6 +8,17 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.9.8] — 2026-08-07
+
+### 變更
+- **公開儲存庫現在包含前端原始碼** —— `src/` 、 `index.html` 、 `package.json` 、
+  `package-lock.json` 、 `tsconfig.json` 、 `vite.config.ts` 。CONTRIBUTING.md 一直
+  記載著 `npm run build` 與 `npm run dev`，但先前只發佈建置後的 `dist/`，因此照著
+  文件操作的貢獻者根本無從建置。這也導致八個讀取 `src/client/**` 的測試完全無法在
+  mirror 上執行，使得文件所寫的閘門 (「推送前 mirror 測試必須全綠」)無法被滿足。
+  現在兩棵樹都回報相同的 723 項測試通過；兩者若出現差異，即代表
+  `sync-to-github.sh` 漏了某個項目。
+
 ## [0.9.7] — 2026-08-06
 
 針對本專案反覆出現的錯誤類型做系統性排查的結果。每項修正都附帶一個「修復前確認會失敗」的測試。

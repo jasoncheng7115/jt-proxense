@@ -8,6 +8,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.8] — 2026-08-07
+
+### Changed
+- **The public repo now carries the frontend source** — `src/`, `index.html`,
+  `package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`.
+  CONTRIBUTING.md has always documented `npm run build` and `npm run dev`, but
+  only the built `dist/` was published, so a contributor following it literally
+  had nothing to build. It also meant the eight tests that read `src/client/**`
+  could not run against the mirror at all, which made the documented gate
+  ("the mirror suite must be green before push") impossible to satisfy. Both
+  trees now report the same 723 passing tests; a difference between them means
+  `sync-to-github.sh` is missing an entry.
+
 ## [0.9.7] — 2026-08-06
 
 Findings from a systematic sweep for the bug classes this project keeps

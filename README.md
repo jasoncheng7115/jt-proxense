@@ -1,4 +1,4 @@
-# JT-PROXENSE v0.9.7
+# JT-PROXENSE v0.9.8
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
