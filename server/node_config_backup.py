@@ -396,7 +396,10 @@ async def download_node_config_handler(request: web.Request) -> web.Response:
     node = request.match_info["node"]
     # POST, not GET: the passphrase must not travel in a URL, where it would
     # land in access logs, proxy caches and the browser's history.
-    body = await request.json() if request.can_read_body else {}
+    try:
+        body = await request.json() if request.can_read_body else {}
+    except Exception:
+        return web.json_response({"error": "bad_json"}, status=400)
     # API is the default: it needs no SSH key on the node, so it works on a
     # node that has never been set up for it. SSH is the opt-in for people who
     # need the real files.

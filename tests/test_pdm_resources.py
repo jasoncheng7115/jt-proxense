@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from aiohttp import web
 
-from server import audit, auth, pdm_resources
+from server import audit, auth, pdm_resources, pools_view
 from server.middleware import request_id_middleware, make_auth_middleware
 
 
@@ -75,8 +75,18 @@ def _make_app(*, auth_enabled=True):
         vm_control=VmControlConfig(),
     )
     app = web.Application(middlewares=[request_id_middleware, make_auth_middleware(auth_enabled)])
-    for method, path, handler in pdm_resources.ROUTES:
-        app.router.add_route(method, path, handler)
+    # pdm_resources no longer routes the pool endpoints -- pools_view owns
+    # them, because pdm_resources gated even the LIST at admin and, being
+    # registered first, shadowed pools_view's viewer-level read. Register both
+    # in the same order the real app does so this harness exercises the
+    # handlers that actually serve these paths.
+    seen = set()
+    for mod in (pdm_resources, pools_view):
+        for method, path, handler in mod.ROUTES:
+            if (method, path) in seen:
+                continue
+            seen.add((method, path))
+            app.router.add_route(method, path, handler)
     return app
 
 
@@ -102,12 +112,17 @@ async def test_pools_list_admin(fake_cluster, aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_pools_list_viewer_forbidden(fake_cluster, aiohttp_client):
+async def test_pools_list_viewer_allowed(fake_cluster, aiohttp_client):
+    """Listing pools is a read. This asserted 403 and so pinned the bug in
+    place: pdm_resources gated every pool route at admin and shadowed
+    pools_view's viewer-level handler, leaving PoolsModal empty for anyone
+    below admin -- while GET /pools/{poolid}, which only pools_view registers,
+    answered them fine."""
     app = _make_app(auth_enabled=True)
     client = await aiohttp_client(app)
     await _login(client, "viewer")
     r = await client.get("/api/clusters/cluster1/pools")
-    assert r.status == 403
+    assert r.status == 200
 
 
 @pytest.mark.asyncio

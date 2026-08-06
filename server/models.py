@@ -179,13 +179,24 @@ class CephOSD:
 
 @dataclass
 class CephPool:
-    """Ceph pool info"""
+    """Ceph pool info.
+
+    min_size / application / type / pool_id are carried because the Ceph admin
+    panel displays them. They used to be dropped here while the frontend's
+    interface still declared them, so the pool table rendered "(pool
+    undefined)" with a blank min-size and every row sharing the same React key.
+    """
     name: str
     size: int = 3  # replication factor
     pg_num: int = 0
     used_bytes: int = 0
     total_bytes: int = 0
     objects: int = 0
+    pool_id: int = 0
+    min_size: int = 0
+    pool_type: str = ""
+    application: str = ""
+    crush_rule: str = ""
 
 
 @dataclass
@@ -256,6 +267,12 @@ class ClusterSummary:
     total_cpu_usage: float = 0.0
     total_memory_usage: float = 0.0
     total_storage_usage: float = 0.0
+    # The PVE account this cluster authenticates as. The console password
+    # prompt tells the operator whose password to type; it used to say
+    # "root@pam" unconditionally, which is wrong instruction for any cluster
+    # configured with a different user. This is the username only -- already
+    # visible in Settings -> Clusters -- never the secret.
+    pve_user: str = ""
     has_ceph: bool = False
     ceph_health: str = ""
     alerts_critical: int = 0

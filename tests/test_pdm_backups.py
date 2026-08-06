@@ -97,12 +97,16 @@ async def test_list_jobs_operator(fake_cluster, aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_list_jobs_viewer_blocked(fake_cluster, aiohttp_client):
+async def test_list_jobs_viewer_allowed(fake_cluster, aiohttp_client):
     app = _make_app(auth_enabled=True)
     client = await aiohttp_client(app)
     await _login(client, "viewer")
     r = await client.get("/api/clusters/cluster1/backup-jobs")
-    assert r.status == 403
+    assert r.status == 200, (
+        "Reading the backup SCHEDULE is not a mutation. This asserted 403 and "
+        "so pinned the bug: the handler was gated at operator, which shadowed "
+        "backup_jobs.py's viewer-level copy of the same route and left the "
+        "whole Backups page empty for viewers.")
 
 
 @pytest.mark.asyncio

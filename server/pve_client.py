@@ -1651,14 +1651,31 @@ class PVEClient:
 
     async def delete_ceph_pool(self, node: str, name: str, *,
                                remove_storages: bool = False) -> str:
-        """DELETE /nodes/{node}/ceph/pools/{name} — destroy a Ceph pool.
+        """DELETE /nodes/{node}/ceph/pool/{name} — destroy a Ceph pool.
+
         Irreversible. `remove_storages=true` also removes any PVE storages
-        backed by this pool. Returns task UPID."""
+        backed by this pool. Returns task UPID.
+
+        The path is SINGULAR. On PVE 9 `pvesh ls /nodes/N/ceph` lists `pool`
+        and answers "no such resource" for `pools`, so the plural form this
+        used to send could never have destroyed anything. Older releases used
+        the plural, so fall back to it rather than dropping support for them --
+        and only after the singular form reports the path missing, never after
+        a real failure.
+        """
         params = {}
         if remove_storages: params["remove_storages"] = 1
-        return await self._request(
-            "DELETE", f"/nodes/{node}/ceph/pools/{name}", params=params,
-        )
+        try:
+            return await self._request(
+                "DELETE", f"/nodes/{node}/ceph/pool/{name}", params=params,
+            )
+        except Exception as e:
+            msg = str(e)
+            if "501" not in msg and "404" not in msg and "no such resource" not in msg:
+                raise
+            return await self._request(
+                "DELETE", f"/nodes/{node}/ceph/pools/{name}", params=params,
+            )
 
     async def get_ceph_mon(self, node: str) -> list:
         """Get Ceph monitors"""

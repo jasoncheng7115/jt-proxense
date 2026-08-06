@@ -8,6 +8,68 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.7] — 2026-08-06
+
+Findings from a systematic sweep for the bug classes this project keeps
+repeating. Each fix ships with a test that was verified to fail before it.
+
+### Fixed
+- **Two read-only endpoints were gated above `viewer`, so the pages were empty
+  for anyone below admin.** `GET /pools` and `GET /backup-jobs` were each
+  registered by TWO modules; aiohttp keeps the first registration, and in both
+  cases the winner required a higher role than the read-only module that lost.
+  A viewer could fetch one pool by id but not list them. `tests/test_route_uniqueness.py`
+  now fails the build on any duplicate route and checks the role each read-only
+  path actually resolves to.
+- **The Ceph pool table displayed nothing real.** `CephAdminModal` was written
+  against PVE's field names, but the backend maps PVE into the `CephPool`
+  dataclass first and that carried none of them. The name column rendered
+  "(pool undefined)", every row shared the React key `undefined`, and the
+  destroy dialog asked the operator to approve destroying pool "undefined". The
+  request then went to `.../ceph/pool/` with an empty name and 404'd, so no
+  data was ever at risk. `CephPool` now carries `pool_id`, `min_size`,
+  `pool_type`, `application` and `crush_rule`.
+- **Destroying a Ceph pool could never have worked on PVE 9.** The client used
+  `/nodes/{n}/ceph/pool**s**/{name}`; a live 9.2 node lists `pool` and answers
+  "no such resource" for `pools`. Singular is tried first, with a fallback for
+  older releases.
+- **The boot-disk replace path parsed `lsblk` with the method known to
+  misread it.** `zfs_admin._boot_layout` used `-r`, whose raw mode collapses
+  empty columns, so a partition with no PARTTYPE but an FSTYPE shifts its
+  filesystem into the type slot — and this function chooses which partition
+  gets formatted as vfat. `boot_mirror.py` had been fixed for this; its copy in
+  `zfs_admin.py` had not. There is now one implementation, `parse_boot_layout`,
+  and it excludes non-partition rows by asking `lsblk` rather than by trailing
+  digits (`nvme0n1` is a disk whose name ends in a digit).
+- **A malformed request body returned 500 with a traceback.** Five handlers
+  called `await request.json()` unguarded; they now answer
+  `400 {"error": "bad_json"}`.
+- **A migration overlay could expire while the guest was still moving.** The
+  10-second fallback timer for a completed migration was never cancelled and
+  the effect depended on its own state, so a timer from an earlier migration of
+  the same guest deleted the entry belonging to the current one — the overlay
+  vanishing mid-move, which reads as failure.
+- **Guest tags were used without normalising.** PVE sends `tags` as a
+  semicolon string on some payloads and an array on others while the type says
+  `string[]`; `.map()` over a string iterates characters and `tags[0]` returns
+  the first letter, so a VM tagged "alpha" grouped under "a".
+- **Shared storages were listed once per node** in the alert feed and the
+  command palette, so one PBS on a five-node cluster produced five identical
+  alerts and five search hits.
+- **Animations settled on `translateY(0)` / `blur(0)` instead of `none`** in 60
+  keyframes. A persisted transform makes the element the containing block for
+  every `position: fixed` descendant — the cause of a context menu rendering a
+  sidebar-width from the cursor. A parametrised test now checks every keyframe.
+- Two bare `alert()` calls survived the useDialogs migration because the guard
+  grepped for `window.alert(` and these had no prefix.
+- The console password prompt said `root@pam` for every cluster — wrong
+  instruction for any cluster configured with a different PVE account. The
+  cluster summary now carries the real username.
+
+### Changed
+- `pools_view` owns the pool endpoints; `backup_jobs` keeps only its shared
+  normaliser. Neither module registers a route another one already claims.
+
 ## [0.9.6] — 2026-08-05
 
 ### Fixed

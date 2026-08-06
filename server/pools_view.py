@@ -187,13 +187,19 @@ async def pool_update_handler(request: web.Request) -> web.Response:
                                          delete=delete)
     except Exception as e:
         await audit.write(user=actor, source_ip=ip,
-                          action=f"pool.{'remove' if delete else 'add'}",
+                          # Keep the names pdm_resources has been emitting since this
+                      # endpoint was live there -- renaming them would split the
+                      # existing audit trail in two.
+                      action="pool.delete_members" if delete else "pool.add_members",
                           target=f"{cid}/{pid}", cluster_id=cid,
                           result=audit.result_error(e), request_id=rid,
                           params={"vms": vms, "storage": storage})
         return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
     await audit.write(user=actor, source_ip=ip,
-                      action=f"pool.{'remove' if delete else 'add'}",
+                      # Keep the names pdm_resources has been emitting since this
+                      # endpoint was live there -- renaming them would split the
+                      # existing audit trail in two.
+                      action="pool.delete_members" if delete else "pool.add_members",
                       target=f"{cid}/{pid}", cluster_id=cid,
                       result="ok", request_id=rid,
                       params={"vms": vms, "storage": storage})

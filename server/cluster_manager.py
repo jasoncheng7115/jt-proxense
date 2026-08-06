@@ -1204,6 +1204,14 @@ class Cluster:
                             pg_num=pool.get("pg_num", 0),
                             used_bytes=pool.get("bytes_used", 0),
                             total_bytes=0,  # Not provided directly
+                            pool_id=pool.get("pool", 0) or 0,
+                            min_size=pool.get("min_size", 0) or 0,
+                            pool_type=pool.get("type", "") or "",
+                            # PVE returns application as null when unset; the
+                            # name also lives under application_metadata.
+                            application=(pool.get("application")
+                                         or next(iter(pool.get("application_metadata") or {}), "")),
+                            crush_rule=pool.get("crush_rule_name", "") or "",
                         )
                         for pool in pools
                     ]
@@ -1273,6 +1281,7 @@ class Cluster:
             id=self.id,
             name=self.name,
             status="connected",
+            pve_user=getattr(getattr(self.client, "auth", None), "user", "") or "",
             node_count=len(self.cache.nodes),
             nodes_online=nodes_online,
             vm_count=sum(1 for v in self.cache.vms.values() if v.type == "qemu" and not v.template),

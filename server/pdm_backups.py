@@ -30,7 +30,10 @@ def _audit_actor(request: web.Request) -> tuple[str, str, str]:
 
 # ---------------------------------------------------------------- scheduled jobs
 
-@role_required("operator")
+# Reading the backup SCHEDULE is not a mutation. This was "operator", which
+# shadowed backup_jobs.py's viewer-level handler (same route, registered
+# later) and left viewers with a 403 on the whole Backups page.
+@role_required("viewer")
 async def list_jobs_handler(request: web.Request) -> web.Response:
     cluster_id = request.match_info["cluster_id"]
     cluster = cluster_manager.get_cluster(cluster_id)

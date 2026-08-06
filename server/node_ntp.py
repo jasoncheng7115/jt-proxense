@@ -113,7 +113,12 @@ async def ntp_put_handler(request: web.Request) -> web.Response:
     ip = request.get("client_ip", "unknown")
     rid = request.get("request_id", "")
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        # A malformed body used to escape as a 500 with a traceback page --
+        # the shape scripts/security-full.sh flags. Answer it as data.
+        return web.json_response({"error": "bad_json"}, status=400)
     raw = body.get("servers")
     if not isinstance(raw, list) or len(raw) > MAX_SERVERS:
         return web.json_response(

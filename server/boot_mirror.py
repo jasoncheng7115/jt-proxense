@@ -51,6 +51,7 @@ from . import audit, db
 from .cluster_manager import cluster_manager
 from .middleware import role_required
 from .zfs_admin import (_BYID_DIR, _ESP_GUID, _ZFS_GUIDS, ZfsError, _actor,
+                        parse_boot_layout,
                         _body, _norm_device, _norm_pool, _require_cluster,
                         _run, _status_pools, pool_serialized, zfs_errors)
 
@@ -163,25 +164,9 @@ async def _boot_layout(cluster, node: str, disk: str) -> dict | None:
     # formatting the wrong partition as vfat.
     _, out, _ = await _run(
         cluster, node,
-        f"lsblk -Pno NAME,PARTTYPE,FSTYPE {shlex.quote(_BYID_DIR + disk)} 2>/dev/null")
-    esp = zfs = bios = None
-    for ln in (out or "").splitlines():
-        kv = dict(re.findall(r'(\w+)="([^"]*)"', ln))
-        name = kv.get("NAME", "")
-        if not name:
-            continue
-        m = re.search(r"(\d+)$", name)
-        if not m:
-            continue                      # the whole-disk row, e.g. "sdb"
-        num, ptype = m.group(1), kv.get("PARTTYPE", "").lower()
-        fstype = kv.get("FSTYPE", "").lower()
-        if ptype == _ESP_GUID:
-            esp = num
-        elif ptype == "21686148-6449-6e6f-744e-656564454649":   # BIOS boot
-            bios = num
-        elif ptype in _ZFS_GUIDS or fstype == "zfs_member":
-            zfs = num
-    return {"esp": esp, "zfs": zfs, "bios": bios} if zfs else None
+        f"lsblk -Pno NAME,PARTTYPE,FSTYPE,TYPE {shlex.quote(_BYID_DIR + disk)} 2>/dev/null")
+    roles = parse_boot_layout(out)
+    return roles if roles["zfs"] else None
 
 
 async def _disk_bytes(cluster, node: str, dev: str) -> int:

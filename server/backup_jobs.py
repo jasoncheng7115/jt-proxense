@@ -76,6 +76,8 @@ async def list_backup_jobs_handler(request: web.Request) -> web.Response:
     return web.json_response({"jobs": out, "count": len(out)})
 
 
-ROUTES = [
-    ("GET", r"/api/clusters/{cluster_id}/backup-jobs", list_backup_jobs_handler),
-]
+# Not routed: pdm_backups.py registers the same path first and wins. Keeping a
+# second registration here made this module's handler dead code, which is how a
+# fix to the "next run" column landed somewhere that never executed. The module
+# stays for normalise_jobs(), which pdm_backups imports.
+ROUTES = []

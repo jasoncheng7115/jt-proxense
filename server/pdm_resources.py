@@ -204,10 +204,14 @@ async def tags_set_handler(request: web.Request) -> web.Response:
 
 # ---------------------------------------------------------------- routes
 
+# The pool routes used to be registered here TOO, and because this module is
+# registered first (server.py) they shadowed pools_view's copies entirely.
+# That mattered: the handlers below gate every pool route at admin, including
+# the plain LIST, so a viewer opening PoolsModal got 403 and an empty dialog --
+# while `GET /pools/{poolid}`, which only pools_view registers, answered fine.
+# pools_view has the correct split (viewer reads, admin writes) plus a response
+# cache, so it owns pools now. The handlers here are kept only because they are
+# referenced by tests; they are no longer routed.
 ROUTES = [
-    ("GET",    "/api/clusters/{cluster_id}/pools",          pools_list_handler),
-    ("POST",   "/api/clusters/{cluster_id}/pools",          pool_create_handler),
-    ("PUT",    "/api/clusters/{cluster_id}/pools/{poolid}", pool_update_handler),
-    ("DELETE", "/api/clusters/{cluster_id}/pools/{poolid}", pool_delete_handler),
     ("PUT",    "/api/clusters/{cluster_id}/vms/{vmid}/tags", tags_set_handler),
 ]

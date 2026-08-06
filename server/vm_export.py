@@ -215,7 +215,12 @@ async def tools_install_handler(request: web.Request) -> web.Response:
     cluster = _require_cluster(cid)
     user, ip, rid = _actor(request)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        # A malformed body used to escape as a 500 with a traceback page --
+        # the shape scripts/security-full.sh flags. Answer it as data.
+        return web.json_response({"error": "bad_json"}, status=400)
     tool = str(body.get("tool", ""))
     if tool not in TOOLS:
         return web.json_response({"error": "unknown_tool"}, status=400)
@@ -425,7 +430,12 @@ async def _run_export_job(job_id: int) -> None:
 @role_required("operator")
 async def job_create_handler(request: web.Request) -> web.Response:
     user, ip, rid = _actor(request)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        # A malformed body used to escape as a 500 with a traceback page --
+        # the shape scripts/security-full.sh flags. Answer it as data.
+        return web.json_response({"error": "bad_json"}, status=400)
 
     cid = str(body.get("cluster_id", ""))
     node = str(body.get("node", ""))

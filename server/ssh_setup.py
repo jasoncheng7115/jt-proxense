@@ -93,7 +93,12 @@ async def propagate_handler(request: web.Request) -> web.Response:
     ip = request.get("client_ip", "unknown")
     rid = request.get("request_id", "")
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        # A malformed body used to escape as a 500 with a traceback page --
+        # the shape scripts/security-full.sh flags. Answer it as data.
+        return web.json_response({"error": "bad_json"}, status=400)
     cid = str(body.get("cluster_id", ""))
     seed = str(body.get("seed_node", ""))
 

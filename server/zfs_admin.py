@@ -1415,11 +1415,47 @@ async def _find_vdev(cluster, node: str, pool: str, want: str) -> dict | None:
 
 
 # GPT partition type GUIDs (stable across systems).
+_BIOS_BOOT_GUID = "21686148-6449-6e6f-744e-656564454649"
 _ESP_GUID = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"      # EFI System Partition
 _ZFS_GUIDS = {
     "6a898cc3-1dd2-11b2-99a6-080020736631",             # Solaris /usr & Apple ZFS
     "516e7cba-6ecf-11d6-8ff8-00022d09712b",             # FreeBSD ZFS
 }
+
+
+def parse_boot_layout(lsblk_pairs: str) -> dict:
+    """Parse `lsblk -Pno NAME,PARTTYPE,FSTYPE,TYPE` into partition roles.
+
+    Pure, so it can be tested against captured output instead of a live node.
+    It lives here and boot_mirror imports it because this logic existed in BOTH
+    modules and they diverged: boot_mirror was moved off `lsblk -r` after raw
+    mode's column collapsing was found to misread partition roles, and this
+    copy was left behind still parsing positionally. Choosing the wrong
+    partition here means formatting one that holds data.
+
+    Returns {"esp": N|None, "zfs": N|None, "bios": N|None} as strings.
+    """
+    esp = zfs = bios = None
+    for ln in (lsblk_pairs or "").splitlines():
+        kv = dict(re.findall(r'(\w+)="([^"]*)"', ln))
+        # Ask lsblk what the row is rather than inferring from the name:
+        # `nvme0n1` is a DISK whose name ends in a digit, so a trailing-digit
+        # test would call it partition 1.
+        if kv.get("TYPE") != "part":
+            continue
+        m = re.search(r"(\d+)$", kv.get("NAME", ""))
+        if not m:
+            continue
+        num = m.group(1)
+        ptype = kv.get("PARTTYPE", "").lower()
+        fstype = kv.get("FSTYPE", "").lower()
+        if ptype == _ESP_GUID:
+            esp = num
+        elif ptype == _BIOS_BOOT_GUID:
+            bios = num
+        elif ptype in _ZFS_GUIDS or fstype == "zfs_member":
+            zfs = num
+    return {"esp": esp, "zfs": zfs, "bios": bios}
 
 
 async def _boot_layout(cluster, node: str, disk_byid: str) -> dict | None:
@@ -1431,23 +1467,20 @@ async def _boot_layout(cluster, node: str, disk_byid: str) -> dict | None:
     wreck it). Returns {"esp": N, "zfs": M} or None.
     """
     dev = _BYID_DIR + disk_byid
+    # -P, not -r. Raw mode COLLAPSES empty fields, so a partition with no
+    # PARTTYPE but an FSTYPE emits `sdb2 vfat` and the FSTYPE lands in the
+    # PARTTYPE slot -- and this function chooses which partition gets
+    # formatted as vfat. boot_mirror.py was fixed for exactly this
+    # (CLAUDE.md #17); this copy was not.
+    #
+    # TYPE is requested so the whole-disk row can be excluded by what lsblk
+    # says it is. Deriving "is this a partition?" from trailing digits reads
+    # `nvme0n1` -- the DISK -- as partition 1.
     _, out, _ = await _run(
-        cluster, node, f"lsblk -rno NAME,PARTTYPE,FSTYPE {shlex.quote(dev)} 2>/dev/null")
-    esp = zfs = None
-    for ln in (out or "").splitlines():
-        cols = ln.split()
-        if len(cols) < 2:
-            continue
-        name, ptype = cols[0], cols[1].lower()
-        fstype = cols[2].lower() if len(cols) > 2 else ""
-        m = re.search(r"(\d+)$", name)
-        if not m:
-            continue
-        num = m.group(1)
-        if ptype == _ESP_GUID:
-            esp = num
-        elif ptype in _ZFS_GUIDS or fstype == "zfs_member":
-            zfs = num
+        cluster, node,
+        f"lsblk -Pno NAME,PARTTYPE,FSTYPE,TYPE {shlex.quote(dev)} 2>/dev/null")
+    roles = parse_boot_layout(out)
+    esp, zfs = roles["esp"], roles["zfs"]
     if esp and zfs:
         return {"esp": esp, "zfs": zfs}
     return None

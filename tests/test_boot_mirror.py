@@ -80,11 +80,11 @@ BASE_RESPONSES = {
     # Verbatim shape of `lsblk -Pno NAME,PARTTYPE,FSTYPE` on a real PVE 8 node:
     # kernel names (not by-id), and a whole-disk row with empty columns.
     "lsblk -Pno NAME,PARTTYPE,FSTYPE": (
-        0, 'NAME="sdb" PARTTYPE="" FSTYPE=""\n'
-           'NAME="sdb1" PARTTYPE="21686148-6449-6e6f-744e-656564454649" FSTYPE=""\n'
-           'NAME="sdb2" PARTTYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" FSTYPE="vfat"\n'
+        0, 'NAME="sdb" PARTTYPE="" TYPE="disk" FSTYPE=""\n'
+           'NAME="sdb1" PARTTYPE="21686148-6449-6e6f-744e-656564454649" TYPE="part" FSTYPE=""\n'
+           'NAME="sdb2" PARTTYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" TYPE="part" FSTYPE="vfat"\n'
            'NAME="sdb3" PARTTYPE="6a898cc3-1dd2-11b2-99a6-080020736631" '
-           'FSTYPE="zfs_member"\n', ""),
+           'TYPE="part" FSTYPE="zfs_member"\n', ""),
     "lsblk -dno PHY-SEC": (0, "512 512\n---\n512 512\n", ""),
     "firmware/efi": (0, "uefi\n", ""),
     "proxmox-boot-tool status": (0, "System currently booted with uefi\n", ""),
@@ -303,11 +303,11 @@ async def test_esp_located_by_gpt_type_not_by_index(monkeypatch, patch_run):
     r, _ = await _pre(
         monkeypatch, patch_run, pools=[_pool([_member(GOOD)])],
         responses={"lsblk -Pno NAME,PARTTYPE,FSTYPE": (
-            0, 'NAME="nvme0n1" PARTTYPE="" FSTYPE=""\n'
+            0, 'NAME="nvme0n1" PARTTYPE="" TYPE="disk" FSTYPE=""\n'
                'NAME="nvme0n1p3" PARTTYPE="6a898cc3-1dd2-11b2-99a6-080020736631" '
-               'FSTYPE="zfs_member"\n'
+               'TYPE="part" FSTYPE="zfs_member"\n'
                'NAME="nvme0n1p4" PARTTYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" '
-               'FSTYPE="vfat"\n', "")})
+               'TYPE="part" FSTYPE="vfat"\n', "")})
     assert r["layout"]["esp"] == "4"
     assert any("-part4" in c and "proxmox-boot-tool format" in c for c in r["plan"])
 
@@ -416,12 +416,12 @@ async def test_empty_parttype_does_not_shift_columns(monkeypatch, patch_run):
     r, _ = await _pre(
         monkeypatch, patch_run, pools=[_pool([_member(GOOD)])],
         responses={"lsblk -Pno NAME,PARTTYPE,FSTYPE": (
-            0, 'NAME="sdb" PARTTYPE="" FSTYPE=""\n'
-               'NAME="sdb1" PARTTYPE="" FSTYPE="ext4"\n'
+            0, 'NAME="sdb" PARTTYPE="" TYPE="disk" FSTYPE=""\n'
+               'NAME="sdb1" PARTTYPE="" TYPE="part" FSTYPE="ext4"\n'
                'NAME="sdb2" PARTTYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" '
-               'FSTYPE="vfat"\n'
+               'TYPE="part" FSTYPE="vfat"\n'
                'NAME="sdb3" PARTTYPE="6a898cc3-1dd2-11b2-99a6-080020736631" '
-               'FSTYPE="zfs_member"\n', "")})
+               'TYPE="part" FSTYPE="zfs_member"\n', "")})
     assert r["layout"]["esp"] == "2", "the ext4 partition must not be taken for the ESP"
     assert r["layout"]["zfs"] == "3"
 
@@ -432,11 +432,11 @@ async def test_whole_disk_row_is_not_read_as_a_partition(monkeypatch, patch_run)
     r, _ = await _pre(
         monkeypatch, patch_run, pools=[_pool([_member(GOOD)])],
         responses={"lsblk -Pno NAME,PARTTYPE,FSTYPE": (
-            0, 'NAME="nvme0n1" PARTTYPE="" FSTYPE=""\n'
+            0, 'NAME="nvme0n1" PARTTYPE="" TYPE="disk" FSTYPE=""\n'
                'NAME="nvme0n1p2" PARTTYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" '
-               'FSTYPE="vfat"\n'
+               'TYPE="part" FSTYPE="vfat"\n'
                'NAME="nvme0n1p3" PARTTYPE="6a898cc3-1dd2-11b2-99a6-080020736631" '
-               'FSTYPE="zfs_member"\n', "")})
+               'TYPE="part" FSTYPE="zfs_member"\n', "")})
     assert r["layout"]["esp"] == "2" and r["layout"]["zfs"] == "3"
     assert r["layout"]["bios"] is None
 
