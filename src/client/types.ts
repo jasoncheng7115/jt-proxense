@@ -64,7 +64,7 @@ export interface VMMetrics {
   template: boolean;
   tags: string[];
   timestamp: number;
-  health?: HealthLevel;
+  health?: HealthLevel;  // NB: computed @property on the dataclass; asdict() drops it, so this is undefined over the wire. Use the health page / getNodeHealth, not this.
 }
 
 export interface NodeMetrics {
@@ -81,7 +81,7 @@ export interface NodeMetrics {
   vm_count: number;
   ct_count: number;
   timestamp: number;
-  health?: HealthLevel;
+  health?: HealthLevel;  // NB: computed @property on the dataclass; asdict() drops it, so this is undefined over the wire. Use the health page / getNodeHealth, not this.
 }
 
 export interface StorageMetrics {

@@ -8,6 +8,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.9] — 2026-08-09
+
+### Fixed
+- **The frontend source published in 0.9.8 could not be built.** The sync list
+  carried `tsconfig.json` but not the `tsconfig.node.json` it references, nor
+  the `public/` directory (favicon, logo, fonts) that vite serves as its
+  `publicDir`. A fresh clone failed `tsc` with TS6053 and, even past that,
+  produced an SPA missing its static assets. Verified now by a clean
+  `npm install && npm run build` on the mirror. `tests/test_publish_completeness.py`
+  fails the build if any input `tsconfig.json`/`vite.config.ts` reference is
+  not in the publish list.
+- **`package-lock.json` still declared version 0.1.0.** Harmless to `npm ci`
+  but inconsistent; now 0.9.9 with the rest.
+
+### Docs
+- CLAUDE.md module list corrected: `backup_jobs.py` is NOT routed (helper-only;
+  `pdm_backups.py` owns `/cluster/backup-jobs`), `pdm_resources.py` is
+  tags-only after its pool routes were removed in 0.9.7, and the previously
+  undocumented `node_config_backup.py` is now described.
+- Marked `VMMetrics.health` / `NodeMetrics.health` in the frontend types as
+  wire-absent: they are computed `@property`s on the dataclasses and `asdict()`
+  drops them, so the field is always undefined over the WebSocket. No code read
+  it; the annotation was a standing invitation to a #6-class bug.
+
 ## [0.9.8] — 2026-08-07
 
 ### Changed

@@ -8,6 +8,26 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [0.9.9] — 2026-08-09
+
+### 修正
+- **0.9.8 發佈的前端原始碼無法建置。** 同步清單帶了 `tsconfig.json`，卻沒帶它所
+  references 的 `tsconfig.node.json`，也沒帶 vite 作為 `publicDir` 的 `public/`
+  目錄 (favicon 、 logo 、字型)。全新 clone 會在 `tsc` 以 TS6053 失敗，即使跳過該
+  錯誤，產出的 SPA 也缺少靜態資源。現已透過在 mirror 上完整執行
+  `npm install && npm run build` 驗證。`tests/test_publish_completeness.py` 會在任何
+  `tsconfig.json`/`vite.config.ts` 所引用的建置輸入不在發佈清單時，讓建置失敗。
+- **`package-lock.json` 仍宣告版本 0.1.0 。** 對 `npm ci` 無害但不一致；現已與其餘
+  一併校正為 0.9.9 。
+
+### 文件
+- 修正 CLAUDE.md 模組列表：`backup_jobs.py` 未被註冊路由 (僅為輔助函式；
+  `/cluster/backup-jobs` 由 `pdm_backups.py` 負責) ,`pdm_resources.py` 在 0.9.7 移除
+  集區路由後只剩標籤功能，先前未記載的 `node_config_backup.py` 現已補上說明。
+- 將前端型別中的 `VMMetrics.health` / `NodeMetrics.health` 標註為傳輸時不存在：它們
+  是 dataclass 上計算得出的 `@property`,`asdict()` 不會序列化，因此該欄位在 WebSocket
+  上永遠是 undefined 。並無程式碼讀取它；該宣告等於是對 #6 類錯誤的長期邀請。
+
 ## [0.9.8] — 2026-08-07
 
 ### 變更

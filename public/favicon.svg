@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-label="JT-PROXENSE">
+  <defs>
+    <linearGradient id="jtp-core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5cf6ff"/>
+      <stop offset="100%" stop-color="#00aacc"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#050810"/>
+  <path d="M32 9 L52 20.5 L52 43.5 L32 55 L12 43.5 L12 20.5 Z"
+        stroke="#00f0ff" stroke-width="2.6" stroke-linejoin="round"
+        fill="#00f0ff" fill-opacity="0.06"/>
+  <path d="M20 42 L32 27 L44 42" stroke="url(#jtp-core)" stroke-width="4.4"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="32" cy="46" r="2.8" fill="#eafdff"/>
+</svg>
