@@ -1,6 +1,6 @@
 {
   "name": "jt-proxense",
-  "version": "0.9.9",
+  "version": "1.0.0",
   "description": "Proxmox VE Monitoring System with Sci-Fi UI",
   "type": "module",
   "scripts": {
@@ -29,5 +29,6 @@
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.12"
-  }
+  },
+  "license": "AGPL-3.0-or-later"
 }

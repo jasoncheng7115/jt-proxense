@@ -358,6 +358,59 @@ async def test_bulk_dispatches_per_vm(fake_cluster, aiohttp_client):
 
 
 @pytest.mark.asyncio
+async def test_bulk_ok_reflects_what_actually_happened(fake_cluster, aiohttp_client):
+    """`ok` used to be a hardcoded True.
+
+    A viewer whose every item was refused still received HTTP 200 with
+    {"ok": true} and a batch_id — the response announced a successful batch
+    while not one guest had been touched, because the refusals live per-item
+    where a caller can miss them. Same class as the identical-ternary and
+    isinstance-against-a-dataclass bugs: it answers wrongly instead of failing.
+    """
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post(
+        "/api/clusters/cluster1/vms/bulk",
+        json={"action": "start", "vmids": [100, 101]},
+    )
+    body = await r.json()
+    assert body["ok"] is True
+    assert body["succeeded"] == 2 and body["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_with_an_unknown_guest_is_not_ok(fake_cluster, aiohttp_client):
+    app = _make_app(auth_enabled=False, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    r = await client.post(
+        "/api/clusters/cluster1/vms/bulk",
+        json={"action": "start", "vmids": [100, 999999]},
+    )
+    assert r.status == 200          # partial success is still a 200
+    body = await r.json()
+    assert body["ok"] is False, "one item failed; the batch is not ok"
+    assert body["succeeded"] == 1 and body["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_refused_for_every_item_is_a_403(fake_cluster, aiohttp_client):
+    """Nothing attempted, every refusal an authorisation one -> 403, not a
+    successful batch of zero."""
+    app = _make_app(auth_enabled=True, vm_control_enabled=True)
+    client = await aiohttp_client(app)
+    await _login_session_cookie(client, "viewer")
+    r = await client.post(
+        "/api/clusters/cluster1/vms/bulk",
+        json={"action": "start", "vmids": [100, 101]},
+    )
+    assert r.status == 403
+    body = await r.json()
+    assert body["ok"] is False
+    assert body["succeeded"] == 0
+    assert all(i["error"] == "forbidden" for i in body["results"])
+
+
+@pytest.mark.asyncio
 async def test_bulk_rejects_bad_action(fake_cluster, aiohttp_client):
     app = _make_app(auth_enabled=False, vm_control_enabled=True)
     client = await aiohttp_client(app)

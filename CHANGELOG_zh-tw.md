@@ -8,6 +8,32 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [1.0.0] — 2026-08-15
+
+### 變更
+- **授權變更為 GNU Affero General Public License v3.0 或更新版本。**
+  將修改後的版本部署為網路服務時，現在有義務向其使用者提供該原始碼 (AGPL 第 13 條) ——
+  這是 AGPL 與 GPL 的根本差異，也是本次變更的目的。
+
+  **v0.9.9 及更早的版本仍為 Apache 2.0 。** 該授權不可撤回：已取得那些版本的人永久
+  保有 Apache-2.0 的權利，包含據以分支的權利。新條款自 v1.0.0 起適用。著作權單獨
+  歸屬 Jason Cheng，因此無需徵得其他貢獻者同意。
+
+  相依授權的相容性是實際查證而非推定。**asyncssh** 為雙授權
+  `EPL-2.0 OR GPL-2.0-or-later`;EPL-2.0 單獨與 (A) GPL 不相容，因此採用其
+  **GPL 分支**，並已載明於授權聲明中。**pyte** 與 **ldap3** 為 LGPL-3.0,
+  **certifi** 與 **noVNC** 為 MPL-2.0，其餘為 MIT / BSD / ISC / Apache-2.0 / PSF ——
+  全部可與 AGPL-3.0 結合。
+
+### 修正
+- **THIRD-PARTY-NOTICES.md 漏列了八項執行期相依**，其中包含唯二會限制授權選擇的兩項 (asyncssh 、 pyte)，以及隨附發佈的 noVNC 與 xterm.js 。`tests/test_licensing.py`
+  現在會在相依未列出、asyncssh 分支未載明，或任何文件仍宣稱 Apache 2.0 時讓建置失敗。
+- `package.json` **原本完全沒有 `license` 欄位**;現已宣告 `AGPL-3.0-or-later` 。
+- **批次電源操作無論結果都回報 `{"ok": true}` 。** 每個項目都被拒絕的 viewer 仍會收到
+  HTTP 200 與一個 batch_id，而實際上沒有任何客體被動到 —— 拒絕訊息藏在各項目中，呼叫端
+  很容易忽略。`ok` 現在代表「所有項目皆成功」，回應帶有 `succeeded`/`failed` 計數，
+  而全數被拒的批次會回應 403 。
+
 ## [0.9.9] — 2026-08-09
 
 ### 修正

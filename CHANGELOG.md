@@ -8,6 +8,40 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.0.0] — 2026-08-15
+
+### Changed
+- **Licence changed to GNU Affero General Public License v3.0 or later.**
+  Deploying a modified copy as a network service now obliges you to offer that
+  source to its users (AGPL §13) — the clause that distinguishes the AGPL from
+  the GPL, and the reason for the change.
+
+  **Releases up to and including v0.9.9 remain under Apache 2.0.** That grant
+  is irrevocable: anyone who obtained those versions keeps their Apache-2.0
+  rights permanently, including the right to fork from them. The new terms
+  apply from v1.0.0 onward. Copyright is held solely by Jason Cheng, so no
+  contributor consent was required.
+
+  Dependency compatibility was verified rather than assumed. **asyncssh** is
+  dual `EPL-2.0 OR GPL-2.0-or-later`; EPL-2.0 alone is not (A)GPL-compatible,
+  so it is used under the **GPL branch**, which is now recorded in the notices.
+  **pyte** and **ldap3** are LGPL-3.0, **certifi** and **noVNC** MPL-2.0, and
+  the rest MIT / BSD / ISC / Apache-2.0 / PSF — all combine with AGPL-3.0.
+
+### Fixed
+- **THIRD-PARTY-NOTICES.md was missing eight runtime dependencies**, among them
+  the only two that constrain the licence choice at all (asyncssh, pyte), plus
+  the vendored noVNC and xterm.js. `tests/test_licensing.py` now fails the
+  build if a requirement is undeclared, if the asyncssh branch is unrecorded,
+  or if any document still claims Apache 2.0.
+- `package.json` had **no `license` field at all**; it now declares
+  `AGPL-3.0-or-later`.
+- **Bulk power actions reported `{"ok": true}` regardless of outcome.** A
+  viewer whose every item was refused received HTTP 200 with a batch_id while
+  not one guest had been touched — the refusals live per-item, where a caller
+  can miss them. `ok` now means "every item succeeded", the response carries
+  `succeeded`/`failed` counts, and a batch refused in its entirety answers 403.
+
 ## [0.9.9] — 2026-08-09
 
 ### Fixed

@@ -60,4 +60,6 @@ Open <http://127.0.0.1:8098/>.
 - **Cyberpunk look stays.** Every UI surface uses Orbitron / Rajdhani / Share Tech Mono and the existing dark palette. No stock component libraries (MUI / Bootstrap / antd).
 - **Cool AND practical.** Animations on entry / hover are fine; never on Refresh / submit / filter. Tables stay information-dense and copy-paste friendly.
 - **Self-hosted, single machine.** No cloud telemetry, no opt-out analytics, no calls home.
-- **Apache 2.0.** Anything that can't be redistributed under Apache 2.0 doesn't get pulled in.
+- **AGPL-3.0-or-later.** Anything that can't be redistributed under the AGPL
+  doesn't get pulled in. By contributing you agree your work is licensed under
+  AGPL-3.0-or-later.

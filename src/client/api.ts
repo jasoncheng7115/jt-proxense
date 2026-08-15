@@ -178,8 +178,12 @@ export const api = {
     cluster_id: string,
     body: { action: string; vmids: number[] },
   ) =>
+    // `ok` is true only when EVERY item succeeded, and the server answers 403
+    // when every item was refused for authorisation — it used to return
+    // 200 {ok: true} regardless, so a refused batch read as a submitted one.
     fetchJson<{
       ok: boolean; batch_id: string; action: string; count: number;
+      succeeded: number; failed: number;
       results: Array<{ vmid: number; type?: 'vm' | 'ct'; ok: boolean; upid?: string; error?: string }>;
     }>(
       `/clusters/${encodeURIComponent(cluster_id)}/vms/bulk`,

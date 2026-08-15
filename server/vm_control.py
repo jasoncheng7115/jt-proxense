@@ -489,11 +489,26 @@ async def vm_bulk_handler(request: web.Request) -> web.Response:
                 params={"batch_id": batch_id},
             )
 
+    # `ok` must describe what HAPPENED, not that the handler ran. It used to
+    # be a hardcoded True, so a viewer whose every item was refused still got
+    # HTTP 200 {"ok": true} with a batch_id, and the UI reported "batch
+    # submitted" when not one guest had been touched. Refusals live per-item,
+    # which is easy to miss.
+    succeeded = sum(1 for r in results if r.get("ok"))
+    failed = len(results) - succeeded
+    forbidden = sum(1 for r in results if r.get("error") == "forbidden")
+
+    # Nothing attempted and every refusal was an authorisation one: that is a
+    # 403, not a successful batch of zero.
+    status = 403 if (results and forbidden == len(results)) else 200
+
     return web.json_response({
-        "ok": True, "batch_id": batch_id,
+        "ok": failed == 0 and bool(results),
+        "batch_id": batch_id,
         "action": action, "count": len(results),
+        "succeeded": succeeded, "failed": failed,
         "results": results,
-    })
+    }, status=status)
 
 
 # ---------------------------------------------------------------- routes

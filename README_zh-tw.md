@@ -1,12 +1,12 @@
-# JT-PROXENSE v0.9.9
+# JT-PROXENSE v1.0.0
 
 > English version: [README.md](README.md)
 
 **為 Proxmox VE 打造的即時監控 + 認證控制平面，採用科幻 cyberpunk 風格介面。**
 
-> 多叢集 · API 容錯切換 · 單機部署 · Apache 2.0
+> 多叢集 · API 容錯切換 · 單機部署 · AGPL-3.0-or-later
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
+![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![React](https://img.shields.io/badge/react-18-blue.svg)
 
@@ -408,7 +408,7 @@ jt-proxense/
 ├── requirements.txt        Python runtime 依賴
 ├── config.example.yaml     設定範本
 ├── install.sh              一行安裝腳本（Linux）
-├── LICENSE                 Apache 2.0
+├── LICENSE                 AGPL-3.0-or-later
 ├── README.md / README_zh-tw.md
 └── CHANGELOG.md / CHANGELOG_zh-tw.md
 ```
@@ -485,7 +485,10 @@ curl -k -H "Authorization: PVEAPIToken=monitoring@pve!mon=<TOKEN>" \
 
 ## 授權
 
-Apache License 2.0 — 見 [LICENSE](LICENSE)。
+GNU Affero General Public License v3.0 or later — 見 [LICENSE](LICENSE) 。
+
+**v0.9.9 及更早的版本以 Apache 2.0 釋出**,該授權不可撤回:已取得那些版本的人
+永久保有 Apache-2.0 的權利。本次變更自 v1.0.0 起生效。
 第三方依賴授權清單：[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 ## 免責聲明

@@ -1,12 +1,12 @@
-# JT-PROXENSE v0.9.9
+# JT-PROXENSE v1.0.0
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
 **Real-time Proxmox VE monitoring + authenticated control plane, with a sci-fi cyberpunk UI.**
 
-> Multi-cluster · API failover · Single Linux box · Apache 2.0
+> Multi-cluster · API failover · Single Linux box · AGPL-3.0-or-later
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
+![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![React](https://img.shields.io/badge/react-18-blue.svg)
 
@@ -416,7 +416,7 @@ jt-proxense/
 ├── requirements.txt        Python runtime deps
 ├── config.example.yaml     Configuration template
 ├── install.sh              One-liner installer (Linux)
-├── LICENSE                 Apache 2.0
+├── LICENSE                 AGPL-3.0-or-later
 ├── README.md / README_zh-tw.md
 └── CHANGELOG.md / CHANGELOG_zh-tw.md
 ```
@@ -493,7 +493,11 @@ This is a privately maintained project. **Pull requests are not accepted.** Open
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE).
+
+Versions up to and including **v0.9.9 were released under Apache 2.0**, and
+that grant is irrevocable: anyone who obtained those releases keeps their
+Apache-2.0 rights permanently. The change applies from v1.0.0 onward.
 Third-party dependency licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Disclaimer
