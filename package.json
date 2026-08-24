@@ -1,6 +1,6 @@
 {
   "name": "jt-proxense",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Proxmox VE Monitoring System with Sci-Fi UI",
   "type": "module",
   "scripts": {

@@ -91,24 +91,43 @@ export function AptUpdatesModal({ open, onClose, clusterId, node }: Props) {
     }
   };
 
+  /**
+   * PVE has no API that applies pending updates: /nodes/{node}/apt offers only
+   * changelog / repositories / update / versions, so the POST this used to
+   * make returned "501 not implemented" on every PVE version (issue #3).
+   *
+   * PVE's own web UI runs a dist-upgrade by opening a terminal on
+   * `pveupgrade --shell`, and that is what we do -- same termproxy the host
+   * shell already uses, with cmd=upgrade. It needs no SSH key, and apt stays
+   * interactive, so the operator sees the package list and answers any
+   * config-file prompt themselves.
+   *
+   * For unattended, orchestrated upgrades across a whole cluster (evacuate ->
+   * apt -> reboot -> migrate back) the host upgrade tool remains the right
+   * path; it drives apt over SSH with the non-interactive dpkg flags.
+   */
   const doUpgrade = async () => {
     if (!isAdmin) return;
     const ok = await dialog.confirm(
       language === 'zh-TW'
-        ? `確定在 ${node} 上執行 apt dist-upgrade？此操作會將節點上所有可升級套件一次升級，建議先在備援節點測試。`
-        : `Run apt dist-upgrade on ${node}? This upgrades every pending package on the node — test on a spare node first.`,
+        ? `在 ${node} 上開啟升級主控台？將執行 pveupgrade --shell（等同 apt dist-upgrade），升級過程會在新分頁中互動進行，需要您親自確認。建議先在備援節點測試。`
+        : `Open an upgrade console on ${node}? This runs pveupgrade --shell (apt dist-upgrade) interactively in a new tab, so you drive it yourself. Test on a spare node first.`,
       { destructive: true }
     );
     if (!ok) return;
     setBusy('upgrade');
     try {
-      const r = await fetch(
-        `/api/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(node)}/apt/upgrade`,
-        { method: 'POST', credentials: 'same-origin' }
-      );
+      const r = await fetch('/api/console/host/prepare', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cluster_id: clusterId, node, cmd: 'upgrade' }),
+      });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      showToast(language === 'zh-TW' ? `升級作業啟動（${d.upid?.slice(0, 24) || ''}） — 可在 /tasks 追蹤` : `upgrade kicked off (${d.upid?.slice(0, 24) || ''}) — track on /tasks`);
+      if (!r.ok) throw new Error(d.message || d.error || `HTTP ${r.status}`);
+      const url = `/console-host/${encodeURIComponent(clusterId)}/${encodeURIComponent(node)}`
+        + `?ct=${encodeURIComponent(d.console_token)}&cmd=upgrade&lang=${encodeURIComponent(language)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      showToast(language === 'zh-TW' ? '已開啟升級主控台' : 'upgrade console opened');
     } catch (e: any) {
       dialog.alert(e.message || String(e));
     } finally {

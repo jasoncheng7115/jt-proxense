@@ -1059,7 +1059,7 @@ function NodeDetailPanel({
 }
 
 export function ClusterCore({ cluster, clusters, onSelectVM, onNavigateToVMMatrix, isPaused = false }: ClusterCoreProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const auth = useAuth();
   const dialog = useDialogs();
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
@@ -1696,7 +1696,7 @@ export function ClusterCore({ cluster, clusters, onSelectVM, onNavigateToVMMatri
               await dialog.alert(d.message || d.error || ('HTTP ' + r.status));
               return;
             }
-            const url = `/console-host/${encodeURIComponent(cid)}/${encodeURIComponent(node)}?ct=${encodeURIComponent(d.console_token)}&lang=zh-TW`;
+            const url = `/console-host/${encodeURIComponent(cid)}/${encodeURIComponent(node)}?ct=${encodeURIComponent(d.console_token)}&lang=${encodeURIComponent(language)}`;
             window.open(url, '_blank', 'noopener,noreferrer');
           } catch (e: any) {
             await dialog.alert(e?.message || String(e));

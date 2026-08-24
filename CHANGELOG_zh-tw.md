@@ -8,6 +8,43 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [1.0.1] — 2026-08-24
+
+### 修正
+- **APT dist-upgrade 呼叫了 PVE 根本不存在的 API** (issue #3，回報者
+  @heroneoz)。`POST /nodes/{node}/apt/upgrade` 在所有 PVE 版本都回應
+  `501 not implemented`：PVE 的 APT 模組只註冊 `changelog`／`repositories`／
+  `update`／`versions`，從來沒有 `upgrade`。因此這個按鈕對所有人、在所有情況
+  下都是壞的。
+
+  PVE 官方介面本身是以終端機開啟 `pveupgrade --shell` 來套用更新，
+  JT-PROXENSE 現在採同一做法 —— 沿用既有的 termproxy 主機 Shell 通道並帶入
+  `cmd=upgrade`。此路徑不需要 SSH 金鑰，且 apt 維持互動狀態，操作者可以自行
+  檢視套件清單並回答設定檔覆寫提示。已移除失效的 `/apt/upgrade` 路由與對應的
+  client 方法；此動作以 `apt.upgrade_shell` 記入稽核，`cmd` 則採白名單且只允許
+  一個值 (PVE 原生列舉另含 `ceph_install`)。若需全叢集無人值守升級，仍請使用
+  主機升級協調器。
+
+- **節點效能歷史圖表：記憶體與磁碟 I/O 空白** (issue #4，回報者 @heroneoz)。
+  節點與客體的 RRD 是不同結構。客體回傳 `mem`／`maxmem`／`diskread`／
+  `diskwrite`；節點回傳 `memused`／`memtotal`，且**完全沒有磁碟 I/O 計數**。
+  原本兩者都讀客體欄位名稱，因此節點的每一筆記憶體取樣都是 `undefined` ——
+  而整條序列皆為 undefined 時，圖卡只會畫成空白，不會拋出錯誤。
+
+  節點記憶體現以 `memused` 對 `memtotal` 繪製，並一併畫出 ZFS ARC (ARC 計入
+  `memused`，因此 ZFS 節點看起來會接近滿載，必須看得到可回收快取的比例才能
+  正確判讀)。由於節點層級並無磁碟 I/O 可繪，該圖卡在節點模式改為 **IO 延遲**
+  與**根檔案系統** —— 這才是節點 RRD 實際具備、且 PVE 在同一位置顯示的資料。
+  VM 與 CT 的圖表維持不變。
+
+  `tests/test_rrd_field_contract.py` 以實際自 PVE 9.0.10 與 9.2.3 節點擷取的
+  回應內容固定兩種結構，任一方讀取另一方的欄位即會使測試失敗。
+
+- **主機 Shell 一律以中文開啟。**開啟網址寫死 `lang=zh-TW`，因此以英文介面
+  操作的使用者仍會得到中文終端機頁面。現改為沿用當前介面語言。
+
+---
+
 ## [1.0.0] — 2026-08-15
 
 ### 變更

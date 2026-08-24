@@ -27,9 +27,11 @@ class _FakeClient:
         return [{"Package": "openssl", "OldVersion": "1.1.1", "Version": "1.1.2"}]
     async def apt_refresh(self, node):
         self._record("apt_refresh", node); return f"UPID:apt-refresh-{node}"
-    async def apt_upgrade(self, node):
-        if self.fail_next: e=self.fail_next; self.fail_next=None; raise e
-        self._record("apt_upgrade", node); return f"UPID:apt-upgrade-{node}"
+    # No apt_upgrade(): PVE has no /nodes/{node}/apt/upgrade endpoint, and this
+    # fake having one is why the dead handler was fully covered by tests while
+    # returning 501 to every real operator (issue #3). A fake that implements a
+    # method the real service lacks tests nothing. The live path now goes
+    # through termproxy -- see tests/test_apt_upgrade_path.py.
 
     # ACME
     async def list_acme_accounts(self): return [{"name": "default"}]
@@ -130,16 +132,6 @@ async def test_apt_refresh_audited(fake_cluster, aiohttp_client):
     assert r.status == 200
     rows = await audit.query(action="apt.refresh")
     assert any(r["target"] == "cluster1/node1" for r in rows)
-
-
-@pytest.mark.asyncio
-async def test_apt_upgrade_failure_audited(fake_cluster, aiohttp_client):
-    fake_cluster.client.fail_next = RuntimeError("boom")
-    client = await aiohttp_client(_make_app())
-    r = await client.post("/api/clusters/cluster1/nodes/node1/apt/upgrade")
-    assert r.status == 502
-    rows = await audit.query(action="apt.upgrade")
-    assert any(r["result"].startswith("error") for r in rows)
 
 
 # ---------------------------------------------------------------- ACME

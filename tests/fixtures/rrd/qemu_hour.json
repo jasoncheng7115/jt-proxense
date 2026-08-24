@@ -1,0 +1,43 @@
+{
+ "_source": "PVE 9.2.3 (pve-manager 9.2.3), captured from a live cluster; one representative sample. The KEY SET is the contract.",
+ "keys": [
+  "cpu",
+  "disk",
+  "diskread",
+  "diskwrite",
+  "maxcpu",
+  "maxdisk",
+  "maxmem",
+  "mem",
+  "memhost",
+  "netin",
+  "netout",
+  "pressurecpufull",
+  "pressurecpusome",
+  "pressureiofull",
+  "pressureiosome",
+  "pressurememoryfull",
+  "pressurememorysome",
+  "time"
+ ],
+ "sample": {
+  "cpu": 0.20031974337012,
+  "disk": 0,
+  "diskread": 225.28,
+  "diskwrite": 431281.493333333,
+  "maxcpu": 6,
+  "maxdisk": 204010946560,
+  "maxmem": 10737418240,
+  "mem": 9776925969.06667,
+  "memhost": 10838961834.6667,
+  "netin": 148987.838333333,
+  "netout": 156995.908333333,
+  "pressurecpufull": 0.256166666666667,
+  "pressurecpusome": 0.5485,
+  "pressureiofull": 0,
+  "pressureiosome": 0,
+  "pressurememoryfull": 0,
+  "pressurememorysome": 0,
+  "time": 1787563380
+ }
+}

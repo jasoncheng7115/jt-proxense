@@ -1260,9 +1260,13 @@ class PVEClient:
         """Trigger apt-get update. Returns task UPID."""
         return await self._request("POST", f"/nodes/{node}/apt/update")
 
-    async def apt_upgrade(self, node: str) -> str:
-        """Apply pending updates. Returns task UPID."""
-        return await self._request("POST", f"/nodes/{node}/apt/upgrade")
+    # There is deliberately NO apt_upgrade() here. PVE has no such endpoint:
+    # /nodes/{node}/apt exposes only changelog / repositories / update /
+    # versions, so `POST /nodes/{node}/apt/upgrade` answered
+    # "501 not implemented" on every PVE version -- issue #3. PVE's own web UI
+    # runs a dist-upgrade by opening termproxy with cmd=upgrade, which spawns
+    # `pveupgrade --shell`; host_shell.py does the same. For unattended,
+    # orchestrated upgrades use host_upgrade.py, which drives apt over SSH.
 
     # ----- ACME certificate management -----
 

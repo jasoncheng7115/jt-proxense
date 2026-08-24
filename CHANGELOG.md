@@ -8,6 +8,50 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.0.1] — 2026-08-24
+
+### Fixed
+- **APT dist-upgrade called a PVE endpoint that does not exist** (issue #3,
+  reported by @heroneoz). `POST /nodes/{node}/apt/upgrade` answered
+  `501 not implemented` on every PVE version: PVE's APT module registers only
+  `changelog` / `repositories` / `update` / `versions`, and never had an
+  `upgrade`. The button therefore failed for everyone, always.
+
+  PVE's own web UI applies updates by opening a terminal on
+  `pveupgrade --shell`, and JT-PROXENSE now does the same — the existing
+  termproxy host-shell path with `cmd=upgrade`. It needs no SSH key, and apt
+  stays interactive, so the operator reads the package list and answers any
+  config-file prompt themselves. The dead `/apt/upgrade` route and its client
+  method are gone; the action is audited as `apt.upgrade_shell`, and `cmd` is
+  an allow-list of exactly one value (PVE's own enum also accepts
+  `ceph_install`). For unattended cluster-wide upgrades, the host upgrade
+  orchestrator remains the right tool.
+
+- **Node performance charts: Memory and Disk I/O were empty** (issue #4,
+  reported by @heroneoz). Node and guest RRDs are different schemas. Guests
+  report `mem` / `maxmem` / `diskread` / `diskwrite`; nodes report
+  `memused` / `memtotal` and carry **no disk-IO counters at all**. The modal
+  read the guest field names for both, so every node memory sample was
+  `undefined` — and an all-undefined series draws a blank card rather than
+  raising.
+
+  Node memory now reads `memused` scaled against `memtotal`, with ZFS ARC
+  drawn alongside it (ARC counts inside `memused`, so a ZFS node looks nearly
+  full until you can see how much is reclaimable cache). Since there is no
+  per-node disk IO to plot, that card is replaced for nodes by **IO delay**
+  and **root filesystem** — what the node RRD actually carries, and what PVE
+  shows in the same slot. VM and CT charts are unchanged.
+
+  `tests/test_rrd_field_contract.py` pins both schemas against real payloads
+  captured from PVE 9.0.10 and 9.2.3 nodes, and fails if either kind's charts
+  read the other kind's fields.
+
+- **Host shell always opened in Chinese.** The launch URL hardcoded
+  `lang=zh-TW`, so an operator running the UI in English got a Chinese
+  terminal page. It now passes the session's own language.
+
+---
+
 ## [1.0.0] — 2026-08-15
 
 ### Changed

@@ -29,16 +29,46 @@ interface Props {
   title?: string;
 }
 
+/**
+ * PVE keeps node and guest RRDs in DIFFERENT schemas, and the difference is
+ * not cosmetic -- it is why issue #4 was filed.
+ *
+ * Guests (pve2-vm):  mem, maxmem, diskread, diskwrite
+ * Nodes  (pve2-node): memused, memtotal, memavailable, rootused, roottotal,
+ *                     swapused, swaptotal, iowait, loadavg, arcsize
+ *
+ * So a node carries NO `mem` and NO disk-IO counters at all. Reading `s.mem`
+ * and `s.diskread` for both kinds gave undefined for every node sample, and an
+ * all-undefined series draws a blank card rather than raising -- the project's
+ * recurring "answers wrongly instead of failing" shape (CLAUDE.md #9).
+ *
+ * Verified against the operator's own clusters on PVE 9.0.10 and 9.2.3, and
+ * against Proxmox's API source; the key sets are pinned in
+ * tests/fixtures/rrd/ so a future edit that reintroduces a guest-only field on
+ * a node chart fails the suite.
+ */
 interface Sample {
   time: number;
   cpu?: number;
   maxcpu?: number;
+  // Guest-only.
   mem?: number;
   maxmem?: number;
-  netin?: number;
-  netout?: number;
   diskread?: number;
   diskwrite?: number;
+  // Node-only.
+  memused?: number;
+  memtotal?: number;
+  memavailable?: number;
+  rootused?: number;
+  roottotal?: number;
+  swapused?: number;
+  swaptotal?: number;
+  iowait?: number;
+  arcsize?: number;
+  // Shared.
+  netin?: number;
+  netout?: number;
   // Storage-only fields.
   used?: number;
   total?: number;
@@ -176,20 +206,41 @@ export function RRDChartModal({ open, onClose, clusterId, node, vmid, storage, k
                 yMax={1.0}
                 yFmt={fmtPct}
               />
-              <ChartCard
-                title={t('rrd.chart.mem')}
-                samples={samples}
-                color="#00ff88"
-                series={[
-                  {
-                    key: 'mem', label: 'Mem',
-                    fmt: (b: number) => fmtBytes(b),
-                    scale: (s: Sample) => s.mem ?? null,
-                  },
-                ]}
-                yFmt={fmtBytes}
-                fillTop={(s) => s.maxmem}
-              />
+              {/* Memory: nodes report used/total, guests report mem/maxmem. */}
+              {kind === 'node' ? (
+                <ChartCard
+                  title={t('rrd.chart.mem')}
+                  samples={samples}
+                  color="#00ff88"
+                  series={[
+                    { key: 'memused', label: t('rrd.s.used'), fmt: fmtBytes,
+                      scale: (s: Sample) => s.memused ?? null, color: '#00ff88' },
+                    // ZFS ARC is counted INSIDE memused, so a node can look
+                    // alarmingly full while most of it is reclaimable cache.
+                    // Drawing it makes the used line readable. Absent on
+                    // non-ZFS nodes, where the series simply does not draw.
+                    { key: 'arcsize', label: t('rrd.s.arc'), fmt: fmtBytes,
+                      scale: (s: Sample) => s.arcsize ?? null, color: '#00f0ff' },
+                  ]}
+                  yFmt={fmtBytes}
+                  fillTop={(s) => s.memtotal}
+                />
+              ) : (
+                <ChartCard
+                  title={t('rrd.chart.mem')}
+                  samples={samples}
+                  color="#00ff88"
+                  series={[
+                    {
+                      key: 'mem', label: 'Mem',
+                      fmt: (b: number) => fmtBytes(b),
+                      scale: (s: Sample) => s.mem ?? null,
+                    },
+                  ]}
+                  yFmt={fmtBytes}
+                  fillTop={(s) => s.maxmem}
+                />
+              )}
               <ChartCard
                 title={t('rrd.chart.net')}
                 samples={samples}
@@ -200,16 +251,50 @@ export function RRDChartModal({ open, onClose, clusterId, node, vmid, storage, k
                 ]}
                 yFmt={fmtBps}
               />
-              <ChartCard
-                title={t('rrd.chart.disk')}
-                samples={samples}
-                color="#bf00ff"
-                series={[
-                  { key: 'diskread',  label: 'Read',  fmt: fmtBps, scale: (s: Sample) => s.diskread ?? null,  color: '#00f0ff' },
-                  { key: 'diskwrite', label: 'Write', fmt: fmtBps, scale: (s: Sample) => s.diskwrite ?? null, color: '#bf00ff' },
-                ]}
-                yFmt={fmtBps}
-              />
+              {/* PVE keeps NO per-node disk-IO counters -- there is nothing to
+                  plot and never was. What the node RRD does carry, and what
+                  PVE's own node summary shows in that slot, is IO delay; the
+                  root filesystem trend is the other thing an operator opens
+                  this modal hoping to see. Showing these beats an empty card
+                  labelled "Disk I/O", which claimed the data existed and was
+                  merely missing. */}
+              {kind === 'node' ? (
+                <>
+                  <ChartCard
+                    title={t('rrd.chart.iowait')}
+                    samples={samples}
+                    color="#ffcc00"
+                    series={[
+                      { key: 'iowait', label: t('rrd.s.iodelay'), fmt: fmtPct,
+                        scale: (s: Sample) => s.iowait ?? null, color: '#ffcc00' },
+                    ]}
+                    yFmt={fmtPct}
+                    yFloor={0.05}
+                  />
+                  <ChartCard
+                    title={t('rrd.chart.rootfs')}
+                    samples={samples}
+                    color="#bf00ff"
+                    series={[
+                      { key: 'rootused', label: t('rrd.s.used'), fmt: fmtBytes,
+                        scale: (s: Sample) => s.rootused ?? null, color: '#bf00ff' },
+                    ]}
+                    yFmt={fmtBytes}
+                    fillTop={(s) => s.roottotal}
+                  />
+                </>
+              ) : (
+                <ChartCard
+                  title={t('rrd.chart.disk')}
+                  samples={samples}
+                  color="#bf00ff"
+                  series={[
+                    { key: 'diskread',  label: 'Read',  fmt: fmtBps, scale: (s: Sample) => s.diskread ?? null,  color: '#00f0ff' },
+                    { key: 'diskwrite', label: 'Write', fmt: fmtBps, scale: (s: Sample) => s.diskwrite ?? null, color: '#bf00ff' },
+                  ]}
+                  yFmt={fmtBps}
+                />
+              )}
             </div>
           )}
         </div>
@@ -254,15 +339,20 @@ interface ChartProps {
   yMax?: number;
   yFmt: (n: number) => string;
   fillTop?: (s: Sample) => number | undefined;
+  /** Floor for the auto-scaled y-axis. The default of 1 keeps a byte chart
+   *  from collapsing to zero height, but on a FRACTION chart it means 1 =
+   *  100%, so IO delay -- which lives around 1% -- drew a flat line under an
+   *  axis labelled 110%. Correct values, unreadable chart. */
+  yFloor?: number;
 }
 
-function ChartCard({ title, samples, series, yMax, yFmt, fillTop }: ChartProps) {
+function ChartCard({ title, samples, series, yMax, yFmt, fillTop, yFloor }: ChartProps) {
   const { width, height } = { width: 460, height: 160 };
   const padL = 48, padR = 8, padT = 10, padB = 22;
 
   const yTop = useMemo(() => {
     if (typeof yMax === 'number') return yMax;
-    let max = 1;
+    let max = yFloor ?? 1;
     for (const s of samples) {
       const ft = fillTop?.(s);
       if (ft && ft > max) max = ft;
@@ -272,7 +362,7 @@ function ChartCard({ title, samples, series, yMax, yFmt, fillTop }: ChartProps) 
       }
     }
     return max * 1.1;
-  }, [samples, series, fillTop, yMax]);
+  }, [samples, series, fillTop, yMax, yFloor]);
 
   const t0 = samples[0]?.time || 0;
   const t1 = samples[samples.length - 1]?.time || t0 + 1;

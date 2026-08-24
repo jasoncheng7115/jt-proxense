@@ -84,27 +84,6 @@ async def apt_refresh_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "upid": upid})
 
 
-@role_required("admin")
-async def apt_upgrade_handler(request: web.Request) -> web.Response:
-    cluster, err = _get_cluster_or_404(request)
-    if err: return err
-    node = request.match_info["node"]
-    user, ip, rid = _audit_actor(request)
-    try:
-        upid = await cluster.client.apt_upgrade(node)
-    except Exception as e:
-        await audit.write(user=user, source_ip=ip, action="apt.upgrade",
-                          target=f"{request.match_info['cluster_id']}/{node}",
-                          cluster_id=request.match_info["cluster_id"],
-                          result=audit.result_error(e), request_id=rid)
-        return web.json_response({"error": "pve_request_failed", "detail": str(e)}, status=502)
-    await audit.write(user=user, source_ip=ip, action="apt.upgrade",
-                      target=f"{request.match_info['cluster_id']}/{node}",
-                      cluster_id=request.match_info["cluster_id"],
-                      result="ok", request_id=rid)
-    return web.json_response({"ok": True, "upid": upid})
-
-
 # ============================================================ ACME
 
 @role_required("admin")
@@ -975,7 +954,6 @@ ROUTES = [
     # apt updates
     ("GET",    "/api/clusters/{cluster_id}/nodes/{node}/apt",          apt_list_handler),
     ("POST",   "/api/clusters/{cluster_id}/nodes/{node}/apt/refresh",  apt_refresh_handler),
-    ("POST",   "/api/clusters/{cluster_id}/nodes/{node}/apt/upgrade",  apt_upgrade_handler),
     # ACME
     ("GET",    "/api/clusters/{cluster_id}/acme/accounts",             acme_accounts_list_handler),
     ("POST",   "/api/clusters/{cluster_id}/acme/accounts",             acme_account_create_handler),

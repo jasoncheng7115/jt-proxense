@@ -4,7 +4,7 @@ PVE's host-level termproxy: same auth dance as the LXC console_proxy
 but the URL has no qemu/lxc/{vmid} segment.
 
 Routes:
-  POST /api/console/host/prepare                 body: {cluster_id, node, password?}
+  POST /api/console/host/prepare                 body: {cluster_id, node, password?, cmd?}
   GET  /api/console/host/{cid}/{node}/term/ws?ct=<token>     WS bridge
   GET  /console-host/{cid}/{node}?ct=<token>&lang=zh-TW      xterm.js HTML page
 
@@ -37,10 +37,20 @@ from .pve_throttle import throttle
 logger = logging.getLogger(__name__)
 
 
+# PVE's termproxy takes an optional `cmd` that selects what the shell runs
+# instead of a login shell. Upstream's enum is {login, upgrade, ceph_install};
+# we surface only `upgrade` (-> /usr/bin/pveupgrade --shell), so the set is
+# reject-by-default rather than a pass-through of operator input.
+_TERMPROXY_CMDS = {"upgrade"}
+
+
 @role_required("admin")
 async def host_shell_prepare_handler(request: web.Request) -> web.Response:
     """POST /api/console/host/prepare — mint a one-shot console_token for
-    a PVE host shell. Same modes as the VM console (`stored` / `prompt`)."""
+    a PVE host shell. Same modes as the VM console (`stored` / `prompt`).
+
+    Optional `cmd`: `upgrade` opens the shell on `pveupgrade --shell`, which
+    is how PVE's own web UI runs a dist-upgrade. See issue #3."""
     cfg = get_config()
     mode = (cfg.console.mode or "disabled").lower()
     if mode == "disabled":
@@ -58,8 +68,15 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
     cluster_id = body.get("cluster_id")
     node       = body.get("node")
     pw         = body.get("password") or ""
+    cmd        = (body.get("cmd") or "").strip()
     if not cluster_id or not node:
         return web.json_response({"error": "missing_fields"}, status=400)
+    if cmd and cmd not in _TERMPROXY_CMDS:
+        return web.json_response(
+            {"error": "bad_cmd",
+             "message": f"cmd must be one of {sorted(_TERMPROXY_CMDS)}"},
+            status=400,
+        )
 
     cluster = cluster_manager.get_cluster(cluster_id)
     if cluster is None:
@@ -75,6 +92,10 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
     ip   = request.get("client_ip", "unknown")
     rid  = request.get("request_id", "")
     audit_target = f"{cluster_id}/{node}/host"
+    # Opening a login shell and starting a dist-upgrade are different acts;
+    # give the second its own action so "who upgraded this node" stays greppable
+    # now that the (never-working) apt.upgrade endpoint is gone.
+    audit_action = "apt.upgrade_shell" if cmd == "upgrade" else "console.host.prepare"
 
     # Decide which password to use (mirrors console_proxy._prepare).
     if mode == "stored":
@@ -138,7 +159,8 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
             connector=aiohttp.TCPConnector(ssl=pve_ssl),
         ) as cs:
             async with throttle.acquire(pve_node_cfg.host), cs.post(
-                proxy_url, headers=headers, data={},
+                proxy_url, headers=headers,
+                data=({"cmd": cmd} if cmd else {}),
             ) as r:
                 if r.status != 200:
                     body_t = await r.text()
@@ -152,10 +174,10 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
         logger.warning("host_termproxy failed cluster=%s node=%s: %s",
                        cluster_id, node, e)
         await audit.write(
-            user=user, source_ip=ip, action="console.host.prepare",
+            user=user, source_ip=ip, action=audit_action,
             target=audit_target, cluster_id=cluster_id,
             result=audit.result_error(e), request_id=rid,
-            params={"mode": mode},
+            params={"mode": mode, "cmd": cmd or "login"},
         )
         return web.json_response(
             {"error": "termproxy_failed", "detail": str(e)},
@@ -170,9 +192,9 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
         pve_user=user_for_pve,
     )
     await audit.write(
-        user=user, source_ip=ip, action="console.host.prepare",
+        user=user, source_ip=ip, action=audit_action,
         target=audit_target, cluster_id=cluster_id,
-        result="ok", request_id=rid, params={"mode": mode},
+        result="ok", request_id=rid, params={"mode": mode, "cmd": cmd or "login"},
     )
     return web.json_response({
         "ok": True,
@@ -532,7 +554,11 @@ async def host_shell_page_handler(request: web.Request) -> web.Response:
     node       = request.match_info["node"]
     lang = _pick_lang(request)
     s = _I18N[lang]
-    heading = f"shell · {node}"
+    # Cosmetic only -- the actual command was fixed when the termproxy session
+    # was minted, so this cannot change what runs. Label it anyway: an operator
+    # who ends up with two shell tabs open needs to know which one is mid
+    # dist-upgrade before typing into either.
+    heading = ("upgrade · " if request.query.get("cmd") == "upgrade" else "shell · ") + node
     page_title = f"JT-PROXENSE — {heading}"
     out = (_HTML
             .replace("{{HTML_LANG}}", lang)
