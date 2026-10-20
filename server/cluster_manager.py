@@ -5,6 +5,7 @@ Manages multiple PVE clusters with independent polling
 
 import asyncio
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass, field, asdict
@@ -37,6 +38,10 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Poll cadences for data that changes far slower than live status.
+NODE_RRD_REFRESH_S = 30.0        # node network rate from the "hour" RRD (1 pt/min)
+DISK_CONFIG_MAX_AGE_S = 600.0    # guest disk layouts; see _fetch_vm_disk_configs
 
 # After a poll finds no Ceph on a cluster, skip this many subsequent polls
 # before re-probing (so non-Ceph clusters don't 500-probe every cycle, while
@@ -84,6 +89,8 @@ class Cluster:
         self._running = False
         self._callbacks: list[Callable[[str, ClusterCache], Awaitable[None]]] = []
         self._pve_cluster_name: str = ""  # Actual PVE cluster name
+        self._disk_due: dict[str, float] = {}   # "node/vmid" -> monotonic due
+        self._rrd_due: dict[str, float] = {}    # node -> monotonic due
         self._is_standalone: bool = False  # True if single node, no PVE cluster
 
     @property
@@ -237,8 +244,25 @@ class Cluster:
         return storage_configs
 
     async def _fetch_vm_disk_configs(self):
-        """Fetch disk configurations for all VMs/CTs"""
-        for key, vm in self.cache.vms.items():
+        """Fetch disk configurations for VMs/CTs that are due.
+
+        This used to read EVERY guest's config on every static refresh (60 s):
+        ~140 guests is a constant 2+ requests/s on a single-process pveproxy
+        for data that changes a few times a week. Now a guest is read when it
+        first appears (a migration also re-keys it as "node/vmid", so it is
+        re-read on arrival) and otherwise every DISK_CONFIG_MAX_AGE_S with
+        jitter so the reads spread out rather than landing together.
+        migrate_guard reads the LIVE config itself before judging a migration,
+        so nothing safety-relevant depends on this cache being fresh.
+        """
+        now = time.monotonic()
+        live = set(self.cache.vms)
+        for gone in set(self._disk_due) - live:
+            del self._disk_due[gone]
+        for key, vm in list(self.cache.vms.items()):
+            if self._disk_due.get(key, 0.0) > now:
+                continue
+            self._disk_due[key] = now + DISK_CONFIG_MAX_AGE_S * random.uniform(0.75, 1.25)
             try:
                 node = vm.node
                 vmid = vm.vmid
@@ -810,8 +834,14 @@ class Cluster:
             except Exception as e:
                 logger.debug(f"Failed to get node status for {node_name}: {e}")
 
-            # Get network data from rrddata endpoint
-            # RRD data updates approximately every 60 seconds
+            # Network rate from the node RRD. PVE's "hour" RRD holds one point
+            # per MINUTE, so reading it every poll (2 s by default) returned the
+            # same point ~30 times over — one heavy request per node per poll.
+            # Read it on its own cadence; the last value stays on the node.
+            now_m = time.monotonic()
+            if self._rrd_due.get(node_name, 0.0) > now_m:
+                return
+            self._rrd_due[node_name] = now_m + NODE_RRD_REFRESH_S
             try:
                 rrd_data = await self.client.get_node_rrddata(node_name, "hour", "AVERAGE")
                 if rrd_data and len(rrd_data) > 0:
@@ -868,7 +898,15 @@ class Cluster:
         vm = self.cache.vms[key]
         vm.name = resource.get("name", vm.name)
         vm.template = resource.get("template", 0) == 1
-        vm.tags = resource.get("tags", "").split(";") if resource.get("tags") else []
+        # PVE hands tags back as a ';' string, but a list must not take the
+        # whole poll down with it (recurring mistake #6).
+        raw_tags = resource.get("tags")
+        if isinstance(raw_tags, (list, tuple)):
+            vm.tags = [str(t) for t in raw_tags if str(t)]
+        elif raw_tags:
+            vm.tags = [t for t in str(raw_tags).split(";") if t]
+        else:
+            vm.tags = []
 
         # Status
         status_str = resource.get("status", "unknown")
@@ -1142,12 +1180,25 @@ class Cluster:
                     mons = await self.client.get_ceph_mon(node_name)
                     if mons:
                         self.cache.ceph.mon_count = len(mons)
+                        # /nodes/{n}/ceph/mon marks EVERY mon in quorum with
+                        # quorum=1 (seen on a real 4-mon cluster), so "in
+                        # quorum" is not "leader": that labelled all four as
+                        # leader. The leader is the lowest-ranked mon in quorum
+                        # — the same one the status path finds as
+                        # quorum_names[0].
+                        in_q = [m for m in mons if m.get("quorum")]
+                        ranks = [m.get("rank") for m in in_q
+                                 if isinstance(m.get("rank"), int)]
+                        leader_rank = min(ranks) if ranks else None
                         self.cache.ceph.mons = [
                             CephMon(
                                 name=mon.get("name", ""),
                                 host=mon.get("host", mon.get("name", "")),
                                 addr=mon.get("addr", ""),
-                                state="leader" if mon.get("quorum", False) else "peon",
+                                state=("out" if not mon.get("quorum")
+                                       else "leader" if (leader_rank is not None
+                                                         and mon.get("rank") == leader_rank)
+                                       else "peon"),
                             )
                             for mon in mons
                         ]
@@ -1286,7 +1337,7 @@ class Cluster:
             nodes_online=nodes_online,
             vm_count=sum(1 for v in self.cache.vms.values() if v.type == "qemu" and not v.template),
             vms_running=vms_running,
-            ct_count=sum(1 for v in self.cache.vms.values() if v.type == "lxc"),
+            ct_count=sum(1 for v in self.cache.vms.values() if v.type == "lxc" and not v.template),
             cts_running=cts_running,
             total_cpu_usage=total_cpu / count if count > 0 else 0,
             total_memory_usage=total_mem / count if count > 0 else 0,
@@ -1505,8 +1556,10 @@ class ClusterManager:
 
         logger.info("All clusters reloaded")
 
-    def get_global_summary(self) -> dict:
-        """Get global summary across all clusters"""
+    def get_global_summary(self, scope=None) -> dict:
+        """Summary across all clusters, or only those in `scope` (a set of
+        cluster ids; None = all) — totals must not count clusters the caller
+        may not see."""
         total_nodes = 0
         total_nodes_online = 0
         total_vms = 0
@@ -1516,7 +1569,9 @@ class ClusterManager:
 
         cluster_summaries = []
 
-        for cluster in self.clusters.values():
+        visible = [c for cid, c in self.clusters.items()
+                   if scope is None or cid in scope]
+        for cluster in visible:
             if cluster.cache.summary:
                 s = cluster.cache.summary
                 total_nodes += s.node_count
@@ -1528,7 +1583,7 @@ class ClusterManager:
                 cluster_summaries.append(asdict(s))
 
         return {
-            "total_clusters": len(self.clusters),
+            "total_clusters": len(visible),
             "total_nodes": total_nodes,
             "total_nodes_online": total_nodes_online,
             "total_vms": total_vms,

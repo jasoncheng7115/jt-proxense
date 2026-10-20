@@ -81,12 +81,12 @@ class PVEClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
         if self._session is None or self._session.closed:
-            # Create SSL context that doesn't verify certificates
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
-            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            # Every request passes its own `ssl=` (the pinned fingerprint from
+            # trust_store, or None for CA validation — see _request). The
+            # session default is therefore a VERIFYING context: a request that
+            # ever skipped _request would fail loudly instead of silently
+            # talking to an unpinned peer, which is what CERT_NONE here did.
+            connector = aiohttp.TCPConnector(ssl=ssl.create_default_context())
             timeout = aiohttp.ClientTimeout(total=self.timeout)
             self._session = aiohttp.ClientSession(
                 connector=connector,
@@ -129,7 +129,11 @@ class PVEClient:
         node_key = f"{node.host}:{node.port}"
 
         from .pve_throttle import throttle
+        from . import trust_store
         try:
+            # Pinned certificate (trust on first use) unless verify_ssl.
+            kwargs.setdefault("ssl", await trust_store.tls_ssl(
+                node.host, node.port, node.verify_ssl))
             async with throttle.acquire(node.host):
                 async with session.request(method, url, **kwargs) as response:
                     response_time = (time.time() - start_time) * 1000
@@ -152,6 +156,7 @@ class PVEClient:
                         )
 
         except Exception as e:
+            await trust_store.tls_failure(e, node.host, node.port)
             # Update health on failure
             health = self.node_health[node_key]
             health.healthy = False
@@ -613,12 +618,6 @@ class PVEClient:
         )
 
     # ----- SDN zones / vnets / subnets (cluster level) -----
-
-    async def list_sdn_zones(self) -> list:
-        try:
-            return await self._request("GET", "/cluster/sdn/zones")
-        except Exception:
-            return []
 
     async def create_sdn_zone(self, zone: str, ztype: str, **fields) -> None:
         """Create a SDN zone. `ztype` ∈ {simple, vlan, qinq, vxlan, evpn}.
@@ -1312,13 +1311,6 @@ class PVEClient:
         stopped / error), node, max_relocate, last reboot, request_state, etc."""
         return await self._request("GET", "/cluster/ha/status/current")
 
-    async def list_replication_jobs(self) -> list:
-        """List storage replication jobs (`/cluster/replication`)."""
-        try:
-            return await self._request("GET", "/cluster/replication")
-        except Exception:
-            return []
-
     async def add_ha_resource(self, sid: str, *, group: str | None = None,
                               state: str = "started", comment: str = "") -> None:
         """sid is e.g. 'vm:100' or 'ct:101'."""
@@ -1445,7 +1437,8 @@ class PVEClient:
             raise RuntimeError("no PVE nodes configured")
         node = self.current_node or self.nodes[0]
         url = f"https://{node.host}:{node.port}/api2/json/access/ticket"
-        ssl_ctx = None if node.verify_ssl else ssl._create_unverified_context()
+        from . import trust_store
+        ssl_ctx = await trust_store.tls_ssl(node.host, node.port, node.verify_ssl)
         connector = aiohttp.TCPConnector(ssl=ssl_ctx)
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         import time as _time

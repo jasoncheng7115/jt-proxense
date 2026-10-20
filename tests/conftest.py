@@ -47,3 +47,14 @@ def reset_global_config():
     yield
     from server import config as cfg_mod
     cfg_mod._current_config = None
+
+
+@pytest.fixture(autouse=True)
+def reset_trust_store():
+    """Pinned fingerprints live in a process-wide map (server/trust_store.py).
+    Fake TLS servers reuse ports across tests, so a pin left by one test would
+    refuse the next one's certificate."""
+    from server import trust_store
+    trust_store.reset()
+    yield
+    trust_store.reset()

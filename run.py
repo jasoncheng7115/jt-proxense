@@ -55,6 +55,10 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Before any third-party import: after an OS upgrade swapped the system
+    # Python, say so and stop, instead of a ModuleNotFoundError restart loop.
+    from server import runtime_guard
+    runtime_guard.ensure_dependencies()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

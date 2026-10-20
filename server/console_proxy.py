@@ -32,6 +32,7 @@ import aiohttp
 from aiohttp import web
 
 from . import audit
+from . import trust_store
 from . import console_sessions
 from . import secret_store
 from .cluster_manager import cluster_manager
@@ -185,7 +186,8 @@ async def console_prepare_handler(request: web.Request) -> web.Response:
     )
     if pve_node_cfg is None:
         return web.json_response({"error": "no_pve_node"}, status=502)
-    pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+    pve_ssl = await trust_store.tls_ssl(
+        pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
     api_path = "lxc" if vm_type == "lxc" else "qemu"
     # Decide endpoint:
     #   - LXC always termproxy
@@ -325,7 +327,8 @@ async def console_ws_handler(request: web.Request) -> web.WebSocketResponse:
     )
     if pve_node_cfg is None:
         return web.json_response({"error": "no_pve_node"}, status=502)
-    pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+    pve_ssl = await trust_store.tls_ssl(
+        pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
     api_path = "lxc" if vm_type == "lxc" else "qemu"
 
     vnc_ticket = entry.vnc_ticket
@@ -345,11 +348,16 @@ async def console_ws_handler(request: web.Request) -> web.WebSocketResponse:
         return web.json_response({"error": "expected_ws_upgrade"}, status=400)
     await ws_browser.prepare(request)
 
-    await audit.write(
-        user=user, source_ip=ip, action="console.open",
-        target=audit_target, cluster_id=cluster_id,
-        result="ok", request_id=rid,
-    )
+    # console.open is written once PVE has ACCEPTED the upstream socket, not
+    # when the browser's is prepared: logging "ok" first meant a console PVE
+    # refused still read as a successful open, with no error row (the
+    # "submitted reported as succeeded" shape, recurring mistake #22).
+    async def _audit_open(result):
+        await audit.write(
+            user=user, source_ip=ip, action="console.open",
+            target=audit_target, cluster_id=cluster_id,
+            result=result, request_id=rid,
+        )
 
     # vnc tickets contain ':', '+', '/', '=' — URL-encode so the WS upgrade
     # request line is well-formed. PVE returns the ticket already trimmed.
@@ -382,6 +390,7 @@ async def console_ws_handler(request: web.Request) -> web.WebSocketResponse:
                 pve_url, protocols=("binary",), max_msg_size=0,
                 headers=ws_headers,
             )
+        await _audit_open("ok")
 
         async def browser_to_pve():
             async for msg in ws_browser:
@@ -411,6 +420,8 @@ async def console_ws_handler(request: web.Request) -> web.WebSocketResponse:
                               return_exceptions=True)
     except Exception as e:
         logger.warning("console proxy error vmid=%d: %s", vmid, e)
+        if ws_pve is None:
+            await _audit_open(audit.result_error(e))
         if not ws_browser.closed:
             await ws_browser.close()
     finally:
@@ -483,7 +494,8 @@ async def console_term_ws_handler(request: web.Request) -> web.WebSocketResponse
     )
     if pve_node_cfg is None:
         return web.json_response({"error": "no_pve_node"}, status=502)
-    pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+    pve_ssl = await trust_store.tls_ssl(
+        pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
     api_path = "lxc" if vm_type == "lxc" else "qemu"
     if not entry.vnc_ticket or not entry.pve_port:
         return web.json_response({"error": "stale_token"}, status=409)
@@ -501,11 +513,13 @@ async def console_term_ws_handler(request: web.Request) -> web.WebSocketResponse
         return web.json_response({"error": "expected_ws_upgrade"}, status=400)
     await ws_browser.prepare(request)
 
-    await audit.write(
-        user=user, source_ip=ip, action="console.open",
-        target=audit_target, cluster_id=cluster_id,
-        result="ok", request_id=rid, params={"kind": "term"},
-    )
+    # Audited after PVE accepts the upstream socket — see the VNC bridge.
+    async def _audit_open(result):
+        await audit.write(
+            user=user, source_ip=ip, action="console.open",
+            target=audit_target, cluster_id=cluster_id,
+            result=result, request_id=rid, params={"kind": "term"},
+        )
 
     logger.info("termproxy connecting cluster=%s node=%s vmid=%d port=%s",
                 cluster_id, node, vmid, entry.pve_port)
@@ -519,6 +533,7 @@ async def console_term_ws_handler(request: web.Request) -> web.WebSocketResponse
             ws_pve = await session.ws_connect(
                 pve_url, max_msg_size=0, headers=ws_headers,
             )
+        await _audit_open("ok")
         # Auth: send `<user>:<ticket>\n` to PVE; never to the browser.
         await ws_pve.send_str(f"{entry.pve_user}:{entry.vnc_ticket}\n")
 
@@ -550,6 +565,8 @@ async def console_term_ws_handler(request: web.Request) -> web.WebSocketResponse
                               return_exceptions=True)
     except Exception as e:
         logger.warning("term proxy error vmid=%d: %s", vmid, e)
+        if ws_pve is None:
+            await _audit_open(audit.result_error(e))
         if not ws_browser.closed:
             await ws_browser.close()
     finally:

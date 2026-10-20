@@ -18,6 +18,7 @@ import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from '../i18n';
 import { HAStatusModal } from '../components/HAStatusModal';
 import { ReplicationModal } from '../components/ReplicationModal';
+import { CapacityModal, type CapacityResp } from '../components/CapacityModal';
 import type { ClusterData } from '../types';
 
 interface Props {
@@ -124,6 +125,9 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
   const [corosync, setCorosync] = useState<Record<string, any>>({});
   const [haDrillCluster, setHaDrillCluster] = useState<string | null>(null);
   const [replDrillCluster, setReplDrillCluster] = useState<string | null>(null);
+  // v1.2.0 capacity forecast (server/capacity.py), per cluster.
+  const [capacity, setCapacity] = useState<Record<string, CapacityResp>>({});
+  const [capCluster, setCapCluster] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState(0);
 
   const fetchOnDemand = useCallback(async () => {
@@ -134,6 +138,7 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
     const replAll: typeof replIssues = [];
     const logAll: typeof logFindings = [];
     const coro: Record<string, any> = {};
+    const cap: Record<string, CapacityResp> = {};
 
     // Build the (cluster, node) work list. Capping each cluster at one
     // node would miss host-specific cert / update issues; just iterate
@@ -180,6 +185,18 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
               });
             }
           }
+        } catch {/* ignore */}
+      })());
+
+      // Storage growth forecast + idle guests (RRD-based, cached 30 min on
+      // the server, so a revisit is cheap).
+      work.push((async () => {
+        try {
+          const r = await fetch(
+            `/api/clusters/${encodeURIComponent(cid)}/capacity`,
+            { credentials: 'same-origin' }
+          );
+          if (r.ok) cap[cid] = await r.json();
         } catch {/* ignore */}
       })());
 
@@ -297,6 +314,7 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
     setHaIssues(haAll);
     setReplIssues(replAll);
     setLogFindings(logAll);
+    setCapacity(cap);
     setCorosync(coro);
     setLastFetch(Date.now());
   }, [clusters]);
@@ -399,7 +417,7 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
         const isZh = language === 'zh-TW';
         let category = 'Corosync';   // a proper noun; identical in both languages
         let msg = cf.code;
-        let sev: Sev = cf.severity === 'critical' ? 'critical' : 'warning';
+        const sev: Sev = cf.severity === 'critical' ? 'critical' : 'warning';
         if (cf.code === 'no_quorum') {
           category = isZh ? 'Corosync 仲裁' : 'Corosync quorum';
           msg = isZh ? '叢集失去仲裁（NO QUORUM）' : 'Cluster has lost quorum';
@@ -431,6 +449,38 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
         });
       }
     }
+    // Storage projected to reach 80 % soon — only for a steady growth trend
+    // (the server gives no date otherwise). Idle guests: one info line per
+    // cluster, not one per guest.
+    for (const [cid, cp] of Object.entries(capacity)) {
+      const cname = clusters[cid]?.name || cid;
+      for (const st of cp.storages || []) {
+        if (st.trend !== 'growing' || st.days_to_80 == null) continue;
+        const sev: Sev = st.days_to_80 <= 7 ? 'critical' : st.days_to_80 <= 30 ? 'warning' : 'info';
+        if (st.days_to_80 > 90) continue;
+        const where = st.shared ? st.storage : `${st.storage}@${st.node}`;
+        out.push({
+          sev, cluster: cname, target: `capacity:${cid}:${where}`,
+          category: t('health.cat.capacity'),
+          msg: language === 'zh-TW'
+            ? `${where}：已用 ${st.used_pct}%，依目前趨勢約 ${Math.round(st.days_to_80)} 天後到 80%、${Math.round(st.days_to_full || 0)} 天後滿`
+            : `${where}: ${st.used_pct}% used; at the current trend 80 % in ~${Math.round(st.days_to_80)} d, full in ~${Math.round(st.days_to_full || 0)} d`,
+          navView: 'storage', navParams: { cluster: cid },
+        });
+      }
+      if ((cp.idle || []).length > 0) {
+        const ids = cp.idle.slice(0, 6).map((g) => `${g.vmid}${g.name ? ` ${g.name}` : ''}`).join(', ');
+        out.push({
+          sev: 'info', cluster: cname, target: `idle:${cid}`,
+          category: t('health.cat.idle'),
+          msg: language === 'zh-TW'
+            ? `${cp.idle.length} 台運作中的虛擬機一週內幾乎沒有負載：${ids}${cp.idle.length > 6 ? ' …' : ''}`
+            : `${cp.idle.length} running guest(s) nearly idle for a week: ${ids}${cp.idle.length > 6 ? ' …' : ''}`,
+          navView: 'holo-matrix', navParams: { cluster: cid },
+        });
+      }
+    }
+
     // Certificates expiring soon — fetched on-demand.
     for (const c of certIssues) {
       let sev: Sev = 'info';
@@ -469,7 +519,7 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
         sev, cluster: h.cluster, target: `ha:${h.sid}`,
         category: t('health.cat.ha'),
         msg: language === 'zh-TW'
-          ? `${h.sid}: ${h.state}（節點 ${h.node || '?'}）`
+          ? `${h.sid}: ${h.state} (節點 ${h.node || '?'})`
           : `${h.sid}: ${h.state} (node ${h.node || '?'})`,
         // Open the HA drilldown for this cluster instead of bouncing
         // to cluster-core (which doesn't show HA detail).
@@ -514,7 +564,7 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
       return ka.localeCompare(kb);
     });
     return out;
-  }, [clusters, taskFailures, certIssues, pendingUpdates, haIssues, replIssues, logFindings, corosync, language, t]);
+  }, [clusters, taskFailures, certIssues, pendingUpdates, haIssues, replIssues, logFindings, corosync, capacity, language, t]);
 
   // ── Differential card updates ────────────────────────────────────
   // Findings re-poll every 60 s; only the DELTA animates. Each card has
@@ -608,6 +658,15 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
           </div>
         </div>
         <div className="hm-tally">
+          {Object.keys(clusters).map((cid) => (
+            <button key={cid} className="hm-cap-btn" onClick={() => setCapCluster(cid)}
+                    title={language === 'zh-TW' ? '儲存成長預測與閒置的虛擬機' : 'Storage growth forecast and idle guests'}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /><path d="M16 8h4v4" />
+              </svg>
+              <span>{language === 'zh-TW' ? '容量預測' : 'Capacity'}{Object.keys(clusters).length > 1 ? ` · ${clusters[cid]?.name || cid}` : ''}</span>
+            </button>
+          ))}
           <span className="hm-pill hm-pill-critical">{counts.critical} {t('health.sev.critical')}</span>
           <span className="hm-pill hm-pill-warning">{counts.warning} {t('health.sev.warning')}</span>
           <span className="hm-pill hm-pill-info">{counts.info} {t('health.sev.info')}</span>
@@ -696,6 +755,10 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
         clusterId={replDrillCluster || ''}
         onClose={() => setReplDrillCluster(null)}
       />
+      {capCluster && (
+        <CapacityModal clusterId={capCluster} clusterName={clusters[capCluster]?.name || capCluster}
+                       onClose={() => setCapCluster(null)} />
+      )}
       <style>{`
         .hm-page {
           padding: 24px 32px; height: 100%;
@@ -728,7 +791,9 @@ export function HealthMonitor({ clusters, onNavigate }: Props) {
           font-size: 12px; color: var(--text-secondary);
           font-family: var(--font-mono); margin-top: 4px;
         }
-        .hm-tally { display: flex; gap: 8px; flex-wrap: wrap; }
+        .hm-tally { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .hm-cap-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 4px; background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.4); color: var(--primary); font-family: var(--font-display); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: background .15s ease, transform .15s ease, box-shadow .15s ease; }
+        .hm-cap-btn:hover { background: rgba(0, 240, 255, 0.16); transform: translateY(-1px); box-shadow: 0 4px 14px -6px rgba(0, 240, 255, .6); }
         /* Severity pill — tinted bg + bright readable text + saturated
            border. Earlier version used the raw severity color as both
            text and border on a transparent bg, which made the red/orange

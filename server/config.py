@@ -126,6 +126,10 @@ class ServerConfig:
     # Empty = no auth (LAN-trust mode); the receiver should be bound to a
     # private interface in that case.
     influx_token: str = ""
+    # Pin each PVE node's TLS certificate and SSH host key on first contact and
+    # refuse a different one until an admin accepts it (server/trust_store.py).
+    # Off = the pre-v1.2.0 behaviour of accepting whatever answers.
+    tls_pinning: bool = True
 
 
 @dataclass

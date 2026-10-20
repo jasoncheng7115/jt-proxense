@@ -55,7 +55,7 @@ What we do NOT defend against:
 - A compromised reverse proxy.
 - Resource exhaustion / DoS (out of scope; deploy behind a rate-limiting ingress).
 - Side channels through PVE itself.
-- **A hostile PVE endpoint.** `verify_ssl` defaults to `false` (PVE ships a self-signed certificate) and SSH connections to nodes use `known_hosts=None`, so neither the API nor the SSH path detects an interposed peer. This is a deliberate trade-off for a tool that lives on the same trusted segment as the nodes it manages — but it *is* a gap, and certificate/host-key pinning is the planned fix. Set `verify_ssl: true` per node if your cluster has a real certificate.
+- **A hostile PVE endpoint at FIRST contact.** `verify_ssl` defaults to `false` (PVE ships a self-signed certificate), so since v1.2.0 each node's TLS certificate and SSH host key are pinned on first contact (trust on first use) and a changed one is refused until an admin accepts it — Settings → Server → Trusted node fingerprints, or `jt-proxense trust`. What this does NOT cover is an attacker already in the path the very first time a node is contacted; compare the recorded fingerprint with the one PVE shows under Node → System → Certificates if that matters, or set `verify_ssl: true` per node if your cluster has a CA-signed certificate. `server.tls_pinning: false` turns pinning off.
 
 ## Public security advisories
 

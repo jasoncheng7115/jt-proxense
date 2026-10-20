@@ -65,6 +65,10 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      # Errors fail the job (rules-of-hooks, correctness); warnings do not.
+      - name: Lint
+        run: npm run lint
+
       - name: Production build
         run: npm run build
 

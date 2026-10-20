@@ -380,7 +380,7 @@ async def test_preflight_fails_when_repos_are_unreachable(monkeypatch):
         async def run(self, cmd, check=False):
             if cmd.startswith("df"):
                 return _Res(str(50 * GIB))
-            if cmd.startswith("apt-get update"):
+            if cmd.startswith("apt-get") and " update" in cmd:
                 return _Res("", "Could not resolve 'deb.debian.org'", 100)
             return _Res("0")
 

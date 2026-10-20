@@ -2,6 +2,11 @@
 
 Concise REST + WebSocket reference. All paths are relative to the service base URL (default `http://127.0.0.1:8098`).
 
+**Complete route list:** this page explains request and response shapes for the commonly used
+endpoints. Every registered route, with the role it requires and whether it is audited, is in
+[API-ROUTES.md](API-ROUTES.md) — generated from the live router and checked by the test suite, so
+it cannot fall behind the code the way a hand-kept list does.
+
 When `auth.enabled: true` (v0.2+), every request that isn't in the public list below requires a valid `jtps` session cookie. Anonymous requests get **`401 auth_required`** for `/api/*` and **`302 → /login`** for HTML routes.
 
 ## Public paths (no session required)

@@ -1,0 +1,13 @@
+{
+  "flags": "sortbitwise,recovery_deletes,purged_snapdirs,pglog_hardlimit",
+  "root": {"leaf": 0, "name": "", "type": "", "children": [
+    {"id": -1, "name": "default", "type": "root", "leaf": 0, "children": [
+      {"id": -3, "name": "pve1", "type": "host", "leaf": 0, "children": [
+        {"id": 0, "name": "osd.0", "type": "osd", "leaf": 1, "status": "up", "in": 1, "host": "pve1", "device_class": "ssd", "total_space": 1000, "bytes_used": 100, "apply_latency_ms": 2, "commit_latency_ms": 3}
+      ]},
+      {"id": -5, "name": "pve2", "type": "host", "leaf": 0, "children": [
+        {"id": 1, "name": "osd.1", "type": "osd", "leaf": 1, "status": "down", "in": 0, "host": "pve2", "device_class": "ssd", "total_space": 2000, "bytes_used": 0, "apply_latency_ms": 0, "commit_latency_ms": 0}
+      ]}
+    ]}
+  ]}
+}

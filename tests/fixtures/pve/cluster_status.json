@@ -1,0 +1,5 @@
+[
+  {"id": "cluster", "type": "cluster", "name": "prod", "nodes": 2, "quorate": 1, "version": 4},
+  {"id": "node/pve1", "type": "node", "name": "pve1", "nodeid": 1, "ip": "203.0.113.1", "online": 1, "local": 1, "level": ""},
+  {"id": "node/pve2", "type": "node", "name": "pve2", "nodeid": 2, "ip": "203.0.113.2", "online": 1, "local": 0, "level": ""}
+]

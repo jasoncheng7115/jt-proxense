@@ -1,13 +1,14 @@
 /**
- * BackupJobs — read-only view of cluster-level scheduled vzdump jobs.
- * Read from PVE's /cluster/backup. Lets operators verify backup posture
- * without bouncing to the PVE web UI.
+ * BackupJobs — cluster-level scheduled vzdump jobs (PVE /cluster/backup),
+ * plus two read-only tabs since v1.2.0: per-guest backup recency against an
+ * RPO, and a cluster-wide snapshot list (components/ProtectionPanels.tsx).
  */
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useTranslation } from '../i18n';
 import { useDialogs } from '../composables/useDialogs';
 import { useAuth } from '../composables/useAuth';
 import { CyberSelect } from '../components/CyberSelect';
+import { ProtectionPanel, SnapshotsPanel } from '../components/ProtectionPanels';
 import type { ClusterData } from '../types';
 
 interface Job {
@@ -42,8 +43,22 @@ const fmtNext = (s?: number, enabled?: boolean) => {
     + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
+type BjTab = 'jobs' | 'protection' | 'snapshots';
+const TAB_KEY = 'jtp.backups.tab';
+
 export function BackupJobs({ clusters, selectedCluster }: Props) {
   const { t, language } = useTranslation();
+  const [tab, setTabState] = useState<BjTab>(() => {
+    try {
+      const v = localStorage.getItem(TAB_KEY);
+      if (v === 'protection' || v === 'snapshots') return v;
+    } catch { /* storage unavailable */ }
+    return 'jobs';
+  });
+  const setTab = (v: BjTab) => {
+    setTabState(v);
+    try { localStorage.setItem(TAB_KEY, v); } catch { /* ignore */ }
+  };
   const dialog = useDialogs();
   const auth = useAuth();
   const isAdmin = auth.user?.role_global === 'admin';
@@ -95,7 +110,7 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
     }
   }, [clusterId]);
 
-  useEffect(() => { reload(false); }, [reload]);
+  useEffect(() => { if (tab === 'jobs') reload(false); }, [reload, tab]);
 
   const visibleJobs = useMemo(() => {
     if (filterEnabled === 'all') return jobs;
@@ -118,7 +133,7 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
           </h1>
           <div className="bj-sub">{t('bjobs.subtitle')}</div>
         </div>
-        <div className="bj-actions">
+        <div className="bj-actions" style={tab === 'jobs' ? undefined : { visibility: 'hidden' }}>
           {isAdmin && (
             <button className="bj-btn" onClick={() => { setShowAdd(true); setError(null); }}>+ {t('bjobs.add')}</button>
           )}
@@ -142,7 +157,7 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
             <div className="bj-modal-body">
               {error && <div className="bj-error">{error}</div>}
               <label className="bj-field">
-                <span>{language === 'zh-TW' ? '排程（cron）' : 'Schedule (cron)'}</span>
+                <span>{language === 'zh-TW' ? '排程 (cron)' : 'Schedule (cron)'}</span>
                 <input placeholder="*/30 or daily or 02:00" value={form.schedule}
                        onChange={(e) => setForm({ ...form, schedule: e.target.value })} />
               </label>
@@ -152,7 +167,7 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
                        onChange={(e) => setForm({ ...form, storage: e.target.value })} />
               </label>
               <label className="bj-field">
-                <span>{language === 'zh-TW' ? 'VMID（留空＝全部）' : 'VMID (empty = all)'}</span>
+                <span>{language === 'zh-TW' ? 'VMID (留空＝全部)' : 'VMID (empty = all)'}</span>
                 <input placeholder="116,134,151…" value={form.vmid} disabled={form.all_vms}
                        onChange={(e) => setForm({ ...form, vmid: e.target.value })} />
               </label>
@@ -215,8 +230,22 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
         </div>
       )}
 
-      <div className="bj-filters">
-        <label className="bj-f">
+      <div className="bj-tabbar">
+        {([
+          ['jobs', language === 'zh-TW' ? '排程' : 'Schedules'],
+          ['protection', language === 'zh-TW' ? '保護狀態' : 'Protection'],
+          ['snapshots', language === 'zh-TW' ? '快照' : 'Snapshots'],
+        ] as [BjTab, string][]).map(([k, lbl]) => (
+          <button key={k} className={`bj-tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>
+            <span className="bj-tab-ico">
+              {k === 'jobs' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>}
+              {k === 'protection' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M9 12l2 2 4-4" /></svg>}
+              {k === 'snapshots' && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="7" width="18" height="13" rx="2" /><circle cx="12" cy="13.5" r="3.5" /><path d="M8 7l1.5-3h5L16 7" /></svg>}
+            </span>
+            {lbl}
+          </button>
+        ))}
+        <label className="bj-f bj-tab-cluster">
           <span>{t('tasks.filter.cluster')}</span>
           <CyberSelect
             value={clusterId}
@@ -224,6 +253,13 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
             onChange={(v) => setClusterId(v)}
           />
         </label>
+      </div>
+
+      {tab === 'protection' && <ProtectionPanel key={`p-${clusterId}`} clusterId={clusterId} />}
+      {tab === 'snapshots' && <SnapshotsPanel key={`s-${clusterId}`} clusterId={clusterId} />}
+
+      {tab === 'jobs' && (<>
+      <div className="bj-filters">
         <label className="bj-f">
           <span>{t('bjobs.filter.enabled')}</span>
           <CyberSelect<'all' | 'enabled' | 'disabled'>
@@ -338,6 +374,7 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
           </tbody>
         </table>
       </div>
+      </>)}
 
       <style>{`
         .bj-page { padding: 24px 32px; height: 100%; display: flex; flex-direction: column; gap: 16px; color: var(--text-primary); }
@@ -349,6 +386,14 @@ export function BackupJobs({ clusters, selectedCluster }: Props) {
         .bj-sub { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); margin-top: 4px; }
 
         .bj-actions { display: flex; gap: 8px; }
+        .bj-tabbar { display: flex; align-items: flex-end; gap: 6px; border-bottom: 1px solid rgba(0, 240, 255, 0.18); padding-bottom: 0; }
+        .bj-tab { display: inline-flex; align-items: center; gap: 7px; padding: 8px 16px; margin-bottom: -1px; background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; color: var(--text-secondary); font-family: var(--font-display); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; position: relative; transition: color .15s ease, background .15s ease, transform .15s ease; }
+        .bj-tab:hover { color: var(--primary); transform: translateY(-1px); background: rgba(0, 240, 255, 0.05); }
+        .bj-tab.on { color: var(--primary); background: rgba(0, 240, 255, 0.08); border-color: rgba(0, 240, 255, 0.35); }
+        .bj-tab.on::after { content: ''; position: absolute; left: 10%; right: 10%; bottom: 0; height: 2px; background: var(--primary); box-shadow: 0 0 8px var(--primary); animation: bj-tabline .3s ease-out; }
+        @keyframes bj-tabline { from { left: 50%; right: 50%; } to { left: 10%; right: 10%; } }
+        .bj-tab-ico { display: inline-flex; }
+        .bj-tab-cluster { margin-left: auto; margin-bottom: 6px; min-width: 160px; }
         .bj-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 4px; background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.4); color: var(--primary); font-family: var(--font-display); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
         .bj-btn:hover:not(:disabled) { background: rgba(0, 240, 255, 0.16); }
         .bj-btn:disabled { opacity: .5; cursor: not-allowed; }

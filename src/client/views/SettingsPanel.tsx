@@ -11,16 +11,18 @@ import { CyberSelect } from '../components/CyberSelect';
 import { SetSecretModal } from '../components/SetSecretModal';
 import { NotificationsModal } from '../components/NotificationsModal';
 import { SSHSetupModal } from '../components/SSHSetupModal';
+import { TrustedFingerprints } from '../components/TrustedFingerprints';
 import { useDialogs } from '../composables/useDialogs';
 
 interface SettingsPanelProps {
   onClose: () => void;
   clusters?: Record<string, ClusterData>;
+  initialTab?: 'ui' | 'clusters' | 'alerts' | 'server';
 }
 
 type TabType = 'ui' | 'clusters' | 'alerts' | 'server';
 
-export function SettingsPanel({ onClose, clusters }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, clusters, initialTab }: SettingsPanelProps) {
   const { t, language, setLanguage } = useTranslation();
   const dialog = useDialogs();
   const [config, setConfig] = useState<Config | null>(null);
@@ -28,7 +30,7 @@ export function SettingsPanel({ onClose, clusters }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isExiting, setIsExiting] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('ui');
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab || 'ui');
   const [notifOpen, setNotifOpen] = useState(false);
 
   // UI Settings
@@ -788,6 +790,8 @@ export function SettingsPanel({ onClose, clusters }: SettingsPanelProps) {
                       <span>{t('sshsetup.button')}</span>
                     </button>
                   </div>
+
+                  <TrustedFingerprints />
 
                   <div className="settings-section">
                     <h3 className="section-title">{t('settings.http_server')}</h3>

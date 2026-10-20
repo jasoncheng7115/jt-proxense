@@ -30,6 +30,7 @@ import ssl
 from aiohttp import web
 
 from . import audit
+from . import trust_store
 from . import console_sessions
 from . import secret_store
 from . import vnc_screenshot
@@ -216,7 +217,8 @@ async def screenshot_handler(request: web.Request) -> web.StreamResponse:
             )
 
         # QEMU: classic vncproxy + RFB framebuffer grab.
-        pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+        pve_ssl = await trust_store.tls_ssl(
+            pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
         url = (f"https://{pve_node_cfg.host}:{pve_node_cfg.port}"
                f"/api2/json/nodes/{_q(node, safe='')}/qemu/{vmid}/vncproxy")
         headers = {"Cookie": f"PVEAuthCookie={ticket}"}

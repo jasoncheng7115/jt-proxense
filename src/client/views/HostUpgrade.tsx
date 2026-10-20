@@ -576,6 +576,45 @@ function JobDetail({ clusterId, jobId, onBack, dialog }: {
 }
 
 
+interface AptProgressSnap {
+  phase: 'update' | 'resolve' | 'download' | 'unpack' | 'configure' | 'triggers' | 'lock_wait' | 'done' | 'failed';
+  total: number | null; download_size: string | null;
+  downloaded: number; unpacked: number; configured: number;
+  current: string | null; percent: number | null;
+  lock: { path: string | null; pid: number | null; holder: string | null } | null;
+}
+
+// Live apt progress, parsed server-side from apt-get's plain output
+// (server/apt_progress.py). The percentage is an estimate across the
+// download / unpack / configure phases; the counts are exact.
+function AptProgressBar({ p, t }: { p: AptProgressSnap; t: (k: string) => string }) {
+  const pct = p.percent;
+  const total = p.total ?? 0;
+  let line = t(`upgrade.apt.phase.${p.phase}`);
+  if (p.phase === 'download' && total) line += ` ${Math.min(p.downloaded, total)} / ${total}`;
+  if (p.phase === 'unpack' && total) line += ` ${Math.min(p.unpacked, total)} / ${total}`;
+  if ((p.phase === 'configure' || p.phase === 'triggers') && total) line += ` ${Math.min(p.configured, total)} / ${total}`;
+  return (
+    <div className={`hu-apt hu-apt-${p.phase}`}>
+      <div className="hu-apt-row">
+        <span className="hu-apt-phase">{line}</span>
+        {p.current && p.phase !== 'lock_wait' && <span className="hu-apt-pkg">{p.current}</span>}
+        {total > 0 && <span className="hu-apt-meta">{total} {t('upgrade.apt.pkgs')}{p.download_size ? ` · ${p.download_size}` : ''}</span>}
+        <span className="hu-apt-pct">{pct == null ? '…' : `${pct}%`}</span>
+      </div>
+      <div className={`hu-apt-track ${pct == null ? 'indet' : ''}`}>
+        <div className="hu-apt-fill" style={{ width: pct == null ? '30%' : `${pct}%` }} />
+      </div>
+      {p.phase === 'lock_wait' && p.lock && (
+        <div className="hu-apt-lock">
+          {t('upgrade.apt.lock')} {p.lock.path || ''}{p.lock.pid ? ` · PID ${p.lock.pid}` : ''}{p.lock.holder ? ` (${p.lock.holder})` : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function NodeStepCard({ step, onConfirm, t }: {
   step: NodeStep;
   onConfirm: (node: string, choice: 'reboot' | 'skip') => void;
@@ -614,6 +653,9 @@ function NodeStepCard({ step, onConfirm, t }: {
             </button>
           </div>
         </div>
+      )}
+      {step.detail.apt_progress && (step.status === 'updating' || step.detail.apt_progress.phase === 'failed') && (
+        <AptProgressBar p={step.detail.apt_progress} t={t} />
       )}
       {step.error && <div className="hu-error hu-node-error">{step.error}</div>}
       {expanded && (
@@ -921,6 +963,38 @@ const styleBlock = `
 .hu-node-error {
   margin: 8px 18px;
 }
+.hu-apt {
+  padding: 10px 18px 12px;
+  border-top: 1px solid rgba(0, 240, 255, 0.12);
+  display: flex; flex-direction: column; gap: 7px;
+  animation: hu-apt-in .24s ease-out;
+}
+@keyframes hu-apt-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.hu-apt-row { display: flex; align-items: baseline; gap: 12px; font-family: var(--font-mono); font-size: 12.5px; }
+.hu-apt-phase { color: var(--primary); letter-spacing: .04em; }
+.hu-apt-pkg { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+.hu-apt-meta { color: var(--text-muted); margin-left: auto; }
+.hu-apt-pct { color: var(--text-primary); min-width: 40px; text-align: right; }
+.hu-apt-track { position: relative; height: 6px; border-radius: 3px; background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.18); overflow: hidden; }
+.hu-apt-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(0,240,255,.55), var(--primary));
+  box-shadow: 0 0 10px rgba(0, 240, 255, .55);
+  transition: width .6s ease;
+  position: relative;
+}
+.hu-apt-fill::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 40px; right: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.55));
+  animation: hu-apt-glint 1.6s ease-in-out infinite;
+}
+@keyframes hu-apt-glint { 0%,100% { opacity: .2; } 50% { opacity: .9; } }
+.hu-apt-track.indet .hu-apt-fill { animation: hu-apt-indet 1.4s ease-in-out infinite; }
+@keyframes hu-apt-indet { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.hu-apt-lock_wait .hu-apt-phase, .hu-apt-lock { color: var(--warning); }
+.hu-apt-lock { font-family: var(--font-mono); font-size: 12px; }
+.hu-apt-failed .hu-apt-phase { color: var(--danger, #ff4d6d); }
+.hu-apt-failed .hu-apt-fill { background: var(--danger, #ff4d6d); box-shadow: 0 0 10px rgba(255, 77, 109, .5); }
 .hu-node-detail {
   padding: 12px 18px 14px;
   border-top: 1px solid rgba(0, 240, 255, 0.08);

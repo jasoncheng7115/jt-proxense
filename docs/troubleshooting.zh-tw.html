@@ -115,7 +115,7 @@ mark { background: var(--cyan-soft); color: var(--text); border-radius: 3px; pad
         <a href="index.zh-tw.html" class="nav-brand">
             <img src="logo-mark.svg" alt="">
             JT-PROXENSE
-            <span class="ver">v1.1.3</span>
+            <span class="ver">v1.2.0</span>
         </a>
         <nav class="nav-links">
             <a href="index.zh-tw.html">回首頁</a>
@@ -145,7 +145,7 @@ mark { background: var(--cyan-soft); color: var(--text); border-radius: 3px; pad
     <div class="ts-body">
         <aside class="ts-toc" aria-label="目錄">
             <h2>目錄</h2>
-            <ol><li><a class="ts-toc-sec" href="#sec-first">從這裡開始</a><ol><li><a href="#read-error">安裝程式中斷了，我該先看哪裡？</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-install">安裝失敗</a><ol><li><a href="#root">This installer must run as root</a></li><li><a href="#no-pm">No supported package manager (apt / dnf / yum / pacman / zypper) found</a></li><li><a href="#python">Python 3.10+ required (found ...)</a></li><li><a href="#not-a-checkout">/opt/jt-proxense is non-empty but not a git checkout. Refusing to overwrite.</a></li><li><a href="#smoke">Smoke test failed — a runtime module did not import</a></li><li><a href="#network">git clone 或 curl 失敗／主機連不到 GitHub</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-upgrade">升級失敗</a><ol><li><a href="#how-to-upgrade">要怎麼升級？git pull 就夠了嗎？</a></li><li><a href="#pin-version">安裝程式會裝哪一版？可以指定嗎？</a></li><li><a href="#local-changes">Your local changes would be overwritten／dubious ownership</a></li><li><a href="#still-old">它說升級完成了，但畫面還是舊版本</a></li><li><a href="#rollback">要怎麼回滾到前一個版本？</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-service">服務起不來</a><ol><li><a href="#config-parse">REFUSING TO START: config.yaml could not be parsed</a></li><li><a href="#systemd-path">systemd: Failed to start／unit 因 ReadWritePaths 失敗</a></li><li><a href="#port">Address already in use／連接埠 8098 被占用</a></li><li><a href="#unstyled">頁面載入了，但沒有樣式、版面整個擠成一直排</a></li><li><a href="#cannot-save">從介面新增叢集時存不起來</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-signin">無法登入</a><ol><li><a href="#locked">Too many attempts, please try again later</a></li><li><a href="#forgot">忘記 admin 密碼，或是驗證器裝置遺失</a></li><li><a href="#shut-out">驗證設定弄錯之後完全被關在外面</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-after-110">升級到 v1.1.0 之後</a><ol><li><a href="#xff">所有人在幾次登入失敗後一起被鎖住</a></li><li><a href="#cors">從其他來源提供的介面在升級後失效</a></li><li><a href="#ignored-setting">記錄裡出現 ignoring unrecognised setting(s)</a></li><li><a href="#rbac">先前被拒絕的「單一叢集角色」使用者，現在可以用了</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-uninstall">解除安裝</a><ol><li><a href="#how-to-uninstall">要怎麼完整移除？</a></li><li><a href="#keep-data">想移除但保留設定和使用者</a></li><li><a href="#uninstall-fails">解除安裝程式回報：run as root 或 no terminal for confirmation</a></li><li><a href="#leftovers">解除安裝後還有殘留</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-stuck">還是卡住</a><ol><li><a href="#report">這裡沒有符合的狀況，要怎麼回報？</a></li></ol></li></ol>
+            <ol><li><a class="ts-toc-sec" href="#sec-first">從這裡開始</a><ol><li><a href="#read-error">安裝程式中斷了，我該先看哪裡？</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-install">安裝失敗</a><ol><li><a href="#root">This installer must run as root</a></li><li><a href="#no-pm">No supported package manager found／Installing the prerequisites with … failed</a></li><li><a href="#python">Python 3.10+ required (found ...)</a></li><li><a href="#not-a-checkout">/opt/jt-proxense is non-empty but not a git checkout. Refusing to overwrite.</a></li><li><a href="#smoke">Smoke test failed — a runtime module did not import</a></li><li><a href="#pip-failed">Cannot uninstall cryptography … no RECORD file／pip could not install the Python dependencies</a></li><li><a href="#venv">Could not create a Python virtual environment (venv/ensurepip missing)</a></li><li><a href="#network">Could not fetch …／git clone 或 curl 失敗／主機連不到 GitHub</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-upgrade">升級失敗</a><ol><li><a href="#how-to-upgrade">要怎麼升級？git pull 就夠了嗎？</a></li><li><a href="#pin-version">安裝程式會裝哪一版？可以指定嗎？</a></li><li><a href="#local-changes">Your local changes would be overwritten／dubious ownership</a></li><li><a href="#still-old">它說升級完成了，但畫面還是舊版本</a></li><li><a href="#rollback">要怎麼回滾到前一個版本？</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-service">服務起不來</a><ol><li><a href="#config-parse">REFUSING TO START: config.yaml could not be parsed</a></li><li><a href="#systemd-path">systemd: Failed to start／unit 因 ReadWritePaths 失敗</a></li><li><a href="#python-changed">升級作業系統之後：No module named &#x27;aiohttp&#x27;／203/EXEC／Python package not installed for this interpreter</a></li><li><a href="#port">Address already in use／連接埠 8098 被占用</a></li><li><a href="#unstyled">頁面載入了，但沒有樣式、版面整個擠成一直排</a></li><li><a href="#cannot-save">從介面新增叢集時存不起來</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-signin">無法登入</a><ol><li><a href="#locked">Too many attempts, please try again later</a></li><li><a href="#forgot">忘記 admin 密碼，或是驗證器裝置遺失</a></li><li><a href="#shut-out">驗證設定弄錯之後完全被關在外面</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-after-110">升級到 v1.1.0 之後</a><ol><li><a href="#xff">所有人在幾次登入失敗後一起被鎖住</a></li><li><a href="#cors">從其他來源提供的介面在升級後失效</a></li><li><a href="#ignored-setting">記錄裡出現 ignoring unrecognised setting(s)</a></li><li><a href="#rbac">先前被拒絕的「單一叢集角色」使用者，現在可以用了</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-uninstall">解除安裝</a><ol><li><a href="#how-to-uninstall">要怎麼完整移除？</a></li><li><a href="#keep-data">想移除但保留設定和使用者</a></li><li><a href="#uninstall-fails">解除安裝程式回報：run as root 或 no terminal for confirmation</a></li><li><a href="#leftovers">解除安裝後還有殘留</a></li></ol></li><li><a class="ts-toc-sec" href="#sec-stuck">還是卡住</a><ol><li><a href="#report">這裡沒有符合的狀況，要怎麼回報？</a></li></ol></li></ol>
         </aside>
 
         <div id="ts-content">
@@ -170,17 +170,21 @@ mark { background: var(--cyan-soft); color: var(--text); border-radius: 3px; pad
    <p>注意 <code>sudo</code> 要加在 <code>bash</code> 上，不是加在 <code>curl</code> 上。</p></div>
             </details>
             <details class="qa" id="no-pm">
-                <summary>No supported package manager (apt / dnf / yum / pacman / zypper) found</summary>
-                <div class="qa-a"><p>安裝程式透過這五種其中之一來裝系統套件。如果你的發行版不在其中，請先手動裝好
-   前置需求再重跑一次 —— 已經存在的它會略過：</p>
-   <pre><code>git、python3 (3.10 以上)、python3-pip、python3-venv、systemd</code></pre></div>
+                <summary>No supported package manager found／Installing the prerequisites with … failed</summary>
+                <div class="qa-a"><p>安裝程式透過 apt、dnf、yum、pacman 或 zypper 來裝系統套件。如果你的發行版不在其中，
+   或這一步失敗了 (套件鏡像連不到、套件庫裡沒有某個套件)，請先手動裝好前置需求再重跑一次
+   —— 已經存在的它會略過：</p>
+   <pre><code>git、python3 (3.10 以上)、python3-pip、python3-venv、systemd</code></pre>
+   <p>v1.2.0 以前的安裝程式還會要求安裝 <code>curl</code>，而它在 RHEL／Rocky／Alma 9
+   上和預設的 <code>curl-minimal</code> 衝突，讓安裝在第 2 步無聲地停下。v1.2.0 在已經有
+   curl 時會略過它。</p></div>
             </details>
             <details class="qa" id="python">
                 <summary>Python 3.10+ required (found ...)</summary>
                 <div class="qa-a"><p>最常見於 RHEL／Rocky／AlmaLinux 8，它們的 <code>python3</code> 是 3.6：</p>
    <pre><code>sudo dnf install python3.11 python3.11-pip
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code></pre>
-   <p>安裝程式會挑它找到的最新直譯器，並讓 systemd unit 指向它，所以你不需要改系統預設值。</p></div>
+   <p>安裝程式會找到較新的直譯器並用它建立虛擬環境，所以你不需要改系統預設值。</p></div>
             </details>
             <details class="qa" id="not-a-checkout">
                 <summary>/opt/jt-proxense is non-empty but not a git checkout. Refusing to overwrite.</summary>
@@ -196,16 +200,43 @@ curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/ins
             </details>
             <details class="qa" id="smoke">
                 <summary>Smoke test failed — a runtime module did not import</summary>
-                <div class="qa-a"><p>Python 相依套件裝好了，但其中一個載入不了。失敗訊息上一行會指出確切的模組名稱，
-   然後：</p>
-   <pre><code>sudo python3 -m pip install --upgrade -r /opt/jt-proxense/requirements.txt
-sudo systemctl restart jt-proxense</code></pre>
-   <p>在 Debian 12 以上／Ubuntu 24.04，系統的 Python 環境被標記為 externally managed
-   (PEP 668)。安裝程式會自動偵測並加上 <code>--break-system-packages</code>；如果你是
-   手動安裝，需要自己加同一個旗標。</p></div>
+                <div class="qa-a"><p>Python 相依套件裝好了，但其中一個載入不了。失敗訊息上一行會指出確切的模組名稱。
+   從 v1.2.0 起，相依套件放在安裝程式自己的虛擬環境 <code>/opt/jt-proxense/.venv</code>
+   裡；把它整個重建就能修好沒裝完整的狀況：</p>
+   <pre><code>sudo rm -rf /opt/jt-proxense/.venv
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code></pre>
+   <p>不要改用 <code>--break-system-packages</code> 裝進系統的 Python：會弄壞什麼，請見
+   <a href="#pip-failed">下一條</a>。</p></div>
+            </details>
+            <details class="qa" id="pip-failed">
+                <summary>Cannot uninstall cryptography … no RECORD file／pip could not install the Python dependencies</summary>
+                <div class="qa-a"><p>v1.2.0 以前的安裝程式把相依套件裝進系統的 Python。如果發行版用自己的套件裝了
+   某個相依套件的舊版，pip 就得替換它，而它做不到：</p>
+   <pre><code>error: uninstall-no-record-file
+× Cannot uninstall cryptography 46.0.5
+hint: The package was installed by debian.</code></pre>
+   <p>Ubuntu 26.04 上會遇到：目前的 <code>asyncssh</code> 需要
+   <code>cryptography</code> 48 以上，發行版附的是 46。從 v1.2.0 起，安裝程式使用自己的
+   虛擬環境，完全不碰系統的套件，所以重新執行一次安裝指令就修好了：</p>
+   <pre><code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code></pre>
+   <p><strong>不要</strong>用 <code>pip install --ignore-installed</code> 或移除
+   <code>python3-cryptography</code> 來繞過：<code>/usr/local</code> 裡較新的那份會蓋過
+   發行版的版本，弄壞系統自己的 <code>pyOpenSSL</code>
+   (<code>module 'lib' has no attribute 'GEN_EMAIL'</code>)；而移除套件會連帶移除所有
+   依賴它的東西。</p>
+   <p>其他 pip 失敗通常是網路問題：主機必須連得到 <code>pypi.org</code> 與
+   <code>files.pythonhosted.org</code> (使用 proxy 請見<a href="#network">網路那一條</a>)。</p></div>
+            </details>
+            <details class="qa" id="venv">
+                <summary>Could not create a Python virtual environment (venv/ensurepip missing)</summary>
+                <div class="qa-a"><p>安裝程式把相依套件放在 <code>/opt/jt-proxense/.venv</code>，而 Debian／Ubuntu
+   把建立虛擬環境的模組拆成另一個套件。安裝程式會自動要求安裝它，但精簡映像或受限的
+   套件鏡像仍可能缺少。請依錯誤訊息指出的 Python 版本安裝，然後重跑：</p>
+   <pre><code>sudo apt-get install python3-venv python3.12-venv
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code></pre></div>
             </details>
             <details class="qa" id="network">
-                <summary>git clone 或 curl 失敗／主機連不到 GitHub</summary>
+                <summary>Could not fetch …／git clone 或 curl 失敗／主機連不到 GitHub</summary>
                 <div class="qa-a"><p>安裝程式需要連到 <code>github.com</code> 與
    <code>raw.githubusercontent.com</code>。在 proxy 後面的話，要把它匯出給<strong>整條指令</strong>
    —— 只設在你自己 shell 裡的 proxy 傳不進 <code>sudo</code> 的環境：</p>
@@ -293,6 +324,29 @@ sudo systemctl restart jt-proxense</code></pre>
    <code>/opt/jt-proxense/.ssh</code>、<code>/var/lib/jt-proxense</code> 與
    <code>/etc/jt-proxense</code>。會發生這個狀況，通常是 unit 被手動更新而不是透過
    安裝程式。</p></div>
+            </details>
+            <details class="qa" id="python-changed">
+                <summary>升級作業系統之後：No module named &#x27;aiohttp&#x27;／203/EXEC／Python package not installed for this interpreter</summary>
+                <div class="qa-a"><p>作業系統大版本升級 (例如 Ubuntu 22.04 &rarr; 24.04、Debian 12 &rarr; 13) 會把
+   系統的 Python 換成新版本。相依套件是裝給舊版的 (v1.2.0 以前裝在系統的 Python 裡，
+   之後裝在 <code>/opt/jt-proxense/.venv</code>)，新版用不了，所以 jt-proxense 會
+   一次失去全部相依套件。通常要等到完成升級的那次重開機之後才會出現：
+   在那之前跑的還是舊的程序。</p>
+   <p>看到的訊息取決於當初是哪個版本安裝的：</p>
+   <ul>
+   <li>v1.2.0 以後：服務會停止 (不會一直重啟)，並顯示
+   <code>the Python package 'aiohttp' is not installed for this interpreter</code>，
+   同時指出相依套件當初是裝給哪個 Python。</li>
+   <li>更早的版本：<code>ModuleNotFoundError: No module named 'aiohttp'</code>
+   (或 <code>'yaml'</code>)，或是 systemd 回報 <code>status=203/EXEC</code>，因為 unit
+   指定的直譯器 (例如 <code>/usr/bin/python3.10</code>) 已經被升級移除。
+   <code>jt-proxense</code> 指令也會以同樣的方式失敗。</li>
+   </ul>
+   <p>重新執行安裝程式。它會為目前的 Python 重建相依套件，重寫 unit 和
+   <code>jt-proxense</code> 指令，並保留你的設定、使用者與資料：</p>
+   <pre><code>curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-proxense/main/install.sh | sudo bash</code></pre>
+   <p>每次升級作業系統大版本之後都要再做一次。留在舊版本目錄 (例如
+   <code>/usr/local/lib/python3.10</code>) 裡的套件已經用不到了。</p></div>
             </details>
             <details class="qa" id="port">
                 <summary>Address already in use／連接埠 8098 被占用</summary>

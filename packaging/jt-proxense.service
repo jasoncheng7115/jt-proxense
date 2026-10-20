@@ -9,9 +9,15 @@ Type=simple
 User=jt-proxense
 Group=jt-proxense
 WorkingDirectory=/opt/jt-proxense
-ExecStart=/usr/bin/python3 /opt/jt-proxense/run.py
+# The installer's virtual environment (since v1.2.0; earlier versions ran the
+# system /usr/bin/python3 with the dependencies pip-installed into it).
+ExecStart=/opt/jt-proxense/.venv/bin/python3 /opt/jt-proxense/run.py
 Restart=on-failure
 RestartSec=5
+# 78 = runtime_guard: the Python dependencies are not installed for this
+# interpreter (typically after an OS release upgrade). Restarting cannot fix
+# that, so stop once with the explanation in the journal instead of looping.
+RestartPreventExitStatus=78
 Environment=PYTHONUNBUFFERED=1
 # The application tree is read-only to this service (see ReadWritePaths), so
 # CPython cannot drop __pycache__ beside the sources. Say so rather than having

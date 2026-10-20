@@ -79,6 +79,8 @@ export function BackupHistoryModal({ open, onClose, clusterId, vmid, vmName, vmT
   const [items, setItems] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Server says an empty list may be PVE hiding files from this token.
+  const [hidden, setHidden] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
 
   const verifyBackup = async (b: Backup) => {
@@ -157,7 +159,7 @@ export function BackupHistoryModal({ open, onClose, clusterId, vmid, vmName, vmT
           throw new Error(d.error || `HTTP ${r.status}`);
         }
         const data = await r.json();
-        if (alive) setItems(data.backups || []);
+        if (alive) { setItems(data.backups || []); setHidden(!!data.note); }
       } catch (e: any) {
         if (alive) setError(e.message || String(e));
       } finally {
@@ -205,6 +207,7 @@ export function BackupHistoryModal({ open, onClose, clusterId, vmid, vmName, vmT
                 <path d="M3 6h18M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
               </svg>
               <div>{t('bh.empty')}</div>
+              {hidden && <div className="bh-empty-note">{t('bh.empty_note')}</div>}
             </div>
           )}
           {items.length > 0 && (
@@ -269,6 +272,7 @@ export function BackupHistoryModal({ open, onClose, clusterId, vmid, vmName, vmT
           .bh-stats .lbl { font-family: var(--font-display); font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-secondary); margin-right: 6px; }
           .bh-body { flex: 1; overflow: auto; padding: 6px 0; }
           .bh-loading, .bh-empty { padding: 40px 20px; text-align: center; font-family: var(--font-mono); font-size: 13px; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+          .bh-empty-note { max-width: 520px; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
           .bh-empty svg { stroke: var(--text-muted); opacity: .6; }
           .bh-error { padding: 8px 14px; margin: 0 18px 8px; border: 1px solid var(--danger, #ff4d6d); border-left-width: 3px; background: rgba(255, 77, 109, 0.08); color: var(--danger, #ff4d6d); font-family: var(--font-mono); font-size: 13.5px; border-radius: 2px; }
           .bh-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 13.5px; }

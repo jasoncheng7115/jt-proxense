@@ -11,10 +11,7 @@ can offer them as a dropdown.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
-import socket
-import ssl
 from typing import Any
 
 from aiohttp import web
@@ -37,27 +34,35 @@ def _audit_actor(request: web.Request) -> tuple[str, str, str]:
     )
 
 
-def get_tls_fingerprint(host: str, port: int = 8006) -> str:
-    """Fetch the SHA-256 fingerprint of the TLS cert at host:port.
+class FingerprintChanged(RuntimeError):
+    pass
 
-    Returns an uppercased hex string with colons every two chars
-    (PVE's expected format: 'AB:CD:...:12').
 
-    Synchronous — only called once per migrate, blocking is fine. Doesn't
-    verify the cert (we explicitly don't trust it; we just want its fingerprint
-    to pin the remote in the migration RPC).
+async def pinned_fingerprint(host: str, port: int = 8006) -> str:
+    """The target's TLS fingerprint in PVE's format ('AB:CD:…:12').
+
+    PVE pins the remote by this value in the migration RPC. It used to be
+    fetched fresh (unverified) for every migration — trust-on-EVERY-use, which
+    pins whatever answers that moment. Now it is the fingerprint trust_store
+    holds for the endpoint (recorded on first contact), and a target whose
+    certificate has since changed is refused here, before any disk data moves,
+    rather than being silently re-trusted.
     """
-    ctx = ssl._create_unverified_context()
-    sock = socket.create_connection((host, port), timeout=10)
-    try:
-        with ctx.wrap_socket(sock, server_hostname=host) as ssock:
-            cert_bin = ssock.getpeercert(binary_form=True)
-    finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
-    digest = hashlib.sha256(cert_bin).hexdigest().upper()
+    from . import trust_store
+    if trust_store.enabled():
+        await trust_store.tls_ssl(host, port, False)       # pins on first contact
+        ep = trust_store.endpoint(host, port)
+        rec = next((e for e in trust_store.entries()
+                    if e["kind"] == "tls" and e["endpoint"] == ep), None)
+        if rec is None:
+            raise RuntimeError(f"{ep} did not answer a TLS handshake")
+        if rec.get("pending"):
+            raise FingerprintChanged(
+                f"the TLS certificate of {ep} changed since it was first seen; "
+                f"review it under Settings → Server → Trusted node fingerprints")
+        digest = rec["fingerprint"].upper()
+    else:
+        digest = (await trust_store.probe_tls(host, port)).upper()
     return ":".join(digest[i:i+2] for i in range(0, len(digest), 2))
 
 
@@ -163,10 +168,10 @@ async def fingerprint_handler(request: web.Request) -> web.Response:
     port = int(request.query.get("port", "8006"))
     if not host:
         return web.json_response({"error": "missing_host"}, status=400)
-    import asyncio
     try:
-        loop = asyncio.get_running_loop()
-        fp = await loop.run_in_executor(None, get_tls_fingerprint, host, port)
+        fp = await pinned_fingerprint(host, port)
+    except FingerprintChanged as e:
+        return web.json_response({"error": "fingerprint_changed", "detail": str(e)}, status=409)
     except Exception as e:
         return web.json_response({"error": "fingerprint_failed", "detail": str(e)}, status=502)
     return web.json_response({"host": host, "port": port, "fingerprint": fp})
@@ -518,12 +523,11 @@ async def remote_migrate_handler(request: web.Request) -> web.Response:
     # Resolve fingerprint if the UI didn't supply one. Best-effort — if the
     # fetch fails, surface a clear error so the operator can paste it manually.
     if not fingerprint:
-        import asyncio
         try:
-            loop = asyncio.get_running_loop()
-            fingerprint = await loop.run_in_executor(
-                None, get_tls_fingerprint, target_host, target_port,
-            )
+            fingerprint = await pinned_fingerprint(target_host, target_port)
+        except FingerprintChanged as e:
+            return web.json_response({"error": "fingerprint_changed", "message": str(e)},
+                                     status=409)
         except Exception as e:
             return web.json_response({
                 "error": "fingerprint_fetch_failed",

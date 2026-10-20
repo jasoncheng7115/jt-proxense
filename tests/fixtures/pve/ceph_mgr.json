@@ -1,0 +1,5 @@
+[
+  {"name": "pve1", "host": "pve1", "addr": "203.0.113.1", "state": "active"},
+  {"name": "pve2", "host": "pve2", "addr": "203.0.113.2", "state": "standby"},
+  {"name": "pve3", "host": "pve3", "addr": "203.0.113.3", "state": "standby"}
+]

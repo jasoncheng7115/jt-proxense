@@ -85,11 +85,8 @@ async def capture_framebuffer_png(
     if vm_type not in ("qemu", "lxc"):
         raise ValueError(f"vm_type must be qemu or lxc, got {vm_type!r}")
 
-    pve_ssl: Optional[ssl.SSLContext]
-    if verify_ssl:
-        pve_ssl = None
-    else:
-        pve_ssl = ssl._create_unverified_context()
+    from . import trust_store
+    pve_ssl = await trust_store.tls_ssl(pve_host, pve_port, verify_ssl)
 
     pve_url = (
         f"wss://{pve_host}:{pve_port}"

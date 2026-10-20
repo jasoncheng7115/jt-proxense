@@ -37,6 +37,11 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
 sys.path.insert(0, str(_ROOT))
 
+# Standard library only, and before anything that needs a dependency: explain a
+# changed system Python instead of failing with ModuleNotFoundError.
+from server import runtime_guard  # noqa: E402
+runtime_guard.ensure_dependencies()
+
 from server import auth, db  # noqa: E402
 
 CONFIG_PATH = Path(os.environ.get("JTPROXENSE_CONFIG", "/opt/jt-proxense/config.yaml"))
@@ -357,6 +362,55 @@ def cmd_unlock(args):
     _cli_audit("auth.unlock", target=target, params={"cleared": cleared})
     where = "all IPs" if target == "*" else target
     print(f"cleared {cleared} failed-login record(s) for {where}")
+
+
+def cmd_trust(args):
+    """Pinned TLS / SSH fingerprints of PVE nodes (server/trust_store.py).
+
+    `list` shows every pin and any REFUSED fingerprint; `accept` makes the
+    refused one the pin (after a node was re-installed or its certificate
+    renewed); `forget` drops a pin so the next contact is trusted on first use.
+    The running service caches pins in memory: restart it after accept/forget.
+    """
+    rows = []
+    changed = None
+    with db.connect_sync() as c:
+        if args.action == "list":
+            rows = c.execute(
+                "SELECT kind, endpoint, fingerprint, pending FROM trusted_endpoints "
+                "ORDER BY kind, endpoint").fetchall()
+        else:
+            row = c.execute(
+                "SELECT fingerprint, pending FROM trusted_endpoints WHERE kind=? AND endpoint=?",
+                (args.kind, args.endpoint)).fetchone()
+            if row is None:
+                sys.exit(f"no pin for {args.kind} {args.endpoint} (see: jt-proxense trust list)")
+            if args.action == "accept":
+                if not row["pending"]:
+                    sys.exit(f"{args.kind} {args.endpoint}: no refused fingerprint to accept")
+                c.execute(
+                    "UPDATE trusted_endpoints SET fingerprint=pending, pending=NULL, "
+                    "pending_seen=NULL, first_seen=strftime('%s','now'), "
+                    "last_seen=strftime('%s','now') WHERE kind=? AND endpoint=?",
+                    (args.kind, args.endpoint))
+                changed = {"old": row["fingerprint"], "new": row["pending"]}
+            else:
+                c.execute("DELETE FROM trusted_endpoints WHERE kind=? AND endpoint=?",
+                          (args.kind, args.endpoint))
+                changed = {"old": row["fingerprint"]}
+
+    if args.action == "list":
+        if not rows:
+            print("no pinned fingerprints yet (they are recorded on first contact)")
+            return
+        for r in rows:
+            flag = "  ** REFUSED: " + r["pending"] if r["pending"] else ""
+            print(f"{r['kind']:<4} {r['endpoint']:<28} {r['fingerprint']}{flag}")
+        return
+    _cli_audit(f"trust.{args.action}", target=f"{args.kind}:{args.endpoint}",
+               params=changed)
+    print(f"{args.action}ed {args.kind} {args.endpoint}. "
+          f"Restart the service to apply: systemctl restart jt-proxense")
 
 
 def _chown_service_user(path: Path) -> None:
@@ -708,6 +762,15 @@ def _parser():
     g_unlock.add_argument("--all", action="store_true",
                           help="clear the lockout for every IP")
     p_unlock.set_defaults(func=cmd_unlock)
+
+    p_trust = sub.add_parser("trust", help="pinned TLS/SSH fingerprints of PVE nodes")
+    st = p_trust.add_subparsers(dest="action", required=True)
+    st.add_parser("list").set_defaults(func=cmd_trust)
+    for name in ("accept", "forget"):
+        pt = st.add_parser(name)
+        pt.add_argument("kind", choices=["tls", "ssh"])
+        pt.add_argument("endpoint", help="host:port as shown by `trust list`")
+        pt.set_defaults(func=cmd_trust)
 
     p_xc = sub.add_parser("export-config",
         help="bundle config.yaml + DB + master.key into one passphrase-encrypted file (host migration)")

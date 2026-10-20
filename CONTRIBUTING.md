@@ -26,10 +26,11 @@ Quickstart on a Linux box:
 git clone https://github.com/jasoncheng7115/jt-proxense.git
 cd jt-proxense
 
-# Backend
-python3 -m pip install -r requirements.txt
-python3 -m pip install pytest pytest-asyncio pytest-aiohttp
-python3 -m pytest tests/
+# Backend (a venv: Debian/Ubuntu refuse pip into the system Python, PEP 668)
+python3 -m venv .venv && . .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install pytest pytest-asyncio pytest-aiohttp
+python -m pytest tests/
 
 # Frontend (only if you want to rebuild dist/)
 npm install

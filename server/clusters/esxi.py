@@ -7,17 +7,19 @@ runtime env footprint identical to the PVE side.
 
 Auth model:
   - Operator configures `auth.user` + `auth.password` in config.yaml for
-    the cluster. The password lives in the encrypted secret store the
-    same way PVE write-tokens do (operator runs `bin/jt-proxense secret
-    set <cluster_id>.esxi.password`).
+    the cluster. A password written into config.yaml is moved into the
+    encrypted secret store at startup (as `pve_password`, like every
+    cluster's), and the adapter reads it back from there.
   - First request POSTs `/rest/com/vmware/cis/session` with HTTP Basic
     auth and pulls the session-id cookie. Subsequent requests reuse the
     cookie. We re-auth automatically on 401 (session expired).
 
 OWASP design:
   A01 — read-only adapter; no mutation routes are wired through.
-  A02 — `verify_ssl` defaults to True. If operator turns it off, the
-        adapter logs a one-shot WARNING at start naming the cluster.
+  A02 — `verify_ssl` follows the shared node config, whose default is
+        False (PVE ships self-signed certificates). With it off, the adapter
+        logs a one-shot WARNING at start naming the cluster; set
+        `verify_ssl: true` on the node entry for a vCenter with a trusted cert.
   A05 — credentials never leave config / secret store; the session-id
         cookie is held in memory only and not logged.
   A07 — failed auth bumps a counter (`stats["auth_fail"]`); 3 consecutive
@@ -134,10 +136,33 @@ class ESXiAdapter(ClusterAdapter):
         self._http = None
         self._session_id = None
 
+    def _stored_password(self) -> str | None:
+        """The password from the encrypted secret store.
+
+        At startup `secret_store.migrate_from_yaml()` moves EVERY cluster's
+        `auth.password` into the store as `pve_password` and blanks it in
+        config.yaml — ESXi clusters included. Reading only the config meant
+        every ESXi cluster lost its password on the first restart and every
+        poll failed with "missing auth.password"."""
+        try:
+            from .. import secret_store
+            return (secret_store.get(self.id, "pve_password")
+                    or secret_store.get(self.id, "esxi_password"))
+        except Exception as e:
+            logger.debug("esxi %s: secret store unreadable: %s", self.id, e)
+            return None
+
     async def _login(self) -> None:
         # POST /rest/com/vmware/cis/session with Basic auth.
-        user = self.config.auth.user or "administrator@vsphere.local"
-        pw = self.config.auth.password
+        #
+        # `auth.user` defaults to "root@pam" (the PVE default in the shared
+        # config dataclass), which is never a vSphere account, so treat it as
+        # unset — otherwise an ESXi cluster without `auth.user` logged in as
+        # root@pam.
+        user = (self.config.auth.user or "").strip()
+        if not user or user == "root@pam":
+            user = "administrator@vsphere.local"
+        pw = self.config.auth.password or self._stored_password()
         if not pw:
             raise RuntimeError(
                 f"ESXi cluster {self.id}: missing auth.password "

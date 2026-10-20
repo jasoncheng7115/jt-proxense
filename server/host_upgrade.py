@@ -47,7 +47,7 @@ from typing import Optional
 from aiohttp import web
 
 from . import audit, db
-from . import migrate_guard
+from . import apt_progress, migrate_guard
 from . import ssh_util
 from .cluster_manager import cluster_manager
 from .middleware import role_required
@@ -61,6 +61,7 @@ _LOOP_TICK_S          = 2.0
 _REBOOT_TIMEOUT_S     = 600      # 10 min for slow ZFS/initramfs boots
 _MIGRATE_WAIT_S       = 1800     # 30 min per VM migrate (safety cap)
 _APT_WAIT_S           = 3600     # hard cap on apt dist-upgrade; kill if exceeded
+_APT_PROGRESS_EVERY_S = 2.0      # min gap between apt_progress detail writes
 _SHUTDOWN_WAIT_S      = 300      # 5 min for an ACPI graceful guest shutdown
 _START_WAIT_S         = 180      # 3 min for a guest to come back up
 _TASK_POLL_S          = 4.0
@@ -78,10 +79,17 @@ _CEPH_EV_EVERY_S      = 60.0     # throttle "still rebalancing…" progress even
 #                                     its interactive whiptail "restart which?"
 #   UCF_FORCE_CONFOLD=1             → ucf-managed conffiles keep the old version
 #   Dpkg --force-conf{def,old}      → dpkg conffile conflicts keep existing
+#   DPkg::Lock::Timeout=600         → WAIT (up to 10 min) for a lock held by
+#                                     pve-daily-update / unattended-upgrades
+#                                     instead of failing the host outright with
+#                                     "Could not get lock"; apt prints "Waiting
+#                                     for cache lock" meanwhile, which
+#                                     apt_progress surfaces as lock_wait.
 APT_CMD = (
-    "apt-get update && "
+    "apt-get -o DPkg::Lock::Timeout=600 update && "
     "DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a UCF_FORCE_CONFOLD=1 "
     "apt-get dist-upgrade -y "
+    "-o DPkg::Lock::Timeout=600 "
     "-o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold"
 )
@@ -573,7 +581,7 @@ async def _preflight_host(cluster, node: str, node_id: int) -> tuple[bool, str]:
             #    apt-get update runs again as part of APT_CMD; doing it here as
             #    well is cheap and moves an unreachable-mirror failure to before
             #    the evacuation.
-            r = await conn.run("apt-get update -qq", check=False)
+            r = await conn.run("apt-get -o DPkg::Lock::Timeout=120 update -qq", check=False)
             if r.exit_status != 0:
                 return False, ("apt-get update failed: "
                                + ((r.stderr or r.stdout or "").strip()[:200]
@@ -892,6 +900,21 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
     host, user, port = _ssh_for(cluster, node)
     await _ev(node_id, "info", f"ssh {user}@{host}:{port}  $ {APT_CMD}")
     tail: list[str] = []
+    progress = apt_progress.AptProgress()
+    last_push = [0.0]
+
+    async def _push(force: bool = False) -> None:
+        # Throttled: every apt line already lands in the event log; the detail
+        # row only needs to be fresh enough for a progress bar.
+        now = time.monotonic()
+        if not force and now - last_push[0] < _APT_PROGRESS_EVERY_S:
+            return
+        last_push[0] = now
+        try:
+            await _patch_node_detail(node_id, {"apt_progress": progress.snapshot()})
+        except Exception as e:                   # never fail apt over a UI write
+            logger.debug("apt progress write failed: %s", e)
+
     try:
         async with await ssh_util.connect(host, user, port) as conn:
             # stdin=DEVNULL: any process that still tries to read a prompt gets
@@ -909,6 +932,8 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
                     if len(tail) > 200:
                         del tail[0:50]
                     await _ev(node_id, kind, line[:400])
+                    if progress.feed(line):
+                        await _push()
 
             # Hard cap the whole run. If apt ever does block on a prompt (e.g. a
             # package whose postinst reads /dev/tty directly, bypassing debconf),
@@ -925,11 +950,15 @@ async def _run_apt_upgrade(cluster, node: str, node_id: int) -> tuple[bool, str,
                     proc.kill()
                 except Exception:
                     pass
+                progress.finish(False)
+                await _push(force=True)
                 await _ev(node_id, "error",
                            f"apt exceeded {_APT_WAIT_S // 60} min and was killed "
                            f"(likely an interactive prompt) — failing this host")
                 return False, "apt timed out (possible interactive prompt)", False
             rc = proc.returncode or 0
+            progress.finish(rc == 0)
+            await _push(force=True)
             # The reboot-required probe must NOT be able to fail an otherwise-
             # successful upgrade: a transient SSH hiccup here previously fell
             # through to the outer except and marked the whole host failed.

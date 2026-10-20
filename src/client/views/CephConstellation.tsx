@@ -317,7 +317,7 @@ function WaveCanvas({ read, write, fmt, height = 100, isPaused = false }: {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       return { width: rect.width, height: rect.height };
     };
-    let { width, height } = setupCanvas();
+    const { width, height } = setupCanvas();
 
     // Left margin for scale labels
     const scaleMargin = 42;

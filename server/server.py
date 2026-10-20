@@ -41,6 +41,10 @@ from . import node_netinfo
 from . import ssh_setup
 from . import rrd_proxy
 from . import vm_backups
+from . import protection
+from . import trust_store
+from . import trust_admin
+from . import capacity
 from . import host_shell
 from . import vm_config as vm_config_mod
 from . import vm_create as vm_create_mod
@@ -393,40 +397,65 @@ async def update_config_handler(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=400)
 
 
+# The REST mirrors of the WebSocket snapshot. v1.1.0 scoped the WebSocket to
+# the clusters a session holds a grant on, but these handlers kept answering
+# with EVERY cluster to any logged-in user — so a user granted only cluster A
+# could read cluster B's nodes, guests and storages from /api/vms or
+# /api/clusters/B, which is the same data the WebSocket scoping withholds.
+# Each one now goes through the same _visible_cluster_ids().
+
+def _scope(request: web.Request):
+    return _visible_cluster_ids(request.get("user"))
+
+
+def _in_scope(scope, cluster_id) -> bool:
+    return scope is None or cluster_id in scope
+
+
+def _scoped_clusters(scope) -> dict:
+    return {cid: c for cid, c in cluster_manager.clusters.items()
+            if _in_scope(scope, cid)}
+
+
 async def get_clusters_handler(request: web.Request) -> web.Response:
-    """Get all cluster data"""
+    """All cluster data visible to the caller."""
     data = cluster_manager.get_all_data()
-    return web.json_response(data)
+    return web.json_response(_scope_snapshot(data, _scope(request)))
 
 
 async def get_cluster_handler(request: web.Request) -> web.Response:
-    """Get single cluster data"""
+    """One cluster's data (404 when missing OR outside the caller's scope)."""
     cluster_id = request.match_info.get("cluster_id")
     cluster = cluster_manager.get_cluster(cluster_id)
 
-    if not cluster:
+    # Out-of-scope answers exactly like missing, so the endpoint cannot be
+    # used to enumerate cluster ids.
+    if not cluster or not _in_scope(_scope(request), cluster_id):
         return web.json_response({"error": "Cluster not found"}, status=404)
 
     return web.json_response(cluster.get_data())
 
 
 async def get_summary_handler(request: web.Request) -> web.Response:
-    """Get global summary"""
-    summary = cluster_manager.get_global_summary()
+    """Summary across the clusters visible to the caller."""
+    summary = cluster_manager.get_global_summary(scope=_scope(request))
     return web.json_response(summary)
 
 
 async def get_nodes_handler(request: web.Request) -> web.Response:
-    """Get all nodes across clusters"""
+    """Nodes across the clusters visible to the caller."""
+    scope = _scope(request)
     cluster_id = request.query.get("cluster")
     nodes = {}
 
-    if cluster_id:
+    if cluster_id and not _in_scope(scope, cluster_id):
+        pass
+    elif cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster:
             nodes = {k: _to_jsonable(v) for k, v in cluster.cache.nodes.items()}
     else:
-        for cid, cluster in cluster_manager.clusters.items():
+        for cid, cluster in _scoped_clusters(scope).items():
             for key, node in cluster.cache.nodes.items():
                 nodes[f"{cid}/{key}"] = _to_jsonable(node)
 
@@ -464,16 +493,19 @@ def _to_jsonable(obj):
 
 
 async def get_vms_handler(request: web.Request) -> web.Response:
-    """Get all VMs across clusters"""
+    """Guests across the clusters visible to the caller."""
+    scope = _scope(request)
     cluster_id = request.query.get("cluster")
     vms = {}
 
-    if cluster_id:
+    if cluster_id and not _in_scope(scope, cluster_id):
+        pass
+    elif cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster:
             vms = {k: _to_jsonable(v) for k, v in cluster.cache.vms.items()}
     else:
-        for cid, cluster in cluster_manager.clusters.items():
+        for cid, cluster in _scoped_clusters(scope).items():
             for key, vm in cluster.cache.vms.items():
                 vms[f"{cid}/{key}"] = _to_jsonable(vm)
 
@@ -481,16 +513,19 @@ async def get_vms_handler(request: web.Request) -> web.Response:
 
 
 async def get_storages_handler(request: web.Request) -> web.Response:
-    """Get all storages"""
+    """Storages across the clusters visible to the caller."""
+    scope = _scope(request)
     cluster_id = request.query.get("cluster")
     storages = {}
 
-    if cluster_id:
+    if cluster_id and not _in_scope(scope, cluster_id):
+        pass
+    elif cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster:
             storages = {k: _to_jsonable(v) for k, v in cluster.cache.storages.items()}
     else:
-        for cid, cluster in cluster_manager.clusters.items():
+        for cid, cluster in _scoped_clusters(scope).items():
             for key, storage in cluster.cache.storages.items():
                 storages[f"{cid}/{key}"] = _to_jsonable(storage)
 
@@ -498,16 +533,19 @@ async def get_storages_handler(request: web.Request) -> web.Response:
 
 
 async def get_ceph_handler(request: web.Request) -> web.Response:
-    """Get Ceph data"""
+    """Ceph data for the clusters visible to the caller."""
+    scope = _scope(request)
     cluster_id = request.query.get("cluster")
     ceph_data = {}
 
-    if cluster_id:
+    if cluster_id and not _in_scope(scope, cluster_id):
+        pass
+    elif cluster_id:
         cluster = cluster_manager.get_cluster(cluster_id)
         if cluster and cluster.cache.ceph:
             ceph_data[cluster_id] = _to_jsonable(cluster.cache.ceph)
     else:
-        for cid, cluster in cluster_manager.clusters.items():
+        for cid, cluster in _scoped_clusters(scope).items():
             if cluster.cache.ceph:
                 ceph_data[cid] = _to_jsonable(cluster.cache.ceph)
 
@@ -825,6 +863,21 @@ def create_app() -> web.Application:
         route = app.router.add_route(method, path, handler)
         cors.add(route)
 
+    # v1.2.0 data-protection overview: backup recency per guest + snapshots
+    for method, path, handler in protection.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v1.2.0 pinned TLS/SSH fingerprints: review / accept / forget (admin)
+    for method, path, handler in trust_admin.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
+    # v1.2.0 capacity forecast + idle guests (read-only, RRD-based)
+    for method, path, handler in capacity.ROUTES:
+        route = app.router.add_route(method, path, handler)
+        cors.add(route)
+
     # v0.3.11 PVE host shell (xterm.js terminal directly to a node)
     for method, path, handler in host_shell.ROUTES:
         route = app.router.add_route(method, path, handler)
@@ -1054,8 +1107,15 @@ async def start_server():
         db.apply_migrations()
         logger.info("auth backend=%s, db=%s, schema=%d",
                     config.auth.backend, config.auth.db_path, db.schema_version())
+        try:
+            trust_store.enable_persistence()
+        except Exception as e:
+            logger.error("trust store: persistence unavailable (%s) — fingerprints "
+                         "are pinned in memory only until the next restart", e)
     else:
         logger.warning("auth.enabled=false — service is OPEN to anyone who can reach the port.")
+        logger.warning("trust store: no database without auth — TLS/SSH fingerprints "
+                       "are pinned in memory only and re-learned after a restart")
 
     # Encrypted secret store: ensure master.key exists, then sweep any
     # plaintext PVE passwords still in config.yaml into the store and clear

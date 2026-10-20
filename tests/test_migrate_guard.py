@@ -198,3 +198,48 @@ def test_guard_runs_after_authorisation():
             f"at +{role} — it would leak cluster topology to unauthorised callers")
         checked += 1
     assert checked == 2, f"expected both migrate handlers, checked {checked}"
+
+
+
+# ── live config beats a stale cache ──────────────────────────────────────
+
+class _Disk:
+    def __init__(self, storage):
+        self.storage = storage
+
+
+def _live_cluster(cached_disk, live_disk):
+    """Cache says the disk is on `cached_disk`; PVE says `live_disk`."""
+    class Client:
+        async def get_vm_config(self, node, vmid):
+            return {"scsi0": f"{live_disk}:vm-{vmid}-disk-0,size=8G"}
+
+    class C:
+        id = "live"
+        cache = Cache(STORAGES, [VM(300, "host-114", [Disk(cached_disk)])])
+        client = Client()
+
+        @staticmethod
+        def _parse_disk_config(cfg, vtype):
+            return [_Disk(v.split(":")[0]) for k, v in cfg.items() if k.startswith("scsi")]
+    return C
+
+
+async def test_live_config_overrides_stale_cache_toward_blocking(monkeypatch):
+    async def no_ha(*a, **k):
+        return None
+    monkeypatch.setattr(mg.ha_affinity, "check_target", no_ha)
+    # disk was just moved ceph1 → local-zfs; the cache has not caught up
+    c = _live_cluster("ceph1", "local-zfs")
+    r = await mg.check(c, "qemu", 300, "host-108", source="host-114",
+                       online=True, with_local_disks=False)
+    assert r is not None and r["error"] == "local_disks_need_copy"
+
+
+async def test_live_config_overrides_stale_cache_toward_allowing(monkeypatch):
+    async def no_ha(*a, **k):
+        return None
+    monkeypatch.setattr(mg.ha_affinity, "check_target", no_ha)
+    c = _live_cluster("local-zfs", "ceph1")
+    assert await mg.check(c, "qemu", 300, "host-108", source="host-114",
+                          online=True, with_local_disks=False) is None

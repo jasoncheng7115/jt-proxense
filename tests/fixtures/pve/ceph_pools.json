@@ -1,0 +1,4 @@
+[
+  {"pool": 1, "pool_name": ".mgr", "size": 3, "min_size": 2, "pg_num": 1, "type": "replicated", "crush_rule_name": "replicated_rule", "bytes_used": 1000, "percent_used": 0.0, "application_metadata": {"mgr": {}}},
+  {"pool": 2, "pool_name": "rbd", "size": 3, "min_size": 2, "pg_num": 32, "type": "replicated", "crush_rule_name": "replicated_rule", "bytes_used": 123456, "percent_used": 0.01, "application": "rbd", "application_metadata": {"rbd": {}}}
+]

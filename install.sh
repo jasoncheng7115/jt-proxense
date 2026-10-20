@@ -15,6 +15,11 @@
 #   JT_PROXENSE_PORT      — HTTP port written into config.yaml (default: 8098)
 #
 set -euo pipefail
+# Everything this script creates under the install dir (the checkout, the venv)
+# must be readable by the service account. Hardened hosts run root with umask
+# 077, which would leave the code and the interpreter unreadable to it. Files
+# that must stay private (config.yaml) set their own mode explicitly.
+umask 022
 
 # ---------- pretty output ----------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -42,6 +47,88 @@ help_line() {
         *)  printf "%b  → Install & upgrade troubleshooting: %s%b\n" "$CYAN" "$(help_url)" "$NC" >&2 ;;
     esac
 }
+
+# ---------- python runtime helpers (exercised by tests/test_install_python.py) ----------
+# BEGIN python-runtime helpers
+
+# Print "<command> <major.minor>" for the interpreter to install for.
+# Prefer the stable `python3` when it is new enough: a versioned path such as
+# /usr/bin/python3.10 written into the unit disappears with the next OS release
+# upgrade (Ubuntu 22.04 -> 24.04, Debian 12 -> 13), and the service then cannot
+# even start to say why. Only when python3 is too old (RHEL/SUSE keep 3.6/3.9
+# as python3 after installing 3.11/3.12) fall back to the newest versioned one.
+pick_python() {
+    local cand v maj min
+    for cand in python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+        command -v "$cand" >/dev/null 2>&1 || continue
+        v=$("$cand" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || continue
+        maj=${v%.*}; min=${v#*.}
+        if [ "$maj" -eq 3 ] && [ "$min" -ge 10 ]; then
+            echo "$cand $v"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Create (or reuse) the virtual environment the dependencies live in.
+# The system interpreter is NOT installed into: on Ubuntu 26.04 the newest
+# asyncssh needs cryptography >= 48 while the distro ships 46 as a Debian
+# package, which pip cannot uninstall ("no RECORD file") -- and forcing a newer
+# copy over it breaks the distro's own pyOpenSSL. A venv sidesteps both.
+# Reused only when it was built for the same MAJOR.MINOR and still runs; an OS
+# release upgrade changes the version, and its site-packages then belong to an
+# interpreter that no longer exists, so it is rebuilt from scratch.
+# Built from the stable path (/usr/bin/python3), so bin/python3 links there and
+# keeps starting after such an upgrade -- long enough for runtime_guard to
+# explain what happened instead of systemd reporting 203/EXEC.
+ensure_venv() {  # <venv dir, must end in /.venv> <base interpreter> <major.minor>
+    case "$1" in */.venv) ;; *) echo "ensure_venv: refusing $1" >&2; return 2 ;; esac
+    local have=""
+    if [ -f "$1/pyvenv.cfg" ]; then
+        have=$(sed -n -E 's/^version[[:space:]]*=[[:space:]]*([0-9]+\.[0-9]+).*/\1/p' "$1/pyvenv.cfg" | head -1)
+    fi
+    if [ "$have" = "$3" ] && "$1/bin/python3" -c 'import sys' >/dev/null 2>&1; then
+        echo reused
+        return 0
+    fi
+    rm -rf "$1"
+    if "$2" -m venv "$1" >/dev/null 2>&1; then
+        echo created
+        return 0
+    fi
+    rm -rf "$1"   # a half-built venv (no ensurepip) would look reusable next time
+    return 1
+}
+
+# Install the CLI as a wrapper that runs it under the interpreter the
+# dependencies were installed for. Its shebang (`env python3`) is a different
+# interpreter on RHEL/SUSE, where python3 is older than the one chosen above.
+# An older install left a SYMLINK here: remove it first, or writing to this
+# path would go through the link and overwrite bin/jt-proxense itself.
+install_cli_wrapper() {  # <dest> <python path> <cli script>
+    rm -f "$1"
+    cat > "$1" <<WRAPPER
+#!/bin/sh
+# Written by the jt-proxense installer: run the CLI with the interpreter its
+# Python dependencies were installed for. Re-running the installer updates it.
+exec "$2" "$3" "\$@"
+WRAPPER
+    chmod 0755 "$1"
+}
+
+# Record which interpreter the dependencies were installed for, so the service
+# and the CLI can say "the system Python changed" instead of failing with
+# ModuleNotFoundError after an OS upgrade (server/runtime_guard.py reads it).
+record_python_runtime() {  # <file> <python path>
+    local ver real
+    ver=$("$2" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    real=$(readlink -f "$2" 2>/dev/null || echo "$2")
+    printf 'version=%s\nexecutable=%s\n' "$ver" "$real" > "$1"
+    chmod 0644 "$1"
+}
+
+# END python-runtime helpers
 
 
 # ---------- config ----------
@@ -130,37 +217,38 @@ elif command -v zypper  >/dev/null 2>&1; then PM=zypper
 else die "No supported package manager (apt / dnf / yum / pacman / zypper) found."
 fi
 
+# curl is how this script usually arrived, so it is normally present already.
+# Asking for it anyway breaks RHEL / Rocky / Alma 9, whose default curl-minimal
+# CONFLICTS with the curl package: dnf refused the whole transaction and, under
+# set -e, the installer stopped at step 2 without a word.
+CURL_PKG=curl
+command -v curl >/dev/null 2>&1 && CURL_PKG=""
+PREREQ_FAIL="Installing the prerequisites with ${PM} failed (see the error above). Install python3, python3-pip, python3-venv and git by hand, then re-run this installer."
 case "$PM" in
-    apt)    DEBIAN_FRONTEND=noninteractive apt-get update -qq
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-pip python3-venv git curl ca-certificates >/dev/null ;;
-    dnf|yum) "$PM" install -y -q python3 python3-pip git curl ca-certificates >/dev/null
+    apt)    DEBIAN_FRONTEND=noninteractive apt-get update -qq || die "$PREREQ_FAIL"
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-pip python3-venv git $CURL_PKG ca-certificates >/dev/null \
+                || die "$PREREQ_FAIL" ;;
+    dnf|yum) "$PM" install -y -q python3 python3-pip git $CURL_PKG ca-certificates >/dev/null || die "$PREREQ_FAIL"
             # RHEL/Rocky/Alma 9 default python3 is 3.9 (< our 3.10 floor); pull
             # a modern interpreter from AppStream. Best-effort: newest first.
             for v in 3.12 3.11; do
                 "$PM" install -y -q "python$v" "python$v-pip" >/dev/null 2>&1 && break
             done ;;
-    pacman) pacman -Sy --noconfirm --needed python python-pip git curl ca-certificates >/dev/null ;;
-    zypper) zypper --non-interactive install -y python3 python3-pip git curl ca-certificates >/dev/null
+    pacman) pacman -Sy --noconfirm --needed python python-pip git $CURL_PKG ca-certificates >/dev/null || die "$PREREQ_FAIL" ;;
+    zypper) zypper --non-interactive install -y python3 python3-pip git $CURL_PKG ca-certificates >/dev/null || die "$PREREQ_FAIL"
             # openSUSE Leap default python3 can be < 3.10; pull a modern one.
             for v in 312 311; do
                 zypper --non-interactive install -y "python$v" "python$v-pip" >/dev/null 2>&1 && break
             done ;;
 esac
 
-# Pick the newest available interpreter >= 3.10 (RHEL/SUSE keep the old
-# default as `python3` even after installing python3.11/3.12).
-PY_BIN=""
-for cand in python3.13 python3.12 python3.11 python3.10 python3; do
-    command -v "$cand" >/dev/null 2>&1 || continue
-    v=$("$cand" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null) || continue
-    maj=${v%.*}; min=${v#*.}
-    if [ "$maj" -eq 3 ] && [ "$min" -ge 10 ]; then PY_BIN="$cand"; PY_VER="$v"; break; fi
-done
-if [ -z "$PY_BIN" ]; then
+# Pick the interpreter (see pick_python above for why python3 comes first).
+if PICK=$(pick_python); then
+    PY_BIN=${PICK% *}; PY_VER=${PICK#* }
+else
     die "Python 3.10+ required (found $(python3 -V 2>&1)). On RHEL/Rocky/Alma run: sudo $PM install python3.11 python3.11-pip"
 fi
-# Ensure pip exists for the chosen interpreter.
-"$PY_BIN" -m pip --version >/dev/null 2>&1 || "$PY_BIN" -m ensurepip --upgrade >/dev/null 2>&1 || true
+BASE_PY=$(command -v "$PY_BIN")
 ok "python ${PY_VER} (${PY_BIN}), git $(git --version | awk '{print $3}') ready"
 
 # ---------- 3. service user ----------
@@ -200,48 +288,57 @@ resolve_ref() {
 }
 TARGET_REF=$(resolve_ref)
 
+# Fresh installs and upgrades take the same path: init + fetch + reset. A plain
+# `git clone --branch <tag>` of an ANNOTATED tag makes git 2.53 print
+# "warning: refs/tags/vX.Y.Z ... is not a commit!" plus a page of detached-HEAD
+# advice, which reads like a failure to anyone installing for the first time.
 if [ -d "$INSTALL_DIR/.git" ]; then
-    # Explicit refspecs so a shallow clone can fetch either a tag or a branch.
-    git -C "$INSTALL_DIR" fetch --quiet --depth=1 origin \
-        "+refs/tags/${TARGET_REF}:refs/tags/${TARGET_REF}" 2>/dev/null \
-      || git -C "$INSTALL_DIR" fetch --quiet --depth=1 origin \
-        "+refs/heads/${TARGET_REF}:refs/remotes/origin/${TARGET_REF}"
-    git -C "$INSTALL_DIR" reset --hard --quiet \
-        "$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "refs/tags/${TARGET_REF}" \
-           || echo "origin/${TARGET_REF}")"
-    ok "updated from ${REPO_URL} (${TARGET_REF})"
+    FETCHED="updated"
 else
     if [ -e "$INSTALL_DIR/run.py" ]; then
         die "${INSTALL_DIR} is non-empty but not a git checkout. Refusing to overwrite. Move it aside or set JT_PROXENSE_INSTALL_DIR."
     fi
-    git clone --depth 1 --quiet --branch "${TARGET_REF}" "$REPO_URL" "$INSTALL_DIR"
-    ok "cloned ${REPO_URL} (${TARGET_REF})"
+    git init --quiet "$INSTALL_DIR"
+    git -C "$INSTALL_DIR" remote add origin "$REPO_URL"
+    FETCHED="cloned"
 fi
+# Explicit refspecs so a shallow fetch can take either a tag or a branch.
+git -C "$INSTALL_DIR" fetch --quiet --depth=1 origin \
+    "+refs/tags/${TARGET_REF}:refs/tags/${TARGET_REF}" 2>/dev/null \
+  || git -C "$INSTALL_DIR" fetch --quiet --depth=1 origin \
+    "+refs/heads/${TARGET_REF}:refs/remotes/origin/${TARGET_REF}" \
+  || die "Could not fetch ${TARGET_REF} from ${REPO_URL}."
+git -C "$INSTALL_DIR" reset --hard --quiet \
+    "$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "refs/tags/${TARGET_REF}^{commit}" \
+       || echo "origin/${TARGET_REF}")"
+ok "${FETCHED} from ${REPO_URL} (${TARGET_REF})"
 
 # ---------- 5. python deps ----------
-say "[5/7] Python dependencies (system pip)..."
-PIP_OPTS="--quiet --root-user-action=ignore"
-# PEP 668: modern Debian/Ubuntu (and others) mark the base environment
-# "externally managed" and refuse system-wide pip. This host is a dedicated
-# jt-proxense appliance, so permit it where that marker is present. Guarded so
-# older pip (which lacks the flag) is untouched.
-if "$PY_BIN" - <<'PYEOF' 2>/dev/null
-import os, sys, sysconfig
-sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)
-PYEOF
-then
-    PIP_OPTS="$PIP_OPTS --break-system-packages"
-    warn "PEP 668 environment — installing deps with --break-system-packages"
-fi
-"$PY_BIN" -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
-"$PY_BIN" -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt"
+say "[5/7] Python dependencies (virtual environment)..."
+# Everything goes into $INSTALL_DIR/.venv (see ensure_venv above). Installs made
+# before v1.2.0 put the dependencies into the system Python; those copies are
+# simply no longer used and are left alone, since other software may use them.
+VENV_DIR="$INSTALL_DIR/.venv"
+case "$PM" in
+    apt) VENV_HINT="sudo apt-get install python3-venv python${PY_VER}-venv" ;;
+    *)   VENV_HINT="install the venv module for ${BASE_PY}" ;;
+esac
+VENV_STATE=$(ensure_venv "$VENV_DIR" "$BASE_PY" "$PY_VER") \
+    || die "Could not create a Python virtual environment with ${BASE_PY} (venv/ensurepip missing). Fix: ${VENV_HINT}, then re-run this installer."
+ok "virtual environment ${VENV_STATE}: ${VENV_DIR}"
+PY_PATH="$VENV_DIR/bin/python3"
+PIP_OPTS="--quiet --disable-pip-version-check"
+"$PY_PATH" -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
+"$PY_PATH" -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt" \
+    || die "pip could not install the Python dependencies (see the error above). Check that pypi.org is reachable, then re-run this installer."
 ok "dependencies installed"
 
 # Smoke test imports — every runtime dep listed here.
 # Adding a new runtime dep? Update this line AND requirements.txt (SOP §7.1).
-"$PY_BIN" -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2, pyotp, qrcode, pam, cryptography, asyncssh, pyte" \
+"$PY_PATH" -c "import aiohttp, aiohttp_cors, yaml, certifi, aiosqlite, argon2, pyotp, qrcode, pam, cryptography, asyncssh, pyte" \
     || die "Smoke test failed — a runtime module did not import. Check requirements.txt."
 ok "import smoke test passed"
+record_python_runtime "$INSTALL_DIR/.python-runtime" "$PY_PATH"
 
 # ---------- 6. config.yaml + state dir + ownership + systemd ----------
 say "[6/7] Configuration, state directory, ownership, systemd unit..."
@@ -301,11 +398,12 @@ chown "${SERVICE_USER}:${SERVICE_USER}" "$KEY_DIR"
 chmod 750 "$KEY_DIR"
 ok "key dir ${KEY_DIR} ready"
 
-# Symlink the CLI back door so operators can run `jt-proxense ...` from anywhere.
+# The CLI back door, runnable as `jt-proxense ...` from anywhere, under the
+# same interpreter as the service (see install_cli_wrapper above).
 if [ -f "$INSTALL_DIR/bin/jt-proxense" ]; then
     chmod +x "$INSTALL_DIR/bin/jt-proxense"
-    ln -sf "$INSTALL_DIR/bin/jt-proxense" /usr/local/bin/jt-proxense
-    ok "CLI back door installed at /usr/local/bin/jt-proxense"
+    install_cli_wrapper /usr/local/bin/jt-proxense "$PY_PATH" "$INSTALL_DIR/bin/jt-proxense"
+    ok "CLI back door installed at /usr/local/bin/jt-proxense (python ${PY_VER})"
 fi
 
 # Ownership: CODE is root's, DATA is the service user's.
@@ -316,6 +414,13 @@ fi
 # achieved command execution inside that process could persist across a
 # restart. The service now owns only what it has to write.
 chown -R root:root "$INSTALL_DIR"
+# ...and readable by the service. umask 022 above covers what THIS run creates,
+# but a checkout made earlier under root's umask 077 keeps its 0700 directories
+# through every later `git reset` — the service account then cannot even enter
+# $INSTALL_DIR, and the service and every CLI call fail with "command not
+# found". The three private paths are left out; their modes are set just below.
+find "$INSTALL_DIR" \( -path "$INSTALL_DIR/config.yaml" -o -path "$INSTALL_DIR/config_backups" \
+        -o -path "$INSTALL_DIR/.ssh" \) -prune -o -exec chmod u+rwX,go+rX,go-w {} +
 
 # The two things the running service legitimately writes: the config it
 # rewrites when you add a cluster from the UI, and the backups it takes first.
@@ -347,14 +452,12 @@ else
 fi
 ok "code owned by root (read-only to the service); config, backups and .ssh owned by ${SERVICE_USER}"
 
-# Install systemd unit. The shipped unit runs `/usr/bin/python3`; on RHEL/SUSE
-# that's the old 3.9 default, so repoint ExecStart at the interpreter we chose.
+# Install systemd unit, pointed at the venv's interpreter (the shipped unit
+# already names /opt/jt-proxense/.venv/bin/python3; this keeps it right for any
+# other install dir, and replaces the system python3 of pre-v1.2.0 units).
 install -m 0644 "$INSTALL_DIR/packaging/${SERVICE_NAME}.service" "$SERVICE_FILE"
-PY_PATH=$(command -v "$PY_BIN")
-if [ -n "$PY_PATH" ] && [ "$PY_PATH" != "/usr/bin/python3" ]; then
-    sed -i -E "s#(ExecStart=)[^ ]*/python3([[:space:]])#\1${PY_PATH}\2#" "$SERVICE_FILE"
-    ok "service interpreter: ${PY_PATH}"
-fi
+sed -i -E "s#(ExecStart=)[^ ]*/python3([[:space:]])#\1${PY_PATH}\2#" "$SERVICE_FILE"
+ok "service interpreter: ${PY_PATH}"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 ok "systemd unit installed and enabled"
@@ -364,11 +467,17 @@ say "[7/7] Authentication setup..."
 
 # Detect whether auth is already enabled or any user already exists in the DB.
 # If either is true, we leave the auth state alone (idempotent across re-runs).
-AUTH_ENABLED=$(JTPROXENSE_DB_PATH="${STATE_DIR}/jt-proxense.db" \
+# Two steps, not one pipeline: under pipefail a failing `auth show` made the
+# pipeline print "0 0" AND fall through to `|| echo "0 0"`, so USER_COUNT came
+# out as two lines, compared unequal to "0", and the admin bootstrap was skipped
+# as "already configured" on a fresh install.
+AUTH_JSON=$(JTPROXENSE_DB_PATH="${STATE_DIR}/jt-proxense.db" \
     JTPROXENSE_CONFIG="$INSTALL_DIR/config.yaml" \
-    sudo -u "$SERVICE_USER" "$INSTALL_DIR/bin/jt-proxense" auth show 2>/dev/null \
-    | python3 -c "import json,sys;d=json.loads(sys.stdin.read() or '{}'); print('1' if d.get('auth.enabled') else '0', d.get('user_count') or 0)" \
-    2>/dev/null || echo "0 0")
+    sudo -u "$SERVICE_USER" "$PY_PATH" "$INSTALL_DIR/bin/jt-proxense" auth show 2>/dev/null) \
+    || { AUTH_JSON='{}'; warn "could not read the auth state as ${SERVICE_USER}; assuming a fresh install"; }
+AUTH_ENABLED=$(printf '%s' "$AUTH_JSON" \
+    | "$PY_PATH" -c "import json,sys;d=json.loads(sys.stdin.read() or '{}'); print('1' if d.get('auth.enabled') else '0', d.get('user_count') or 0)" \
+    2>/dev/null) || AUTH_ENABLED="0 0"
 
 CURRENT_AUTH=$(echo "$AUTH_ENABLED" | awk '{print $1}')
 USER_COUNT=$(echo "$AUTH_ENABLED" | awk '{print $2}')
@@ -378,10 +487,10 @@ if [ "$CURRENT_AUTH" = "1" ] || [ "$USER_COUNT" != "0" ]; then
 else
     if ask_yes_no "Enable authentication and bootstrap an 'admin' user?" y; then
         # 1) flip auth on
-        sudo -u "$SERVICE_USER" "$INSTALL_DIR/bin/jt-proxense" auth set-local >/dev/null
+        sudo -u "$SERVICE_USER" "$PY_PATH" "$INSTALL_DIR/bin/jt-proxense" auth set-local >/dev/null
         # 2) create admin with auto-generated password; capture stdout for the OTP
         BOOT_OUT=$(sudo -u "$SERVICE_USER" \
-            "$INSTALL_DIR/bin/jt-proxense" user add admin --role admin 2>&1) || \
+            "$PY_PATH" "$INSTALL_DIR/bin/jt-proxense" user add admin --role admin 2>&1) || \
             { warn "admin bootstrap failed: $BOOT_OUT"; }
         ADMIN_BOOTSTRAP_PW=$(echo "$BOOT_OUT" | awk -F': ' '/one-time password/ {print $2}')
         ADMIN_BOOTSTRAP_USER="admin"
@@ -399,7 +508,7 @@ fi
 # v0.3+: sweep any plaintext PVE password in config.yaml into the encrypted
 # secret store, then blank the yaml field. Idempotent — safe to run on
 # every install / re-run / upgrade.
-MIGR=$(sudo -u "$SERVICE_USER" "$INSTALL_DIR/bin/jt-proxense" secret migrate-yaml 2>&1 || true)
+MIGR=$(sudo -u "$SERVICE_USER" "$PY_PATH" "$INSTALL_DIR/bin/jt-proxense" secret migrate-yaml 2>&1 || true)
 if echo "$MIGR" | grep -q ": ok"; then
     N=$(echo "$MIGR" | grep -c ": ok")
     ok "migrated ${N} cluster password(s) from config.yaml → encrypted store at ${KEY_DIR}/master.key"
@@ -421,7 +530,10 @@ else
 fi
 
 # ---------- summary ----------
-HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+# `|| true`: minimal images (UBI, some RHEL 9 installs) have no `hostname`, and
+# under set -e + pipefail the failed lookup ended the script HERE — after the
+# admin account was created, before its one-time password was printed.
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}') || true
 [ -z "$HOST_IP" ] && HOST_IP="<your-server-ip>"
 
 cat <<EOF

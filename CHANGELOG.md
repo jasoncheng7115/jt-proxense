@@ -8,6 +8,198 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.0] — 2026-10-20
+
+Two new views of data PVE never puts in one place, a migration pre-check for the
+one failure the existing guards could not see, and an authorisation gap closed.
+Every PVE behaviour described below was checked against a live 9.2.3 cluster
+with read-only API calls.
+
+### Upgrade notes
+
+- **The Python dependencies now live in a virtual environment,**
+  `/opt/jt-proxense/.venv`, which the installer creates and the service runs
+  from. Upgrading builds it; there is nothing to do by hand. Earlier installs
+  put the dependencies into the system Python, and those copies (under
+  `/usr/local/lib/python3.*/`) are left where they are, unused, because other
+  software on the host may rely on them.
+- **Node certificates and SSH host keys are now pinned.** The first connection
+  to each node after the upgrade records its fingerprints; nothing changes that
+  day. If a node is later re-installed or its certificate renewed, jt-proxense
+  stops talking to it and shows a red notice until an admin accepts the new
+  fingerprint (Settings → Server → Trusted node fingerprints, or
+  `jt-proxense trust accept`). Nodes with `verify_ssl: true` keep ordinary CA
+  validation; `server.tls_pinning: false` restores the old behaviour.
+- **Users with cluster-scoped grants see less over REST** — see Security. A user
+  granted only some clusters now gets only those from `/api/clusters`,
+  `/api/vms` and the rest, the same as the WebSocket already gave them. Anyone
+  with a `*` grant, and every install with `auth.enabled: false`, sees no change.
+- **Host upgrade now waits up to 10 minutes for the package lock** instead of
+  failing the host at once when `pve-daily-update` or unattended-upgrades holds
+  it.
+- **A browser tab left open across the upgrade reloads itself once** the first
+  time it opens a view: the interface is now split into per-view files, and the
+  old tab asks for files the new version no longer has.
+
+### Security
+
+- **TLS certificates and SSH host keys of PVE nodes are pinned (trust on first
+  use).** `verify_ssl` defaults to off because PVE ships a self-signed
+  certificate, and SSH connected with `known_hosts=None` — so jt-proxense, which
+  holds API tokens, cached tickets and root SSH to every node, accepted whatever
+  answered on a node's address. Flipping `verify_ssl` on would have cut off
+  every stock PVE; instead the first fingerprint seen is recorded and a
+  different one is refused and kept for review. Every PVE connection — API
+  polling, consoles, host shell, thumbnails, downloads, every SSH feature — goes
+  through the pin. Accepting or forgetting a fingerprint is admin-only and
+  audited with both values. Verified against the live cluster: the pinned
+  fingerprint equals the one PVE reports for its own `pveproxy` certificate.
+- **The REST data endpoints ignored per-cluster scoping.** v1.1.0 limited the
+  WebSocket snapshot to the clusters a session holds a grant on, but
+  `/api/clusters`, `/api/clusters/{id}`, `/api/nodes`, `/api/vms`,
+  `/api/storages`, `/api/ceph` and `/api/summary` kept answering with every
+  cluster to any logged-in user — the same data, one request away. They now go
+  through the same scope check; an out-of-scope `/api/clusters/{id}` answers
+  exactly like a missing one, and summary totals count only visible clusters.
+  Found by generating the route permission table (below) and reading the rows
+  gated only at "logged in".
+- **Backup failure messages no longer carry the PBS repository string.** The
+  `proxmox-backup-client` command line vzdump quotes names the PBS user, token
+  id and host; the new protection view redacts it before any viewer sees it.
+
+### Added
+
+- **Capacity forecast and idle guests (Health → Capacity).** Each storage's
+  30-day growth, fitted from PVE's own RRD, with the projected days to 80 % and
+  to full — only for storage that is actually growing at a steady rate
+  (r² ≥ 0.5); flat, shrinking and irregular storage get no invented date.
+  Running guests that spent a week under 2 % CPU (and 5 % at the 95th
+  percentile) with almost no network traffic are listed as candidates for
+  shutdown or right-sizing; nothing is acted on. Storage projected to reach
+  80 % within 30 days and idle guests also appear as Health findings.
+- **Live-migration CPU check.** PVE accepts a live migration the target's CPU
+  cannot run and fails it inside the task. The migration dialog, the
+  migrate-targets list and host-upgrade evacuation now refuse, with the reason:
+  `cpu: host` (or `max`) across CPU vendors or onto a host missing an
+  instruction-set feature the source has; `x86-64-v2`…`v4` onto a host without
+  that level; a `+flag` PVE reports as unsupported on the target; nested
+  virtualisation across Intel/AMD. Models it cannot judge (named CPU models,
+  custom models) are never blocked. Read from the PVE API, no SSH. On the test
+  cluster — one AMD node, four Intel — it found a `cpu: host` guest on the AMD
+  node that could not live-migrate anywhere.
+- **Backups → Protection.** Every guest's last successful backup against a
+  chosen RPO (12 h / 24 h / 48 h / 7 d), whether its latest attempt failed and
+  why, and which scheduled jobs cover it. Built from vzdump **task history**,
+  not from the backup storage: PVE hides backup files from a token without
+  `VM.Backup`, so a monitoring token sees an empty datastore (a 6.7 TB PBS store
+  listed as empty on the test cluster). Guests on a node that could not be read
+  are shown as "Unknown", never as unprotected.
+- **Backups → Snapshots.** Every snapshot on the cluster with its age, filterable
+  to the old ones — they pin storage and slow writes on qcow2 / ZFS / Ceph.
+- **Host upgrade shows apt progress:** downloading n / m, unpacking, configuring,
+  and who holds the package lock while it waits, as a progress bar instead of
+  a scrolling log.
+- **`API-ROUTES.md`: every route, the role it needs, and whether it is audited**
+  — generated from the live router (301 routes), with a test that fails when the
+  file and the code disagree. API.md documented a few dozen.
+
+### Fixed
+
+- **The installer failed on Ubuntu 26.04** with `Cannot uninstall cryptography
+  46.0.5 … no RECORD file`. The newest `asyncssh` needs `cryptography` 48 or
+  later; the distribution ships 46 as its own package, which pip cannot replace.
+  Forcing a newer copy over it is no way out either: it breaks the
+  distribution's own `pyOpenSSL`. The installer now installs into its own
+  virtual environment and never touches the system's packages. The same failure
+  awaited any system whose distribution packages an older copy of a dependency.
+  Alongside it:
+  - A pip failure now ends with the troubleshooting link like every other
+    failure, instead of stopping silently.
+  - A fresh install no longer prints `warning: refs/tags/vX.Y.Z … is not a
+    commit!` and a page of detached-HEAD advice (git 2.53 on an annotated tag).
+    Harmless, but it read like an error.
+  - On hosts where root's umask is 077, the checkout was unreadable to the
+    service account, so the service and every CLI call failed. The installer
+    now creates with 022 and repairs the modes of a checkout made earlier;
+    `config.yaml`, `config_backups/` and `.ssh/` keep their private modes.
+  - On RHEL / Rocky / Alma 9 the installer stopped at step 2 without a message:
+    it asked for `curl`, which conflicts with the default `curl-minimal`. It now
+    skips curl when one is already installed, and a failed prerequisite step
+    ends with the troubleshooting link.
+  - On a host without the `hostname` command (minimal RHEL 9 / UBI images) the
+    installer stopped right after creating the admin account, before printing
+    its one-time password.
+  - If the installer could not read the auth state, it treated the install as
+    "already configured" and skipped creating the admin account. It now
+    assumes a fresh install and says so.
+- **An operating-system release upgrade broke the install.** The installer
+  pip-installs the dependencies into the system Python, and wrote a versioned
+  interpreter such as `/usr/bin/python3.10` into the systemd unit. An upgrade
+  like Ubuntu 22.04 → 24.04 or Debian 12 → 13 replaces that Python: the service
+  then failed with `203/EXEC` (interpreter removed) or `No module named
+  'aiohttp'`, and the `jt-proxense` command failed the same way — typically only
+  after the reboot that completes the upgrade. Now:
+  - The installer prefers the stable `/usr/bin/python3` whenever it is new
+    enough and builds the virtual environment from it, so the service's
+    interpreter still starts after an upgrade, and rebuilds the environment
+    when the Python version has changed.
+  - It records which Python the dependencies were installed for. The service
+    and the CLI check before importing anything, and say what changed and that
+    re-running the installer fixes it. The service stops once (exit 78, which
+    the unit does not restart) instead of crash-looping.
+  - A troubleshooting entry covers it, including the messages older installs
+    show.
+  Re-running the installer after an OS release upgrade remains the fix; it keeps
+  configuration, users and data.
+- **The `jt-proxense` command could use a different Python than the service.**
+  It was a symlink run by `env python3`, which on RHEL/Rocky/Alma is 3.9 while
+  the installer installs the dependencies for 3.11+. The command, and the
+  installer's own admin-user setup that calls it, could fail there. It is now a
+  small wrapper that runs the CLI with the interpreter the dependencies belong to.
+- **The per-VM backup history failed outright.** It called `.lower()` on the
+  storage `content` field, which is a list, and raised `AttributeError` for any
+  storage with content set. It also matched backups only by the `-<vmid>-`
+  pattern of file names, which PBS volumes (`backup/vm/100/…`) never contain,
+  so PBS backups could not have appeared even without the crash. When the list
+  is empty it now says that PVE may be hiding the files rather than implying
+  there are none.
+- **The user administration page could go blank** when opened by URL: a hook ran
+  after an early return, so the number of hooks changed when the login state
+  arrived. Found by the new lint step.
+- **Ceph monitor roles:** when the status payload carried no monitor list, every
+  monitor in quorum was labelled leader (PVE marks all of them `quorum: 1`).
+  The leader is now the lowest-ranked monitor in quorum.
+- **The cluster summary counted container templates** as containers, so it
+  disagreed with the per-node counts.
+- **ESXi (preview):** a cluster whose password had been moved into the
+  encrypted store at startup — which happens to every cluster's — could not log
+  in again after a restart; and one without `auth.user` logged in as
+  `root@pam`. Both fixed; the module docs now state the real TLS default.
+- **`console.open` was audited as a success before PVE had accepted the
+  connection.** A console PVE refused now leaves an error row instead.
+
+### Changed
+
+- **Migration checks read the guest's live configuration** (one request per
+  check) instead of the poll cache, so a disk moved minutes earlier is judged
+  where it is now.
+- **Slow-changing data is polled on its own schedule.** Node network rates came
+  from each node's RRD on every 2-second poll, although PVE updates it once a
+  minute; now every 30 s. Guest disk layouts were re-read for every guest every
+  minute (about 2 requests/s on a 140-guest cluster); now on first sight, after
+  a migration, and every 10 minutes, spread out.
+- **The interface loads per view.** The single 1.7 MB bundle is now a 391 KB core
+  (122 KB gzipped) plus one file per view, fetched on first visit.
+
+### Development
+
+- ESLint (flat config, correctness and React-hooks rules) as `npm run lint`,
+  also run in CI. Warnings do not fail the build; errors do.
+- New tests for `cluster_manager`, `pve_client`, `console_proxy` and the ESXi
+  adapter (0–32% → 52–99% line coverage), with fake PVE and vCenter servers
+  speaking real TLS; each guard was checked by breaking the code and watching
+  the test fail.
+
 ## [1.1.3] — 2026-09-14
 
 ### Added

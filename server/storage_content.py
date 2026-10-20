@@ -24,6 +24,7 @@ import aiohttp
 from aiohttp import web
 
 from . import audit
+from . import trust_store
 from . import task_outcome
 from . import console_sessions
 from . import secret_store
@@ -342,7 +343,8 @@ async def upload_handler(request: web.Request) -> web.Response:
         f"/api2/json/nodes/{node}/storage/{storage}/upload"
     )
     pve_ssl: ssl.SSLContext | None
-    pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+    pve_ssl = await trust_store.tls_ssl(
+        pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
     headers = {"Cookie": f"PVEAuthCookie={ticket}"}
     if csrf:
         headers["CSRFPreventionToken"] = csrf

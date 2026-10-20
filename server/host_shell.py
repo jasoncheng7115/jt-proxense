@@ -27,6 +27,7 @@ from aiohttp import web
 
 from .cluster_manager import cluster_manager
 from . import audit
+from . import trust_store
 from . import console_sessions
 from . import secret_store
 from .config import get_config
@@ -86,7 +87,8 @@ async def host_shell_prepare_handler(request: web.Request) -> web.Response:
     )
     if pve_node_cfg is None:
         return web.json_response({"error": "no_pve_node"}, status=502)
-    pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+    pve_ssl = await trust_store.tls_ssl(
+        pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
 
     user = (request.get("user") or {}).get("username", "anonymous")
     ip   = request.get("client_ip", "unknown")
@@ -230,7 +232,8 @@ async def host_shell_term_ws_handler(request: web.Request) -> web.WebSocketRespo
     )
     if pve_node_cfg is None:
         return web.json_response({"error": "no_pve_node"}, status=502)
-    pve_ssl = None if pve_node_cfg.verify_ssl else ssl._create_unverified_context()
+    pve_ssl = await trust_store.tls_ssl(
+        pve_node_cfg.host, pve_node_cfg.port, pve_node_cfg.verify_ssl)
 
     if not entry.vnc_ticket or not entry.pve_port:
         return web.json_response({"error": "stale_token"}, status=409)

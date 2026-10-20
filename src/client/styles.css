@@ -2847,3 +2847,25 @@ button:active:not(:disabled),
 .bm-note-detail {
   margin-top: 6px; font-size: 12px; opacity: .8; line-height: 1.55;
 }
+
+/* Placeholder while a lazily-loaded view's chunk arrives (normally a few
+   hundred ms on first visit, then cached). A hologram ring, not a blank. */
+.view-loading {
+  height: 100%;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: view-loading-in 0.3s ease-out 0.15s both;
+}
+.view-loading-ring {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 240, 255, 0.15);
+  border-top-color: var(--primary);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.25);
+  animation: view-loading-spin 0.9s linear infinite;
+}
+@keyframes view-loading-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes view-loading-spin { to { transform: rotate(360deg); } }

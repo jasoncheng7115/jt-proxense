@@ -29,6 +29,23 @@ _CACHE_TTL_S = 30.0
 _cache: dict[tuple, tuple[float, list]] = {}
 
 
+def _content_set(raw) -> set[str]:
+    """StorageMetrics.content is a LIST (cluster_manager splits PVE's csv);
+    dict-shaped test doubles and older callers hand over the csv string."""
+    if isinstance(raw, (list, tuple, set)):
+        return {str(x).strip().lower() for x in raw if str(x).strip()}
+    return {p.strip().lower() for p in str(raw or "").split(",") if p.strip()}
+
+
+def _row_is_for(row: dict, vmid: int) -> bool:
+    """PVE tags every backup volume with its `vmid`; trust that first. The
+    volid pattern is only a fallback — and it cannot match PBS at all, whose
+    volids look like 'pbs:backup/vm/100/2026-09-27T18:30:02Z' (no '-100-')."""
+    if row.get("vmid") is not None:
+        return str(row.get("vmid")) == str(vmid)
+    return _matches_vmid(row.get("volid", ""), vmid)
+
+
 def _matches_vmid(volid: str, vmid: int) -> bool:
     """vzdump volid pattern: '{storage}:backup/vzdump-{kind}-{vmid}-{date}.vma.zst'.
     Accept both qemu / lxc; reject neighbouring vmids that share a prefix
@@ -53,7 +70,7 @@ async def list_vm_backups_handler(request: web.Request) -> web.Response:
     now = time.monotonic()
     hit = _cache.get(cache_key)
     if hit and now - hit[0] < _CACHE_TTL_S:
-        return web.json_response({"backups": hit[1], "count": len(hit[1])})
+        return web.json_response(_body(hit[1]))
 
     # Build (node, storage) pairs that can hold backups. cluster.cache.storages
     # already has the right shape; we pull via list_storage_content per-pair.
@@ -62,12 +79,13 @@ async def list_vm_backups_handler(request: web.Request) -> web.Response:
     for skey, st in cluster.cache.storages.items():
         node = getattr(st, "node", None)
         name = getattr(st, "storage", None)
-        content = (getattr(st, "content", "") or "").lower()
+        # `.lower()` on this used to raise AttributeError for every storage
+        # with content set — it is a list — so the whole endpoint failed.
+        content = _content_set(getattr(st, "content", None))
         if not node or not name:
             continue
-        # PVE storages have a 'content' csv: 'rootdir,images,iso,vztmpl,backup'.
         # If unset (e.g. unreachable), still try — the call returns empty.
-        if "backup" in content or content == "":
+        if "backup" in content or not content:
             key = (node, name)
             if key not in seen:
                 seen.add(key)
@@ -81,7 +99,7 @@ async def list_vm_backups_handler(request: web.Request) -> web.Response:
             out: list[dict] = []
             for r in rows or []:
                 volid = r.get("volid", "")
-                if not _matches_vmid(volid, vmid):
+                if not _row_is_for(r, vmid):
                     continue
                 out.append({
                     "volid":   volid,
@@ -102,13 +120,36 @@ async def list_vm_backups_handler(request: web.Request) -> web.Response:
     results = await asyncio.gather(
         *(fetch(n, s) for (n, s) in targets), return_exceptions=False
     )
+    # A shared storage (PBS / NFS) answers identically from every node.
     backups: list[dict] = []
+    seen_vol: set[str] = set()
     for r in results:
-        backups.extend(r)
+        for b in r:
+            if b["volid"] in seen_vol:
+                continue
+            seen_vol.add(b["volid"])
+            backups.append(b)
     backups.sort(key=lambda b: b.get("ctime") or 0, reverse=True)
 
     _cache[cache_key] = (now, backups)
-    return web.json_response({"backups": backups, "count": len(backups)})
+    return web.json_response(_body(backups))
+
+
+# PVE drops backup volumes the caller may not restore (needs VM.Backup on the
+# guest or Datastore.Allocate on the storage) and still answers 200 — so an
+# empty list from a monitoring token does NOT mean "no backups".
+_EMPTY_NOTE = ("no backup files are visible to this API token. PVE hides backup "
+               "volumes unless the token has VM.Backup on the guest or "
+               "Datastore.Allocate on the storage, so this may not mean there are "
+               "none — the Backups view's protection tab reads backup task history "
+               "instead, which needs only Sys.Audit.")
+
+
+def _body(backups: list) -> dict:
+    out = {"backups": backups, "count": len(backups)}
+    if not backups:
+        out["note"] = _EMPTY_NOTE
+    return out
 
 
 @role_required("operator")

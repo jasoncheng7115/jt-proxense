@@ -193,6 +193,15 @@ export function UserAdmin() {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   };
 
+  // Every hook must run before the early return below: isAdminViewer comes
+  // from auth state, which is still null on the first render of a deep link
+  // to this page, so a hook after the return changed the hook count between
+  // renders and React blanked the page.
+  const usersSorted = useMemo(
+    () => [...users].sort((a, b) => a.username.localeCompare(b.username)),
+    [users],
+  );
+
   if (!isAdminViewer) {
     return (
       <div className="user-admin-noauth">
@@ -203,11 +212,6 @@ export function UserAdmin() {
       </div>
     );
   }
-
-  const usersSorted = useMemo(
-    () => [...users].sort((a, b) => a.username.localeCompare(b.username)),
-    [users],
-  );
 
   return (
     <div className="user-admin">

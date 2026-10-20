@@ -1463,12 +1463,13 @@ const migratingVMs = useMemo(() => {
         return isAllClusters ? clusterLabel : 'all';
       case 'type':
         return `${clusterPrefix}${vm.type === 'qemu' ? 'VM' : 'CT'}`;
-      case 'tag':
+      case 'tag': {
         const vmTags = normaliseTags(vm.tags);
         if (vmTags.length > 0) {
           return `${clusterPrefix}${vmTags[0]}`;
         }
         return `${clusterPrefix}(no tag)`;
+      }
       case 'node':
       default:
         return `${clusterPrefix}${vm.node}`;

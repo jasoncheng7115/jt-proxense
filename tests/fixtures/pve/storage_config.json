@@ -1,0 +1,5 @@
+[
+  {"storage": "local-zfs", "type": "zfspool", "pool": "rpool/data", "content": "images,rootdir", "sparse": 1, "digest": "0123456789abcdef"},
+  {"storage": "ceph-rbd", "type": "rbd", "pool": "rbd", "content": "images,rootdir", "krbd": 0, "digest": "0123456789abcdef"},
+  {"storage": "pbs1", "type": "pbs", "server": "203.0.113.50", "datastore": "store1", "content": "backup", "nodes": "pve1", "digest": "0123456789abcdef"}
+]

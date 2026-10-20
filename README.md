@@ -1,4 +1,4 @@
-# JT-PROXENSE v1.1.3
+# JT-PROXENSE v1.2.0
 
 > 中文版本：[README_zh-tw.md](README_zh-tw.md)
 
@@ -461,6 +461,7 @@ jt-proxense/
 ```bash
 git clone https://github.com/jasoncheng7115/jt-proxense.git
 cd jt-proxense
+python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 npm install
 npm run build           # rebuilds dist/

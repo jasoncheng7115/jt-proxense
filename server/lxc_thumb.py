@@ -85,11 +85,8 @@ async def capture_lxc_text_png(
 
     Raises on protocol failure / timeout — caller turns that into a 502.
     """
-    pve_ssl: Optional[ssl.SSLContext]
-    if verify_ssl:
-        pve_ssl = None
-    else:
-        pve_ssl = ssl._create_unverified_context()
+    from . import trust_store
+    pve_ssl = await trust_store.tls_ssl(pve_host, pve_port, verify_ssl)
 
     # 1. Mint termproxy ticket. Sends raw Cookie header (same gotcha as
     #    everywhere else: aiohttp's `cookies={...}` percent-encodes PVE's

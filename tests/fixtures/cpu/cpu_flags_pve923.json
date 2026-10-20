@@ -1,0 +1,120 @@
+[
+ {
+  "description": "Controls nested virtualization, namely 'svm' for AMD CPUs and 'vmx' for Intel CPUs. Live migration still only works if it's the same flag on both sides. Use a CPU model similar to the host, with the same vendor, not x86-64-vX!",
+  "name": "nested-virt",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111",
+   "host-114"
+  ]
+ },
+ {
+  "description": "Activate AES instruction set for HW acceleration.",
+  "name": "aes",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111",
+   "host-114"
+  ]
+ },
+ {
+  "description": "Improves Spectre mitigation performance with AMD CPUs, best used with 'virt-ssbd'.",
+  "name": "amd-ssbd",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111",
+   "host-114"
+  ]
+ },
+ {
+  "description": "Allows improved Spectre mitigation with AMD CPUs.",
+  "name": "ibpb",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111",
+   "host-114"
+  ]
+ },
+ {
+  "description": "Required to let the guest OS know if MDS is mitigated correctly.",
+  "name": "md-clear",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111"
+  ]
+ },
+ {
+  "description": "Meltdown fix cost reduction on Westmere, Sandy-, and IvyBridge Intel CPUs.",
+  "name": "pcid",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111"
+  ]
+ },
+ {
+  "description": "Allow guest OS to use 1GB size pages, if host HW supports it.",
+  "name": "pdpe1gb",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111",
+   "host-114"
+  ]
+ },
+ {
+  "description": "Allows improved Spectre mitigation with Intel CPUs.",
+  "name": "spec-ctrl",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111"
+  ]
+ },
+ {
+  "description": "Protection for 'Speculative Store Bypass' for Intel models.",
+  "name": "ssbd",
+  "supported-on": [
+   "host-108",
+   "host-109",
+   "host-110",
+   "host-111",
+   "host-114"
+  ]
+ },
+ {
+  "description": "Basis for 'Speculative Store Bypass' protection for AMD models.",
+  "name": "virt-ssbd",
+  "supported-on": [
+   "host-114"
+  ]
+ },
+ {
+  "description": "Notifies guest OS that host is not vulnerable for Spectre on AMD CPUs.",
+  "name": "amd-no-ssb",
+  "supported-on": []
+ },
+ {
+  "description": "Improve performance for nested virtualization. Only supported on Intel CPUs.",
+  "name": "hv-evmcs",
+  "supported-on": []
+ },
+ {
+  "description": "Improve performance in overcommitted Windows guests. May lead to guest bluescreens on old CPUs.",
+  "name": "hv-tlbflush",
+  "supported-on": []
+ }
+]

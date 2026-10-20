@@ -8,6 +8,150 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [1.2.0] — 2026-10-20
+
+兩個 PVE 從來不會放在同一處的新檢視、一項現有防護看不到的遷移前檢查，以及補上一個
+授權缺口。以下描述的每一項 PVE 行為，都用唯讀 API 在一座 9.2.3 叢集上實際核對過。
+
+### 升級注意事項
+
+- **Python 相依套件現在放在虛擬環境裡**，也就是 `/opt/jt-proxense/.venv`，由安裝程式
+  建立，服務也從這裡執行。升級時會自動建立，不需要手動處理。之前的安裝把相依套件裝進
+  系統的 Python，那些複本 (在 `/usr/local/lib/python3.*/` 底下) 會原封不動留著、不再
+  使用，因為主機上其他軟體可能還在用。
+- **節點憑證與 SSH 主機金鑰現在會被鎖定。** 升級後第一次連到每個節點時會記下它的
+  指紋，當天不會有任何變化。之後若節點重新安裝或更換憑證，jt-proxense 會停止與它
+  通訊並顯示紅色提醒，直到 admin 接受新指紋 (設定 → 伺服器 → 受信任的節點指紋，或
+  `jt-proxense trust accept`)。設定 `verify_ssl: true` 的節點維持一般的 CA 驗證；
+  `server.tls_pinning: false` 可恢復舊行為。
+- **只擁有部分叢集權限的使用者，透過 REST 看到的會變少** —— 見「安全性」。只被授權
+  部分叢集的使用者，從 `/api/clusters`、`/api/vms` 等端點只會拿到那些叢集，與
+  WebSocket 原本給的一致。擁有 `*` 授權的人，以及 `auth.enabled: false` 的安裝，
+  都沒有變化。
+- **主機升級現在最多等 10 分鐘取得套件鎖**，不再因為 `pve-daily-update` 或
+  unattended-upgrades 正占用套件鎖就立刻讓該主機失敗。
+- **升級時沒關的瀏覽器分頁，第一次開啟檢視時會自動重新載入一次**：介面現在拆成每個
+  檢視一個檔案，舊分頁會去要新版已經沒有的檔案。
+
+### 安全性
+
+- **PVE 節點的 TLS 憑證與 SSH 主機金鑰會被鎖定 (首次使用即信任)。** `verify_ssl`
+  預設關閉，因為 PVE 使用自簽憑證；SSH 則以 `known_hosts=None` 連線 —— 所以握有
+  API token、快取 ticket 與每個節點 root SSH 的 jt-proxense，會接受任何在節點位址
+  上回應的對象。直接打開 `verify_ssl` 會讓每一台原廠 PVE 都連不上；改為記下第一次
+  看到的指紋，之後不同的指紋會被拒絕並留下供檢查。所有對 PVE 的連線 —— API 輪詢、
+  主控台、主機 shell、縮圖、下載、所有 SSH 功能 —— 都經過這道鎖定。接受或忘記指紋
+  僅限 admin，並連同新舊兩個值寫入稽核記錄。已在實際叢集上驗證：鎖定的指紋與 PVE
+  自己回報的 `pveproxy` 憑證指紋相同。
+- **REST 資料端點沒有套用依叢集的權限範圍。** v1.1.0 把 WebSocket 快照限制在該工作
+  階段有授權的叢集，但 `/api/clusters`、`/api/clusters/{id}`、`/api/nodes`、
+  `/api/vms`、`/api/storages`、`/api/ceph` 與 `/api/summary` 仍對任何已登入的使用者
+  回傳所有叢集 —— 同一份資料，只差一個請求。現在它們走同一套範圍檢查；超出範圍的
+  `/api/clusters/{id}` 回應與不存在的叢集完全相同，摘要的總數也只計入看得到的叢集。
+  是在產生路由權限表 (見下) 時，讀那些只要求「已登入」的列發現的。
+- **備份失敗訊息不再帶有 PBS repository 字串。** vzdump 引用的
+  `proxmox-backup-client` 指令列會寫出 PBS 使用者、token id 與主機；新的保護狀態
+  檢視在任何檢視者看到之前就把它遮掉。
+
+### 新增
+
+- **容量預測與閒置虛擬機 (健康 → 容量預測)。** 以 PVE 自己的 RRD 擬合每個儲存過去
+  30 天的成長，推算到 80% 與到滿的天數 —— 只針對穩定成長 (r² ≥ 0.5) 的儲存；持平、
+  減少或變化不規則的儲存不會得到一個編出來的日期。一週內 CPU 平均低於 2% (p95 低於
+  5%) 且幾乎沒有網路流量的運作中虛擬機，會列為可關機或調整規格的候選；不會自動
+  執行任何動作。30 天內預計到 80% 的儲存與閒置虛擬機，也會出現在健康頁的項目中。
+- **即時遷移的 CPU 檢查。** 目標主機的 CPU 跑不了的即時遷移，PVE 會先接受，再在作業
+  裡失敗。遷移對話框、可遷移目標清單與主機升級的撤離，現在都會拒絕並說明原因：
+  `cpu: host` (或 `max`) 跨 CPU 廠牌，或遷到缺少來源端指令集功能的主機；
+  `x86-64-v2`…`v4` 遷到沒有該等級的主機；PVE 回報目標不支援的 `+flag`；跨
+  Intel/AMD 的巢狀虛擬化。無法判斷的型號 (具名 CPU 型號、自訂型號) 一律不擋。資料
+  來自 PVE API，不需 SSH。在測試叢集上 —— 一台 AMD、四台 Intel —— 它找到一台位於
+  AMD 節點、`cpu: host` 的虛擬機，哪裡都無法即時遷移。
+- **備份 → 保護狀態。** 每台虛擬機最近一次成功備份與所選 RPO (12 小時 / 24 小時 /
+  48 小時 / 7 天) 的比較、最近一次嘗試是否失敗及原因，以及涵蓋它的排程。依據 vzdump
+  **作業記錄**，而不是備份儲存：PVE 會對沒有 `VM.Backup` 的 token 隱藏備份檔，所以
+  監控用 token 看到的是空的 datastore (測試叢集上一個 6.7 TB 的 PBS 儲存列出來是空
+  的)。位於讀不到的節點上的虛擬機顯示為「無法判斷」，絕不會顯示為未受保護。
+- **備份 → 快照。** 叢集上每一個快照與其存在時間，可只列出過舊的 —— 它們會占住儲存
+  空間，也會拖慢 qcow2 / ZFS / Ceph 上的寫入。
+- **主機升級顯示 apt 進度：** 下載 n / m、解開、設定，以及等待時是誰占住套件鎖，以
+  進度列呈現，而不是一直捲動的記錄。
+- **`API-ROUTES.md`：每一條路由、需要的角色，以及是否寫入稽核記錄** —— 由實際的
+  router 產生 (301 條)，並有測試在檔案與程式不一致時失敗。API.md 只記載了幾十條。
+
+### 修正
+
+- **安裝程式在 Ubuntu 26.04 上失敗**，訊息是 `Cannot uninstall cryptography 46.0.5 …
+  no RECORD file`。最新的 `asyncssh` 需要 `cryptography` 48 以上，發行版用自己的套件
+  附了 46，而 pip 無法替換它。硬把新版蓋上去也不是辦法：會弄壞發行版自己的
+  `pyOpenSSL`。安裝程式現在把相依套件裝進自己的虛擬環境，完全不碰系統的套件。任何
+  用自己的套件附上某個相依套件舊版的發行版，遲早都會遇到同樣的失敗。一併修正：
+  - pip 失敗時，現在會像其他失敗一樣附上疑難排解連結，而不是無聲地停下。
+  - 全新安裝不再印出 `warning: refs/tags/vX.Y.Z … is not a commit!` 和一整頁
+    detached HEAD 說明 (git 2.53 處理附註標籤時)。這無害，但看起來像錯誤。
+  - root 的 umask 是 077 的主機上，服務帳號讀不到原始碼，服務和每一個 CLI 指令都會
+    失敗。安裝程式現在以 022 建立檔案，並修正先前 checkout 的權限；`config.yaml`、
+    `config_backups/` 與 `.ssh/` 維持各自的私有權限。
+  - 在 RHEL／Rocky／Alma 9 上，安裝程式會在第 2 步無聲地停下：它要求安裝 `curl`，
+    而這和預設的 `curl-minimal` 衝突。現在已經有 curl 時會略過，前置需求安裝失敗時也會
+    附上疑難排解連結。
+  - 在沒有 `hostname` 指令的主機上 (精簡的 RHEL 9／UBI 映像)，安裝程式會在建立 admin
+    帳號之後、印出一次性密碼之前就停下。
+  - 安裝程式讀不到認證狀態時，會當成「已經設定好」而略過建立 admin 帳號。現在會當成
+    全新安裝，並明確提示。
+- **升級作業系統大版本會讓安裝壞掉。** 安裝程式用 pip 把相依套件裝進系統 Python，
+  並把帶版本號的直譯器 (例如 `/usr/bin/python3.10`) 寫進 systemd unit。像 Ubuntu
+  22.04 → 24.04、Debian 12 → 13 這種升級會換掉那個 Python：服務因此以 `203/EXEC`
+  (直譯器被移除) 或 `No module named 'aiohttp'` 失敗，`jt-proxense` 指令也一樣 ——
+  而且通常要到完成升級的那次重開機之後才出現。現在：
+  - 安裝程式在 `/usr/bin/python3` 版本夠新時優先使用它，並用它建立虛擬環境，所以
+    升級後服務的直譯器仍然能啟動；Python 版本改變時，安裝程式會重建虛擬環境。
+  - 安裝時會記錄相依套件是裝給哪個 Python。服務和 CLI 在載入任何東西之前會先檢查，
+    並說明變了什麼、重新執行安裝程式就能修好。服務會停止一次 (exit 78，unit 不會
+    重啟它)，而不是一直重啟。
+  - 疑難排解頁新增一條，也涵蓋舊版本安裝會出現的訊息。
+  升級作業系統大版本之後重新執行安裝程式，仍然是修復方式；設定、使用者與資料都會
+  保留。
+- **`jt-proxense` 指令可能和服務用的不是同一個 Python。** 它原本是由 `env python3`
+  執行的 symlink，而在 RHEL/Rocky/Alma 上 `python3` 是 3.9，安裝程式卻把相依套件
+  裝給 3.11 以上。這個指令，以及安裝程式自己呼叫它來建立 admin 帳號的步驟，在那些
+  系統上都可能失敗。現在它是一個小 wrapper，用相依套件所屬的直譯器執行 CLI。
+- **單一虛擬機的備份歷史整個失敗。** 它對儲存的 `content` 欄位呼叫 `.lower()`，而那是
+  list，所以只要有設定 content 的儲存就會拋出 `AttributeError`。它也只用檔名的
+  `-<vmid>-` 樣式比對備份，而 PBS 的 volume (`backup/vm/100/…`) 從來不含這個樣式，
+  所以就算沒有當掉，PBS 備份也不可能出現。清單為空時，現在會說明可能是 PVE 把檔案
+  藏起來了，而不是暗示沒有備份。
+- **使用者管理頁用網址直接開啟時可能整頁空白：** 有一個 hook 放在提早 return 之後，
+  登入狀態一到，hook 的數量就變了。由新的 lint 步驟發現。
+- **Ceph 監視器角色：** 狀態資料沒有監視器清單時，每個在 quorum 裡的監視器都被標成
+  leader (PVE 把它們全部標為 `quorum: 1`)。現在 leader 是 quorum 中 rank 最小的
+  監視器。
+- **叢集摘要把容器範本算成容器**，因此與各節點的數量對不起來。
+- **ESXi (預覽)：** 密碼在啟動時被移進加密儲存區 (每座叢集都會) 的叢集，重新啟動後
+  就再也登入不了；沒有設定 `auth.user` 的叢集則以 `root@pam` 登入。兩者都已修正；
+  模組文件也改為寫出真正的 TLS 預設值。
+- **`console.open` 在 PVE 接受連線之前就被稽核為成功。** PVE 拒絕的主控台現在會留下
+  錯誤記錄。
+
+### 變更
+
+- **遷移檢查改讀虛擬機的即時設定** (每次檢查一個請求)，而不是輪詢快取，所以幾分鐘前
+  才搬走的磁碟，會依它現在的位置判斷。
+- **變化緩慢的資料改用各自的輪詢週期。** 節點網路速率原本在每 2 秒的輪詢都去讀各節點
+  的 RRD，但 PVE 每分鐘才更新一次；現在每 30 秒。虛擬機的磁碟配置原本每分鐘對每台
+  虛擬機重讀 (140 台的叢集約每秒 2 個請求)；現在在第一次看到、遷移之後，以及每 10
+  分鐘分散讀取。
+- **介面改為依檢視載入。** 原本單一 1.7 MB 的 bundle，現在是 391 KB 的核心
+  (gzip 後 122 KB) 加上每個檢視一個檔案，第一次開啟時才下載。
+
+### 開發
+
+- ESLint (flat config，正確性與 React hooks 規則)，指令為 `npm run lint`，CI 也會
+  執行。警告不會讓建置失敗，錯誤會。
+- 為 `cluster_manager`、`pve_client`、`console_proxy` 與 ESXi adapter 新增測試
+  (行覆蓋率 0–32% → 52–99%)，以講真 TLS 的假 PVE 與 vCenter 伺服器執行；每一項防護
+  都以故意改壞程式、確認測試會失敗的方式驗證過。
+
 ## [1.1.3] — 2026-09-14
 
 ### 新增
@@ -357,7 +501,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   `package-lock.json` 、 `tsconfig.json` 、 `vite.config.ts` 。CONTRIBUTING.md 一直
   記載著 `npm run build` 與 `npm run dev`，但先前只發佈建置後的 `dist/`，因此照著
   文件操作的貢獻者根本無從建置。這也導致八個讀取 `src/client/**` 的測試完全無法在
-  mirror 上執行，使得文件所寫的閘門 (「推送前 mirror 測試必須全綠」)無法被滿足。
+  mirror 上執行，使得文件所寫的閘門 (「推送前 mirror 測試必須全綠」) 無法被滿足。
   現在兩棵樹都回報相同的 723 項測試通過；兩者若出現差異，即代表
   `sync-to-github.sh` 漏了某個項目。
 
@@ -373,7 +517,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   失敗，並檢查每個唯讀路徑實際解析到的角色。
 - **Ceph 集區表格顯示的內容全都不是真的。** `CephAdminModal` 是照 PVE 的欄位名撰寫，
   但後端會先把 PVE 映射成 `CephPool` dataclass，而該類別一個都沒帶。名稱欄顯示
-  「 (pool undefined) 」、每一列共用 React key `undefined`，銷毀對話框則要求操作者確認
+  「 (pool undefined)」、每一列共用 React key `undefined`，銷毀對話框則要求操作者確認
   銷毀名為「undefined」的集區。該請求最終送往 `.../ceph/pool/` (名稱為空) 並回傳
   404，因此資料從未真正面臨風險。`CephPool` 現在帶有 `pool_id` 、 `min_size` 、
   `pool_type` 、 `application` 與 `crush_rule` 。
@@ -467,9 +611,9 @@ JT-PROXENSE 所有重要變動紀錄於此。
     `/etc` 複本。
   - **SSH** — `tar czf -` 串流至 stdout，不在節點寫入任何檔案，取得逐位元組的原始檔。
   - 機密檔案 (`/etc/pve/priv` 、 `/etc/ceph` 、 `/etc/ssh` 、 `*.key` 、
-    `shadow.cfg`)預設排除，需明確勾選，並記錄為獨立的稽核動作；對話框會說明叢集 CA
+    `shadow.cfg`) 預設排除，需明確勾選，並記錄為獨立的稽核動作；對話框會說明叢集 CA
     私鑰可用於偽造任何使用者的登入憑證。
-  - PVE 自身的系統報告 (`pvereport`)需勾選才納入，並警告其中嵌有客體**備註**欄位，
+  - PVE 自身的系統報告 (`pvereport`) 需勾選才納入，並警告其中嵌有客體**備註**欄位，
     該欄位經常含有明文帳密。
   - 選填密碼加密，採用 OpenSSL `enc` 容器格式 (AES-256-CBC + PBKDF2)，可用標準
     `openssl` 解開，不需要 jt-proxense 。密碼走 POST body，絕不進入 URL 。
@@ -684,7 +828,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   對「帶有標籤」的磁碟反而不印；比對裸的 `/` 導致每顆乾淨碟都被判為已被占用，
   逼使操作者改用 `--force`，而那同時會關閉「替換碟過小」的保護。
 - **`zpool status -j` 失敗時被當成事實。** 先前忽略結束碼，在該指令不可用的節點
-  (OpenZFS 2.2 以前沒有 `-j`)上，空輸出會被解讀為「該磁碟不屬於此集區」，並讓
+  (OpenZFS 2.2 以前沒有 `-j`) 上，空輸出會被解讀為「該磁碟不屬於此集區」，並讓
   「重建中不得清理檢查」的保護悄悄失效。
 - **draid 被報成同位 1**，因為其名稱帶有幾何資訊 (`draid2:4d:11c:1s-0`),
   低估容錯能力 —— 而這正是操作者拔碟前會看的數字。
@@ -729,7 +873,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   驗證**並**做 shell 引號處理。
 - **一律先預覽再執行**:變更會先跑 ZFS 自己的 `-n` 乾跑並原文呈現其判斷；必須
   明確確認並輸入儲存池名稱後才真正執行。ZFS 的阻擋 (備援等級不一致，例如把
-  2-way mirror 加進 raidz2 池)會轉為可見警示並需手動選擇強制，而不是被默默
+  2-way mirror 加進 raidz2 池) 會轉為可見警示並需手動選擇強制，而不是被默默
   強制或默默弄錯。
 - 磁碟清冊排除 ZFS zvol (`zd*`) 與 device-mapper / loop / MD / zram 節點。
   `lsblk` 會把 zvol 回報為 `type=disk`，少了這道過濾，精靈可能把「位於某個池
@@ -762,7 +906,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 - **使用者管理：最後管理員/自我鎖死保護。** 刪除、停用或降級最後一位已啟用的
   全域管理員 (或停用/降級自己) 現在會被擋下——網頁介面不再可能落到只剩 CLI
   才能管理。
-- **聯合帳號 (PAM/LDAP)處理。** 本機登入與自助改密現在辨識所有 `*` sentinel
+- **聯合帳號 (PAM/LDAP) 處理。** 本機登入與自助改密現在辨識所有 `*` sentinel
   (不只 `*PAM*`);對 PAM/LDAP 帳號做管理員重設密碼會被擋下，不再默默分岔出本機
   憑證。停用帳號同時撤銷其 session。新本機使用者名稱改用允許清單驗證。
 - **作業：叢集作業清單默默被截到約 50 筆。** `get_cluster_tasks` 現在把 `limit`
@@ -781,12 +925,12 @@ JT-PROXENSE 所有重要變動紀錄於此。
 ## [0.8.11] — 2026-07-15
 
 ### 新增
-- **VM 遷移可選 `bwlimit`(KiB/s)頻寬節流。** 遷移 API 與 PVE client 現在接受
+- **VM 遷移可選 `bwlimit`(KiB/s) 頻寬節流。** 遷移 API 與 PVE client 現在接受
   每次遷移的頻寬上限，線上遷移可節流而不必佔滿遷移網路。
 
 ### 變更
 - **矩陣也會為 HA 管理的遷移畫來源→目的連線。** 先前只有一般 `qmigrate`/
-  `vzmigrate` 會畫線，HA 管理的 guest (`hamigrate`)只有格子上的徽章、沒有連線。
+  `vzmigrate` 會畫線，HA 管理的 guest (`hamigrate`) 只有格子上的徽章、沒有連線。
   HA 遷移也是真實搬移，現在同樣畫線 (依 vmid 去重，避免 hamigrate 與其 qmigrate
   子任務畫成兩條)。
 - **著陸頁功能卡片桌面版固定為一列三張** (auto-fit 會變成四張、把字多的卡片擠窄);
@@ -808,7 +952,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   會在框內換行，不再衝出畫面右邊。
 
 ### 變更
-- **主機升級的疏散改為強制檢查絕對記憶體餘量。** 先前疏散只用相對負載 (CPU%+MEM%)來平衡目標，可能把某台目標的 RAM 超額配置而 OOM —— 最糟情況是無
+- **主機升級的疏散改為強制檢查絕對記憶體餘量。** 先前疏散只用相對負載 (CPU%+MEM%) 來平衡目標，可能把某台目標的 RAM 超額配置而 OOM —— 最糟情況是無
   swap / HA 目標自我 fence。現在會檢查每個目標的**可用位元組**、保留每台餘量 (max 4 GiB 或 5%)、絕不把裝不下的 guest 塞進去，且若目標池整體容不下就**中止該
   主機 (不 reboot) ** —— 包含「總量夠但沒有單一節點裝得下大 guest」的破碎化情況。
 
@@ -831,7 +975,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ### 安全
 
-- 無伺服器面變更——僅前端 canvas 繪製。v0.8.8 的 OWASP ZAP baseline (0 High / 0 Medium)與手動滲透測試持續涵蓋本版；ZAP baseline 重跑確認
+- 無伺服器面變更——僅前端 canvas 繪製。v0.8.8 的 OWASP ZAP baseline (0 High / 0 Medium) 與手動滲透測試持續涵蓋本版；ZAP baseline 重跑確認
   0 High / 0 Medium。
 - 測試強化：v0.8.8 的 webhook SSRF 防護新增專屬回歸測試 (字面 loopback／
   link-local 拒絕、公網 IP 放行)，webhook 扇出測試不再依賴 loopback 目標可
@@ -849,7 +993,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   回傳 daemon 讀得到的任何檔案 —— **完全免驗證**。已證實可外洩 `config.yaml` (PVE API token)、Fernet `master.key`(可解密整個 secret store)、SQLite
   資料庫 (密碼雜湊 + 有效 session token)、伺服器原始碼，以及 `/etc/passwd`。
   以 `_resolve_within()` 圍堵檢查修正：對接好的路徑 `.resolve()` 後，**僅在**
-  仍位於預期基底目錄內 (`Path.is_relative_to`)時才回傳，逃逸者一律回 404。
+  仍位於預期基底目錄內 (`Path.is_relative_to`) 時才回傳，逃逸者一律回 404。
   由內部滲透測試發現，當日修補完成，正式站在本次發佈前已先行熱修。
 - **修正 SSRF 防護的主機名繞過 (通知 webhook)。** `_validate_webhook_url`
   原本只在 host 為字面 IP 時檢查，因此一個**解析**到被封鎖位址的主機名
@@ -919,7 +1063,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 - **矩陣：VM / CT 類型標記** — 每個方格標示 (青色 VM、紫色 CT)，工具列
   加入**方格寬度拉桿**。
 - **快照彈窗**加入動作圖示；設定頁的**告警閾值拉桿** (CPU／記憶體／磁碟／
-  IO-wait)與數字欄並列。
+  IO-wait) 與數字欄並列。
 
 ### 變更
 
@@ -1050,7 +1194,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   儲存下載) 需要 jt-proxense 主機到節點的免密碼 root SSH；新增「SSH
   設定說明」會列出主機公鑰與可一鍵複製的 `ssh-copy-id` / 驗證指令。
   可從 設定 → 伺服器 進入，遇到 SSH「permission denied」錯誤時也會
-  就地浮出。`GET /api/ssh/pubkey` 讀取 (首次自動產生)主機金鑰對。
+  就地浮出。`GET /api/ssh/pubkey` 讀取 (首次自動產生) 主機金鑰對。
 - **Ceph I/O 面板**新增 IOPS 趨勢圖 (共用位元組波形引擎) 與平均 OSD
   延遲讀數；OSD 使用率分布圖新增即時 hover 提示。
 
@@ -1112,7 +1256,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   節點；API Token 認證) 與逐連線刪除 — 寫入 config.yaml 並熱重載，
   無需重啟。
 - **使用者頁入口。** 使用者管理頁 (v0.4 起即存在於 /users 但沒有入口)
-  現已加入側欄 (僅 admin，快捷鍵 `A`)與指令面板。
+  現已加入側欄 (僅 admin，快捷鍵 `A`) 與指令面板。
 - **矩陣表格欄位自訂。** 可勾選顯示欄位 (持久化)，並提供六個原本
   沒有的欄位：叢集、vCPU、記憶體配額、磁碟用量、磁碟容量、磁碟 I/O。
 - **縮圖自動填滿。** 尺寸滑桿改為目標寬度 — 網格取最接近的欄數並把
@@ -1273,10 +1417,10 @@ JT-PROXENSE 所有重要變動紀錄於此。
   回來後解除，並**等到所有 PG 回到 `active+clean`(無 degraded /
   misplaced 物件、無 recovery 進行中) 才動下一台**。判斷乾淨刻意只
   看 PG 狀態而非 `health.status`，因為設了 `noout` 後 Ceph 本身就會
-  報 `HEALTH_WARN`。若超過軟上限 (60 分鐘)仍未平衡完，job 會停住並
+  報 `HEALTH_WARN`。若超過軟上限 (60 分鐘) 仍未平衡完，job 會停住並
   警告，絕不在叢集還沒乾淨時繼續 — 需要時可 abort 覆寫。`noout` 在
   所有錯誤路徑與 daemon 重啟復原時都會清除，不會被卡著。精靈有一個
-  開關 (預設開)可關閉；非 Ceph 叢集無作用。
+  開關 (預設開) 可關閉；非 Ceph 叢集無作用。
 
 ---
 
@@ -1287,7 +1431,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 - **節點畫面預設改為即時心電圖。**「波形範圍」現在預設停在 **即時**
   而非 24 小時。持久化 key 一併升版 (`jtp.nodes.timeframe` →
   `jtp.nodes.timeframe.v2`)，讓既有瀏覽器 (先前自動存了舊的 24 小時
-  預設)真的吃到新預設；之後的選擇會在新 key 下照常記住。
+  預設) 真的吃到新預設；之後的選擇會在新 key 下照常記住。
 
 ### 修正
 
@@ -1318,7 +1462,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ### 新增
 
-- **不疏散 (in-place)主機升級模式。** 主機升級精靈的「VM 疏散
+- **不疏散 (in-place) 主機升級模式。** 主機升級精靈的「VM 疏散
   目標節點」步驟，在自動 / 手動之外新增第三種：**不疏散**。不再把
   客體線上遷移到其他節點，而是把該主機上執行中的客體正常關機 (ACPI)，主機跑 `apt dist-upgrade` 並重開機，完成後再把原本在跑
   的客體在原機上重新開機。會有短暫停機，但不需要其他節點有餘裕
@@ -1407,7 +1551,7 @@ JT-PROXENSE 所有重要變動紀錄於此。
   儲存的近似管理動作 (PBS chunk index 走訪、檔案讀取)，先前版本
   完全沒進 audit log。現在成功 / PVE 失敗兩條路徑都會以 `backup.verify`
   + volume id 寫入 audit。
-- **`task_status_handler`(PVE 任務輪詢)沒有角色檢查。** 任何已登入
+- **`task_status_handler`(PVE 任務輪詢) 沒有角色檢查。** 任何已登入
   使用者 — 包含 session 過期但仍持 cookie 的、沒有任何角色授權的
   人 — 都可以直接打 URL 輪詢 PVE 任務 UPID。已加上
   `@role_required("viewer")`，與其他唯讀 handler 一致。
@@ -1437,14 +1581,14 @@ v0.5.0 上線後的視覺＋效能修正補丁。
   真的有變動才 setState — 大多數 poll 都是 no-op，不再造成 125 列
   反覆 re-render。
 - **健康監測徽章紅／橘文字看不清。** 原本徽章直接拿飽和色 (`#ff0040`
-  / `#ff6b00`)當文字色，配上深底色背景時對比太差。改為「淡色文字 +
+  / `#ff6b00`) 當文字色，配上深底色背景時對比太差。改為「淡色文字 +
   深色 tinted 背景 + 飽和邊框 + 發光小圓點」配色，三種等級都清楚可讀。
 
 ### 變更
 
 - **`neon-breathe` 卡片脈動動畫力道大幅調弱。** 原本 keyframe 疊了四
   層 box-shadow 寬到 40px，套用 panel-card 的卡片 (概觀叢集卡 / 底部
-  四面板 / Ceph 子面板)看起來像在發強光，跟上方靜態薄框 stat tiles
+  四面板 / Ceph 子面板) 看起來像在發強光，跟上方靜態薄框 stat tiles
   視覺重量差太多。改為「微弱的內側光暈 + 邊框 opacity 小幅變化」，
   卡片仍然有「活著」的感覺但不再壓過鄰居。
 - **登入頁標語** 從「Cyberpunk PVE Monitor」／「賽博龐克 PVE 監控」
@@ -1474,7 +1618,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 ### 變更
 
 - **品牌 Logo 換新**：移除原本的寬幅 PNG 文字標，改為 SVG 圖示 (六角形
-  感測器標靶) ＋ CSS 文字標 (Rajdhani 字型)成對結構。圖示從 16px
+  感測器標靶) ＋ CSS 文字標 (Rajdhani 字型) 成對結構。圖示從 16px
   favicon 縮放到 36px 側欄圖示都清晰；側欄收合到 64px 時，文字標會
   淡出折疊，不再溢出。Favicon 同步更新。
 - **概觀儀表板改版**：新增六顆 hero stat tiles (線上節點 · 運作中虛擬機
@@ -1533,7 +1677,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 ### 新增
 
 - **PVE API token 建立 / 撤銷** (admin)。v0.3.30 的列表 UI 加上「+ 建立」
-  表單 (privsep / 到期 / 備註)與每列「撤銷」按鈕。新建 token 的 secret
+  表單 (privsep / 到期 / 備註) 與每列「撤銷」按鈕。新建 token 的 secret
   以單次顯示面板呈現，內含複製按鈕與「PVE 不會再回傳此密碼」警告。
   Server 端以 `userid` / `tokenid` 嚴格 regex 驗證輸入，每次建立/刪除
   都寫稽核。
@@ -1546,10 +1690,10 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
   欄位以 allow-list regex 在前後端雙重驗證；最終送出時稽核僅紀錄非機密
   欄位的 hash (密碼 / SSH 公鑰永遠不進稽核紀錄)。
 - **防火牆寫入 UI** (admin)。FirewallModal 加入「+ 新增規則」inline
-  表單 (叢集與 VM 兩種範圍)與每列刪除按鈕。Server 端嚴格驗證 source /
+  表單 (叢集與 VM 兩種範圍) 與每列刪除按鈕。Server 端嚴格驗證 source /
   dest / proto / dport / sport / comment。
 - **HA 寫入 UI** (admin)。HAStatusModal 新增「+ 新增資源」 (sid / 群組
-  / 狀態 / 備註)與每列刪除。Server 端強制 sid 必須是 `vm:<id>` 或
+  / 狀態 / 備註) 與每列刪除。Server 端強制 sid 必須是 `vm:<id>` 或
   `ct:<id>`。
 - **ESXi 一等叢集 (v0.4 唯讀預覽) **。新 `server/clusters/` 子模組，
   抽象 `ClusterAdapter` 介面，`ESXiAdapter` 透過 vSphere REST API
@@ -1605,7 +1749,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **`/audit` 加「僅顯示錯誤」過濾** — 篩選列加 checkbox，勾選後只顯示 `result` 以 "error" 開頭或 `result == "denied"` 的列。完全 client-side (過濾已抓回的列)，跟其他篩選 (使用者 / 動作 / 叢集 / 起迄 / 筆數)疊加使用，不重打 API。
+- **`/audit` 加「僅顯示錯誤」過濾** — 篩選列加 checkbox，勾選後只顯示 `result` 以 "error" 開頭或 `result == "denied"` 的列。完全 client-side (過濾已抓回的列)，跟其他篩選 (使用者 / 動作 / 叢集 / 起迄 / 筆數) 疊加使用，不重打 API。
 
 ---
 
@@ -1692,7 +1836,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **批次標籤操作** — 矩陣表格的批次工具列 (多選 VM/CT 後出現)新增「批次設定標籤」按鈕。Modal 支援三種模式：**加入** (合併進每台 VM 既有清單)、**移除** (從每台 VM 拿掉指定標籤)、**取代** (用新清單覆蓋)。建議標籤條從同叢集其他 VM 已用過的標籤撈。每台 VM 並行 PUT；結果列顯示成功/失敗數及前 5 個錯誤。
+- **批次標籤操作** — 矩陣表格的批次工具列 (多選 VM/CT 後出現) 新增「批次設定標籤」按鈕。Modal 支援三種模式：**加入** (合併進每台 VM 既有清單)、**移除** (從每台 VM 拿掉指定標籤)、**取代** (用新清單覆蓋)。建議標籤條從同叢集其他 VM 已用過的標籤撈。每台 VM 並行 PUT；結果列顯示成功/失敗數及前 5 個錯誤。
 
 ### 內部
 
@@ -1725,7 +1869,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 ### 新增
 
 - **節點服務查看** — 節點右鍵選單新增「服務」，列出該節點上所有 PVE 主機服務 (pveproxy / pvedaemon / pvestatd / corosync / pve-cluster …) 以及狀態 badge (active / failed / inactive)。目前唯讀。
-- **節點系統日誌查看** — 節點右鍵選單新增「系統日誌」，開啟 modal 顯示 `/nodes/{node}/syslog` 最後 1000 行。每 5 秒自動更新，可填 unit 篩選 (如 `pveproxy`)以及自由文字搜尋。
+- **節點系統日誌查看** — 節點右鍵選單新增「系統日誌」，開啟 modal 顯示 `/nodes/{node}/syslog` 最後 1000 行。每 5 秒自動更新，可填 unit 篩選 (如 `pveproxy`) 以及自由文字搜尋。
 
 ### 內部
 
@@ -1751,7 +1895,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **每叢集 OPS 備註** — admin 可編輯、viewer+ 可看的自由格式備註。常見用途：「PROD 叢集 — 上班時間不可重啟 pve-prod-01」「pve-edge-04 還在用舊 SSD，EOQ 前要遷」。從 cluster-core 操作列 (單一叢集模式)進入。SQLite 儲存，16 KB 上限。新 endpoint `GET/PUT /api/clusters/{cid}/notes`(viewer / admin)，有 audit。
+- **每叢集 OPS 備註** — admin 可編輯、viewer+ 可看的自由格式備註。常見用途：「PROD 叢集 — 上班時間不可重啟 pve-prod-01」「pve-edge-04 還在用舊 SSD，EOQ 前要遷」。從 cluster-core 操作列 (單一叢集模式) 進入。SQLite 儲存，16 KB 上限。新 endpoint `GET/PUT /api/clusters/{cid}/notes`(viewer / admin)，有 audit。
 
 ### 內部
 
@@ -1764,7 +1908,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **HA / 複寫 / 防火牆 三個唯讀檢視 modal** — 從 cluster-core header (單一叢集模式)按鈕進入：
+- **HA / 複寫 / 防火牆 三個唯讀檢視 modal** — 從 cluster-core header (單一叢集模式) 按鈕進入：
   - **HA 狀態 modal** — 即時 quorum / master / 各節點 LRM 狀態條 + HA 資源表 (sid / 狀態 / 預期狀態 / 節點 / max_relocate / max_restart) + HA 群組清單。Quorum 用綠/紅燈標示，狀態 pill 依 started / stopped / error / fence 上色。
   - **複寫作業 modal** — 列出每個 `pvesr` job：id / 目標節點 / 排程 / 最後同步 / 耗時 / 失敗次數 / 狀態。勾「僅顯示錯誤」過濾出 fail_count > 0 或 error 非空的 job。
   - **防火牆規則 modal** (cluster 層級用 cluster-core 按鈕進入；VM 層級用右鍵選單) — pos / 方向 / 動作 / 協定 / 來源 / 目的 / 埠 / 介面 / 啟用 / 備註。動作上色：ACCEPT 綠 / REJECT 橘 / DROP 紅。
@@ -1789,7 +1933,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **資源池瀏覽器** — 節點頁 (選單只選擇單一叢集時)右上會出現「資源池」按鈕，開啟 modal 列出 PVE 所有 pool，每筆可展開看成員 (VM / CT / 儲存) 的類型、id、名稱、節點、狀態。唯讀檢視；建立 / 刪除 已經在 `pve_client` 內，留給之後迭代。新 endpoint `GET /api/clusters/{cid}/pools` 及 `.../pools/{poolid}`(30 秒快取)。
+- **資源池瀏覽器** — 節點頁 (選單只選擇單一叢集時) 右上會出現「資源池」按鈕，開啟 modal 列出 PVE 所有 pool，每筆可展開看成員 (VM / CT / 儲存) 的類型、id、名稱、節點、狀態。唯讀檢視；建立 / 刪除 已經在 `pve_client` 內，留給之後迭代。新 endpoint `GET /api/clusters/{cid}/pools` 及 `.../pools/{poolid}`(30 秒快取)。
 
 ### 內部
 
@@ -1819,7 +1963,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 新增
 
-- **APT 更新管理 modal** — NodeDetailPanel 的「待更新套件」badge 現在可以點，開 modal 列出該節點所有待更新套件 (套件名 / 舊版 / 新版 / 分類)。Admin 角色看到 `apt update`(刷索引) 和 `apt dist-upgrade`(升級全部)兩個按鈕，包現有的 `pdm_cluster` endpoint 並回傳 PVE task UPID。其他角色顯示唯讀狀態 + 提示。dist-upgrade 有破壞性確認對話框。
+- **APT 更新管理 modal** — NodeDetailPanel 的「待更新套件」badge 現在可以點，開 modal 列出該節點所有待更新套件 (套件名 / 舊版 / 新版 / 分類)。Admin 角色看到 `apt update`(刷索引) 和 `apt dist-upgrade`(升級全部) 兩個按鈕，包現有的 `pdm_cluster` endpoint 並回傳 PVE task UPID。其他角色顯示唯讀狀態 + 提示。dist-upgrade 有破壞性確認對話框。
 
 ### 內部
 
@@ -1963,7 +2107,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 - **儲存從網址下載** — `POST /api/clusters/.../download-url` 包 PVE 的 `download-url` 端點。StorageDetail 介面新增 modal，可填 URL、檔名、選填 checksum、TLS 驗證開關。operator+ 權限。
 - **儲存上傳** — 瀏覽器到 PVE 的 multipart 串流代理。前端 modal 含拖拉、進度條、內容類型驗證。App 的 `client_max_size` 提到 16 GiB，handler 直接串流不落地，多 GB 的 ISO 沒問題。operator+ 權限。
-- **儲存 SSH 下載** — PVE 沒有原生檔案下載 API，`GET .../storage/.../download/{volid}` 用 `asyncssh` 連到該儲存所在節點、`pvesm path` 解析路徑、`cat` 串流回 client。每個 cluster 新增 `ssh_user`(預設 `root`) / `ssh_port`(預設 `22`)設定。Operator 需要先把 jt-proxense host 的公鑰部署到每台 PVE node 的 `authorized_keys`。
+- **儲存 SSH 下載** — PVE 沒有原生檔案下載 API，`GET .../storage/.../download/{volid}` 用 `asyncssh` 連到該儲存所在節點、`pvesm path` 解析路徑、`cat` 串流回 client。每個 cluster 新增 `ssh_user`(預設 `root`) / `ssh_port`(預設 `22`) 設定。Operator 需要先把 jt-proxense host 的公鑰部署到每台 PVE node 的 `authorized_keys`。
 - **批次操作 UI** — 矩陣表格新增多選欄位。勾選 ≥1 列時，sticky cyber 工具列出現可批次：開機 / 關機 / 重啟 / 強制停止。混選 VM/CT OK (既有 `vm_bulk_handler` 會自動辨識)。Per-cluster 分發 + per-cluster 結果摘要。
 - **使用者管理頁** `/users`(admin only) — 列出 / 建立 / 啟停 / 刪除本機使用者；重設密碼 (強制下次登入變更)；清除 2FA；per-user 角色授權 (cluster + VM-pattern 三元組)。對應 API 在 `/api/admin/users/...`。
 - **AD / LDAP 認證後端** — 設 `auth.backend: ldap` + `auth.ldap.{server, bind_dn|user_dn_template, group_role_map, ...}` 即可委派密碼驗證給 AD/LDAP。每次登入會依據群組成員自動授權角色。本地表的 `*LDAP*` sentinel 密碼雜湊確保 local 後端永遠不會配對成功。CLI 後門永遠走 local 後端，AD 連不上時 operator 可救援。
@@ -1989,7 +2133,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 ### 變更
 
-- **InfluxDB 接收器：v2 唯一支援。** 舊的 `/write`(v1)端點已移除。Telegraf agent 請改用 `outputs.influxdb_v2` 寫入 `/api/v2/write`。Handler 現在讀取 `precision`(ns/us/ms/s)、`org`、`bucket` query 參數；不論 agent 用什麼精度，timestamp 一律正規化成 ns 存進快取。Auth 仍然用 `Authorization: Token <t>`。誤連 v1 的舊 agent 現在會收到乾淨的 `404`，不再有偽成功。
+- **InfluxDB 接收器：v2 唯一支援。** 舊的 `/write`(v1) 端點已移除。Telegraf agent 請改用 `outputs.influxdb_v2` 寫入 `/api/v2/write`。Handler 現在讀取 `precision`(ns/us/ms/s)、`org`、`bucket` query 參數；不論 agent 用什麼精度，timestamp 一律正規化成 ns 存進快取。Auth 仍然用 `Authorization: Token <t>`。誤連 v1 的舊 agent 現在會收到乾淨的 `404`，不再有偽成功。
 
 ### 備註
 
@@ -2015,7 +2159,7 @@ UX 打磨 + 新功能版本：品牌識別更新、新增矩陣熱度檢視、�
 
 - **`RemoteMigrateModal` 內所有原生 `<select>` 全換成 `CyberSelect`** (目標端點、資料路徑 IP、磁碟對應、NIC 對應)。`CyberSelect` 的下拉清單改用 portal 渲染到 `document.body`，座標固定、空間不足會自動翻上開 — 不會再被父層 modal 的 `overflow: hidden` 裁掉。
 - **SPA fallback Cache-Control 修正**：所有回傳 `index.html` 的路由都加 `no-cache, no-store, must-revalidate`。之前 Chrome heuristic cache 會卡住舊的 `index.html`(指向已刪除的 `index-*.js` bundle)，下一次部署後是空白頁。HTML 也加自我修復腳本：HEAD 檢查 bundle URL，404 就 force-reload。
-- **縮圖 fetch 並發限制 6 個**：60+ 同時 fetch 撞到 Chrome per-origin 連線上限 (`ERR_INSUFFICIENT_RESOURCES`)會吃掉一半請求。矩陣 effect 用 sliding-window pool 把同時間 in-flight 限 6 個，剛好對應 server `pve_throttle` 每 host 4 並發 + 50ms gap 的預算。
+- **縮圖 fetch 並發限制 6 個**：60+ 同時 fetch 撞到 Chrome per-origin 連線上限 (`ERR_INSUFFICIENT_RESOURCES`) 會吃掉一半請求。矩陣 effect 用 sliding-window pool 把同時間 in-flight 限 6 個，剛好對應 server `pve_throttle` 每 host 4 並發 + 50ms gap 的預算。
 - **FLIP 重排位置改用 layout-relative** (沿 offsetParent 鏈累加 `offsetTop` / `offsetLeft`)，不再用 viewport-relative 的 `getBoundingClientRect`。原本的做法在使用者捲動後遇到 2 秒 cluster broadcast re-render 時，會誤判每張卡都動了 (其實是 viewport 位置變了) → 觸發一波幻影動畫。
 - **VMContextMenu 樣式跟著 component 走** — `.vm-context-menu` / `.context-menu-*` 的 CSS 移到 component 自己的 `<style>` 內，這樣 RadarScan、HoloMatrix、未來任何 host render 時都自動帶樣式。
 - **帳號設定頁 (`/account`) ** — h2 區段標題 (個人資料 / 變更密碼 / 雙因素認證) 和主要按鈕都加 icon。

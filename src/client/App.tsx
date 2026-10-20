@@ -13,19 +13,56 @@ import { api } from './api';
 
 // Views
 import { CommandCenter } from './views/CommandCenter';
-import { ClusterCore } from './views/ClusterCore';
-import { HoloMatrix } from './views/HoloMatrix';
-import { RadarScan } from './views/RadarScan';
-import { CephConstellation } from './views/CephConstellation';
-import { Storage } from './views/Storage';
-import { ZFSManager } from './views/ZFSManager';
-import { UserAdmin } from './views/UserAdmin';
-import { PveTasks } from './views/PveTasks';
-import { HealthMonitor } from './views/HealthMonitor';
-import { BackupJobs } from './views/BackupJobs';
-import { HostUpgrade } from './views/HostUpgrade';
 import { CommandPalette } from './components/CommandPalette';
-import { SettingsPanel } from './views/SettingsPanel';
+import { FingerprintAlert } from './components/TrustedFingerprints';
+
+// Every view except the landing dashboard is its own chunk (v1.2.0). The
+// bundle used to be one 1.7 MB file, three.js and d3 included, although only
+// the storage view uses them; a first load now fetches the dashboard alone.
+// After an upgrade, a tab still open on the OLD bundle asks for chunk hashes
+// that no longer exist; the import rejects and React would blank the page.
+// Reload once to pick up the new index (the flag stops a reload loop when the
+// failure is something else, e.g. the server being down).
+const RELOAD_FLAG = 'jtp.chunk-reload';
+function lazyView<T extends React.ComponentType<any>>(load: () => Promise<T>) {
+  return React.lazy(async () => {
+    try {
+      const mod = await load();
+      try { sessionStorage.removeItem(RELOAD_FLAG); } catch { /* ignore */ }
+      return { default: mod };
+    } catch (e) {
+      let reloaded = false;
+      try { reloaded = sessionStorage.getItem(RELOAD_FLAG) === '1'; } catch { /* ignore */ }
+      if (!reloaded) {
+        try { sessionStorage.setItem(RELOAD_FLAG, '1'); } catch { /* ignore */ }
+        window.location.reload();
+        return new Promise<{ default: T }>(() => { /* page is reloading */ });
+      }
+      throw e;
+    }
+  });
+}
+
+const ClusterCore = lazyView(() => import('./views/ClusterCore').then((m) => m.ClusterCore));
+const HoloMatrix = lazyView(() => import('./views/HoloMatrix').then((m) => m.HoloMatrix));
+const RadarScan = lazyView(() => import('./views/RadarScan').then((m) => m.RadarScan));
+const CephConstellation = lazyView(() => import('./views/CephConstellation').then((m) => m.CephConstellation));
+const Storage = lazyView(() => import('./views/Storage').then((m) => m.Storage));
+const ZFSManager = lazyView(() => import('./views/ZFSManager').then((m) => m.ZFSManager));
+const UserAdmin = lazyView(() => import('./views/UserAdmin').then((m) => m.UserAdmin));
+const PveTasks = lazyView(() => import('./views/PveTasks').then((m) => m.PveTasks));
+const HealthMonitor = lazyView(() => import('./views/HealthMonitor').then((m) => m.HealthMonitor));
+const BackupJobs = lazyView(() => import('./views/BackupJobs').then((m) => m.BackupJobs));
+const HostUpgrade = lazyView(() => import('./views/HostUpgrade').then((m) => m.HostUpgrade));
+const SettingsPanel = lazyView(() => import('./views/SettingsPanel').then((m) => m.SettingsPanel));
+
+function ViewLoading() {
+  return (
+    <div className="view-loading" role="status" aria-live="polite">
+      <div className="view-loading-ring" />
+    </div>
+  );
+}
 
 // Components
 import { ParticleBackground } from './components/effects/ParticleBackground';
@@ -291,6 +328,7 @@ function AppContent() {
     }
   });
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'ui' | 'server' | undefined>(undefined);
   const [showShortcuts, setShowShortcuts] = useState(false);
   // Sidebar collapse state. Persisted across reloads.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -809,14 +847,25 @@ function AppContent() {
       {/* Main Content */}
       <main className="main-content">
         <div key={currentView} className="view-container">
-          {renderView()}
+          <React.Suspense fallback={<ViewLoading />}>
+            {renderView()}
+          </React.Suspense>
         </div>
       </main>
 
 
+      {/* Refused node fingerprint (admins only; the component asks the API,
+          which answers 403 to everyone else). */}
+      {(!auth.authEnforced || auth.user?.role_global === 'admin') && (
+        <FingerprintAlert onReview={() => { setSettingsTab('server'); setShowSettings(true); }} />
+      )}
+
       {/* Settings Panel */}
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} clusters={clusters} />
+        <React.Suspense fallback={null}>
+          <SettingsPanel onClose={() => { setShowSettings(false); setSettingsTab(undefined); }}
+                         clusters={clusters} initialTab={settingsTab} />
+        </React.Suspense>
       )}
 
       {/* Keyboard shortcuts cheat-sheet (press "?" to toggle). */}

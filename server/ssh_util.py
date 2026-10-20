@@ -14,11 +14,14 @@ This module owns that policy. Callers keep their own error handling — the poin
 is to centralise *how we connect*, not to rewrite what each feature does when a
 node says no.
 
-known_hosts=None is deliberate and unchanged: the operator authorises this host's
-key on each node (see ssh_setup.py / the SSHSetupModal), and PVE nodes are
-re-imaged often enough that pinning host keys would generate more support load
-than it removes. Documented here so the decision lives in one place rather than
-being re-derived from a comment in whichever module you happen to read.
+Two separate keys are involved. OUR key is authorised on each node by the
+operator (see ssh_setup.py / the SSHSetupModal). The NODE's host key:
+known_hosts=None is still passed to asyncssh, but since v1.2.0 host keys ARE
+pinned: connect() checks the key against trust_store right after the handshake
+(trust on first use; a changed key is refused until an admin accepts it). The
+old reasoning — nodes are re-imaged often, so pinning means support load — is
+answered by the accept flow rather than by trusting every key; a lab that truly
+re-images constantly can set `server.tls_pinning: false`.
 """
 from __future__ import annotations
 
@@ -124,13 +127,23 @@ async def connect(host: str, user: str, port: int = DEFAULT_PORT, *,
             "asyncssh is not installed on the jt-proxense host — "
             "pip install 'asyncssh>=2.21.0'") from e
     try:
-        return await asyncio.wait_for(
+        conn = await asyncio.wait_for(
             asyncssh.connect(host, port=port, username=user, known_hosts=None),
             timeout=timeout)
     except asyncio.TimeoutError:
         raise SshTimeout(
             f"connecting to {host}:{port} timed out after {timeout:g}s "
             "— node unreachable, or the SSH port is filtered") from None
+    # known_hosts=None above means asyncssh accepts any host key; the pin is
+    # enforced here instead (trust on first use, admin-accepted on change —
+    # see trust_store). Nothing is run on a connection that fails this.
+    from . import trust_store
+    try:
+        await trust_store.check_ssh(host, port, conn)
+    except trust_store.FingerprintMismatch:
+        conn.close()
+        raise
+    return conn
 
 
 async def connect_node(cluster, node: str, *, timeout: float = CONNECT_TIMEOUT):
