@@ -18,8 +18,11 @@ def test_all_present_is_silent():
 
 
 def test_missing_dependency_exits_78_with_the_fix(monkeypatch, capsys, tmp_path):
+    # The recorded version must DIFFER from the running one, or the guard
+    # (correctly) reports "missing" rather than "the Python changed". This used
+    # 3.10, which is exactly what CI's 3.10 leg runs, so it failed only there.
     rec = tmp_path / ".python-runtime"
-    rec.write_text("version=3.10\nexecutable=/usr/bin/python3.10\n")
+    rec.write_text("version=3.9\nexecutable=/usr/bin/python3.9\n")
     monkeypatch.setattr(g, "RUNTIME_FILE", rec)
     monkeypatch.setattr(g, "REQUIRED", ("aiohttp", "jtp_definitely_not_installed"))
     with pytest.raises(SystemExit) as ei:
@@ -27,8 +30,20 @@ def test_missing_dependency_exits_78_with_the_fix(monkeypatch, capsys, tmp_path)
     assert ei.value.code == g.EXIT_CODE == 78
     err = capsys.readouterr().err
     assert "jtp_definitely_not_installed" in err
-    assert "installed for Python 3.10 (/usr/bin/python3.10)" in err
+    assert "installed for Python 3.9 (/usr/bin/python3.9)" in err
     assert g.REINSTALL in err and g.HELP_URL in err
+
+
+def test_same_version_reports_missing_not_changed(monkeypatch, capsys, tmp_path):
+    """The other branch: deps recorded for the version that is running now."""
+    rec = tmp_path / ".python-runtime"
+    rec.write_text("version=%d.%d\n" % sys.version_info[:2])
+    monkeypatch.setattr(g, "RUNTIME_FILE", rec)
+    monkeypatch.setattr(g, "REQUIRED", ("jtp_definitely_not_installed",))
+    with pytest.raises(SystemExit):
+        g.ensure_dependencies()
+    err = capsys.readouterr().err
+    assert "missing or incomplete" in err and "Python changed" not in err
 
 
 def test_same_version_does_not_claim_an_os_upgrade():
