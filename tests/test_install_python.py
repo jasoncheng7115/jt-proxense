@@ -215,3 +215,25 @@ def test_venv_reads_a_real_pyvenv_cfg(tmp_path):
     r1 = run(f'ensure_venv "{venv}" "{base}" {ver}', "/usr/bin:/bin", tmp_path)
     r2 = run(f'ensure_venv "{venv}" "{base}" {ver}', "/usr/bin:/bin", tmp_path)
     assert (r1.stdout.strip(), r2.stdout.strip()) == ("created", "reused"), r1.stderr + r2.stderr
+
+
+# ---------- the pip floor (eMudhra / emSign CA compromise, October 2026) ----------
+
+@pytest.mark.parametrize("have,need,ok", [
+    ("26.2.2", "26.2.2", True), ("26.10", "26.2.2", True), ("27.0", "26.2.2", True),
+    ("26.2.1", "26.2.2", False), ("25.1.1", "26.2.2", False), ("", "26.2.2", False),
+])
+def test_version_at_least(tmp_path, have, need, ok):
+    r = run(f'version_at_least "{have}" "{need}"', "/usr/bin:/bin", tmp_path)
+    assert (r.returncode == 0) is ok
+
+
+def test_pip_floor_and_certifi_floor_agree_with_the_advisory():
+    """pip < 26.2.2 and certifi < 2026.10.19 still trust the leaked chains."""
+    text = INSTALL.read_text()
+    m = re.search(r'^PIP_MIN="([0-9.]+)"', text, re.M)
+    assert m, "install.sh lost PIP_MIN"
+    assert tuple(map(int, m.group(1).split("."))) >= (26, 2, 2)
+    req = next(p for p in (ROOT / "requirements.txt", ROOT / "github" / "requirements.txt") if p.exists())
+    m = re.search(r"^certifi>=([0-9.]+)", req.read_text(), re.M)
+    assert m and tuple(map(int, m.group(1).split("."))) >= (2026, 10, 19)

@@ -101,6 +101,11 @@ ensure_venv() {  # <venv dir, must end in /.venv> <base interpreter> <major.mino
     return 1
 }
 
+# True when dotted version $1 >= $2 (sort -V; "26.2.2" vs "26.10" sorts right).
+version_at_least() {  # <have> <need>
+    [ -n "$1" ] && [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]
+}
+
 # Install the CLI as a wrapper that runs it under the interpreter the
 # dependencies were installed for. Its shebang (`env python3`) is a different
 # interpreter on RHEL/SUSE, where python3 is older than the one chosen above.
@@ -143,6 +148,12 @@ INSTALL_DIR="${JT_PROXENSE_INSTALL_DIR:-/opt/jt-proxense}"
 SERVICE_USER="${JT_PROXENSE_USER:-jt-proxense}"
 HTTP_PORT="${JT_PROXENSE_PORT:-8098}"
 SERVICE_NAME="jt-proxense"
+# Oldest pip allowed to download the dependencies. pip uses the certifi bundle
+# it carries INSIDE itself (as well as the system store), and every release
+# before 26.2.2 still trusts the eMudhra / emSign chains whose intermediate CA
+# keys leaked in October 2026: a MITM could serve a forged PyPI. Updating the
+# OS certificates does not fix a pip that brought its own.
+PIP_MIN="26.2.2"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # v0.2: when the CLI prints a one-time password we capture it here so the
@@ -229,6 +240,9 @@ case "$PM" in
             DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-pip python3-venv git $CURL_PKG ca-certificates >/dev/null \
                 || die "$PREREQ_FAIL" ;;
     dnf|yum) "$PM" install -y -q python3 python3-pip git $CURL_PKG ca-certificates >/dev/null || die "$PREREQ_FAIL"
+            # `install` leaves an already-installed package alone, so ask for the
+            # CA bundle explicitly: everything that verifies TLS here reads it.
+            "$PM" upgrade -y -q ca-certificates >/dev/null 2>&1 || warn "could not update ca-certificates — run: sudo $PM upgrade ca-certificates"
             # RHEL/Rocky/Alma 9 default python3 is 3.9 (< our 3.10 floor); pull
             # a modern interpreter from AppStream. Best-effort: newest first.
             for v in 3.12 3.11; do
@@ -236,6 +250,7 @@ case "$PM" in
             done ;;
     pacman) pacman -Sy --noconfirm --needed python python-pip git $CURL_PKG ca-certificates >/dev/null || die "$PREREQ_FAIL" ;;
     zypper) zypper --non-interactive install -y python3 python3-pip git $CURL_PKG ca-certificates >/dev/null || die "$PREREQ_FAIL"
+            zypper --non-interactive update -y ca-certificates >/dev/null 2>&1 || warn "could not update ca-certificates — run: sudo zypper update ca-certificates"
             # openSUSE Leap default python3 can be < 3.10; pull a modern one.
             for v in 312 311; do
                 zypper --non-interactive install -y "python$v" "python$v-pip" >/dev/null 2>&1 && break
@@ -328,7 +343,15 @@ VENV_STATE=$(ensure_venv "$VENV_DIR" "$BASE_PY" "$PY_VER") \
 ok "virtual environment ${VENV_STATE}: ${VENV_DIR}"
 PY_PATH="$VENV_DIR/bin/python3"
 PIP_OPTS="--quiet --disable-pip-version-check"
-"$PY_PATH" -m pip install $PIP_OPTS --upgrade pip >/dev/null 2>&1 || true
+# pip first, and verify what we got: everything after this is downloaded by it
+# (see PIP_MIN). This used to be `|| true`, so a failed upgrade went on to fetch
+# every dependency with whatever pip the interpreter happened to seed.
+"$PY_PATH" -m pip install $PIP_OPTS --upgrade "pip>=${PIP_MIN}" \
+    || die "Could not upgrade pip to ${PIP_MIN} or later in ${VENV_DIR} (see the error above). Check that pypi.org is reachable, then re-run this installer."
+PIP_VER=$("$PY_PATH" -m pip --version 2>/dev/null | awk '{print $2}')
+version_at_least "$PIP_VER" "$PIP_MIN" \
+    || die "pip ${PIP_VER:-unknown} is older than ${PIP_MIN}, which is required (older pip trusts the compromised eMudhra / emSign CAs). Check your package index or proxy, then re-run this installer."
+ok "pip ${PIP_VER}"
 "$PY_PATH" -m pip install $PIP_OPTS -r "$INSTALL_DIR/requirements.txt" \
     || die "pip could not install the Python dependencies (see the error above). Check that pypi.org is reachable, then re-run this installer."
 ok "dependencies installed"

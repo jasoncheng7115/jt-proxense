@@ -8,6 +8,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.1] — 2026-10-23
+
+A response to the eMudhra / emSign certificate-authority compromise: the private
+keys of eight intermediate CAs leaked in October 2026, and the Python Security
+Response Team asked everyone to update pip and certifi. Nothing in the running
+service depends on those copies — it verifies TLS against the operating
+system's certificates — but the installer downloads every dependency with pip,
+and pip carries its own CA list.
+
+### Security
+
+- **The installer refuses to download dependencies with a pip older than
+  26.2.2.** Older pip still trusts the leaked chains through the certifi copy it
+  carries inside itself, which updating the system certificates does not touch,
+  so a man-in-the-middle could have posed as PyPI. The upgrade used to be
+  best-effort (`|| true`): if it failed, every dependency was fetched with
+  whatever pip the interpreter had seeded the virtual environment with. It is
+  now required and verified, and a failure says why.
+- **`certifi>=2026.10.19`**, the first bundle that rejects those chains. No
+  jt-proxense code imports certifi, but it is installed alongside it, and the
+  advisory asks for the floor wherever Python runs.
+- **RHEL / Rocky / Alma and openSUSE: `ca-certificates` is now upgraded
+  explicitly.** `dnf install` leaves an already-installed package as it is; on
+  Debian and Ubuntu `apt-get install` already upgraded it.
+
+### Upgrade notes
+
+- Run the installer again: it upgrades pip and certifi inside
+  `/opt/jt-proxense/.venv`. Update the operating system's certificates too
+  (`apt-get install --only-upgrade ca-certificates`, or
+  `dnf upgrade ca-certificates`): the service's own connections, to PVE, LDAP,
+  ESXi and notification targets, are verified against them.
+
 ## [1.2.0] — 2026-10-20
 
 Two new views of data PVE never puts in one place, a migration pre-check for the

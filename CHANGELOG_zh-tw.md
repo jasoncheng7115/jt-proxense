@@ -8,6 +8,31 @@ JT-PROXENSE 所有重要變動紀錄於此。
 
 ---
 
+## [1.2.1] — 2026-10-23
+
+因應 eMudhra／emSign 憑證機構事件：2026 年 10 月有八個中繼憑證機構的私鑰外洩，
+Python 資安團隊呼籲所有人更新 pip 與 certifi。執行中的服務並不依賴那些複本 —— 它用
+作業系統的憑證驗證 TLS —— 但安裝程式是用 pip 下載每一個相依套件，而 pip 自己帶了一份
+憑證清單。
+
+### 安全性
+
+- **安裝程式不再用低於 26.2.2 的 pip 下載相依套件。** 舊版 pip 透過它內建的 certifi
+  複本仍然信任那些外洩的憑證鏈，更新系統憑證碰不到這一份，所以網路路徑上的人原本可以
+  假冒 PyPI。之前升級 pip 只是「盡量」 (`|| true`)：失敗了就用直譯器建立虛擬環境時附的
+  那個 pip 下載所有相依套件。現在升級是必要條件並會驗證版本，失敗時會說明原因。
+- **`certifi>=2026.10.19`**，這是第一個拒絕那些憑證鏈的版本。jt-proxense 的程式沒有
+  載入 certifi，但它會被一起裝進環境，而公告要求所有執行 Python 的地方都設這個下限。
+- **RHEL／Rocky／Alma 與 openSUSE：現在會明確升級 `ca-certificates`。** `dnf install`
+  不會動已經安裝的套件；Debian 與 Ubuntu 的 `apt-get install` 本來就會升級它。
+
+### 升級注意事項
+
+- 重新執行安裝程式：它會升級 `/opt/jt-proxense/.venv` 裡的 pip 與 certifi。也請更新
+  作業系統的憑證 (`apt-get install --only-upgrade ca-certificates` 或
+  `dnf upgrade ca-certificates`)：服務自己對 PVE、LDAP、ESXi 與通知目標的連線，都是用
+  它們驗證。
+
 ## [1.2.0] — 2026-10-20
 
 兩個 PVE 從來不會放在同一處的新檢視、一項現有防護看不到的遷移前檢查，以及補上一個

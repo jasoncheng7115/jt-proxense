@@ -37,8 +37,11 @@ cryptography>=41.0.0
 # text-mode preview. Without it, every CT thumbnail shows "NO SIGNAL".
 pyte>=0.8.1
 
-# SSL handling
-certifi>=2024.0.0
+# CA bundle. Nothing in jt-proxense imports it (aiohttp verifies against the
+# system store), but it is in the venv, and anything there that does use it
+# must not trust the eMudhra / emSign chains whose intermediate keys leaked in
+# October 2026 — 2026.10.19 is the first bundle that rejects them.
+certifi>=2026.10.19
 
 # v0.3.x: SSH file streaming for storage downloads (PVE has no
 # server-side download endpoint, so we cat files via SSH from the node
